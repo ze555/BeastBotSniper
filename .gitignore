@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.*
+sniper.db
+sniper.db-journal
+*.log
