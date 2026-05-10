@@ -205,9 +205,15 @@ export async function runBinanceScanner() {
       if (checks.spreadPass) score++;
       if (checks.trendPass) score++;
 
-      // Minimum score threshold to consider valid
-      if (score >= 4) {
-        candidates.push({
+    // Minimum score threshold to consider valid
+    if (score >= 4) {
+      // Calculate sector strength (Simple: how many USDT pairs are up > 2%)
+      const marketHeat = validTickers.filter(t => parseFloat(t.priceChangePercent) > 2).length / validTickers.length;
+      if (marketHeat > 0.4) {
+          score += 0.5; // Boost score if whole market is pumping (Safety in numbers)
+      }
+
+      candidates.push({
           symbol,
           price,
           volume,

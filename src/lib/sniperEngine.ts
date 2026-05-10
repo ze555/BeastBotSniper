@@ -123,6 +123,16 @@ export class SniperEngine {
     // 2. Score threshold: Must be 4/5 or 5/5
     if (condition.score <= 3) return;
 
+    // 2.5 HTF Trend Alignment (The Beast Logic)
+    // Only fight the 1H trend if signal is absolute 5/5 or beastMode is active with High RVol
+    if (condition.htfTrend && condition.htfTrend !== 'FLAT' && condition.htfTrend !== condition.type) {
+       const isBeastException = this.settings.beastMode && condition.score >= 5;
+       if (!isBeastException) {
+          // console.log(`[SNIPER] 🚫 Entry rejected: HTF Trend (${condition.htfTrend}) conflicts with Entry (${condition.type}).`);
+          return;
+       }
+    }
+
     // 3. Prevent duplicate trades on same symbol
     if (this.activeTrades.has(condition.symbol)) return;
 
@@ -137,11 +147,17 @@ export class SniperEngine {
     const entryPrice = cond.price;
     let sl = 0;
 
-    // Stop Loss Placement 
-    if (cond.type === 'LONG') {
-      sl = cond.support * 0.999; // Slightly below support
+    // Stop Loss Placement: Prioritize ATR for dynamic protection
+    if (cond.atr && cond.atr > 0) {
+      const atrMultiplier = this.settings.beastMode ? 2.0 : 1.5; // Give more room in beast mode
+      sl = cond.type === 'LONG' ? entryPrice - (cond.atr * atrMultiplier) : entryPrice + (cond.atr * atrMultiplier);
     } else {
-      sl = cond.resistance * 1.001; // Slightly above resistance
+      // Fallback to Support/Resistance if ATR is missing
+      if (cond.type === 'LONG') {
+        sl = cond.support * 0.999;
+      } else {
+        sl = cond.resistance * 1.001;
+      }
     }
 
     // Risk calculation (1R)
@@ -149,15 +165,21 @@ export class SniperEngine {
     const riskPerc = risk / entryPrice;
 
     // Max Risk filter
-    const maxRiskAllowed = this.settings.strictMode ? (this.settings.strictMaxRisk ? this.settings.strictMaxRisk / 100 : 0.01) : 0.015;
+    const maxRiskAllowed = this.settings.strictMode ? (this.settings.strictMaxRisk ? this.settings.strictMaxRisk / 100 : 0.02) : 0.03;
     if (riskPerc > maxRiskAllowed) {
        console.log(`[SNIPER] ⚠️ Trade Ignored. Stop Loss too wide (${(riskPerc*100).toFixed(2)}%). Max allowed is ${(maxRiskAllowed*100).toFixed(2)}%.`);
        return; // Ignore trade
     }
 
+    // 🌊 WHALE PROTECTION: Volatility/Liquidity correlation check
+    if (this.settings.beastMode && cond.rvol && cond.rvol < 2.5 && cond.volatility > 5) {
+        console.log(`[BEAST 🐺] ⚠️ WHALE TRAP DETECTED: High volatility (${cond.volatility.toFixed(2)}%) but weak RVOL (${cond.rvol.toFixed(2)}). Likely a fakeout. Skipping ${cond.symbol}.`);
+        return;
+    }
+
     // Take Profits
-    const tp1 = cond.type === 'LONG' ? entryPrice + risk : entryPrice - risk; // +1R
-    const tp2 = cond.type === 'LONG' ? entryPrice + (risk * 2) : entryPrice - (risk * 2); // +2R
+    const tp1 = cond.type === 'LONG' ? entryPrice + (risk * 0.8) : entryPrice - (risk * 0.8); // +0.8R (Aggressive capture)
+    const tp2 = cond.type === 'LONG' ? entryPrice + (risk * 2.5) : entryPrice - (risk * 2.5); // +2.5R (The Beast Run)
 
     // Calculate USD value using user settings
     const riskAmountUsd = this.settings.portfolioSize * (this.settings.riskPerTradePerc / 100); 
@@ -561,34 +583,38 @@ export class SniperEngine {
       
       const learningRate = (this.settings.beastLearnRate ?? 50) / 100; // 0.01 to 1.0
       
-      // 1. Slippage / Stop-Hunt Reversal Exploit (تحويل الانزلاق لربح)
+      // 1. Slippage / Stop-Hunt Reversal Exploit (تحويل الانزلاق لربح بذكاء)
       if (this.settings.beastSlippageExploit && isLoss && reason === '🛑 STOP_LOSS' && timeOpenMinutes < 3) {
-          // If stopped out in < 3 minutes, it's highly likely a stop-hunt liquidity sweep.
-          // Beast Mode immediately reverses the position and doubles the risk to ride the sweep!
-          console.log(`[BEAST 🐺] LIQUIDITY SWEEP DETECTED ON ${trade.symbol}! Stopped out in ${timeOpenMinutes.toFixed(1)}m. Reversing position...`);
+          // Check if it's a "V-Shape" recovery before jumping back in
+          // Beast Mode shouldn't be blind, it should wait for a confirmation on 1m timeframe (simplified check)
+          console.log(`[BEAST 🐺] POTENTIAL LIQUIDITY SWEEP ON ${trade.symbol}. Waiting for structure confirmation...`);
           
-          const newType = trade.type === 'LONG' ? 'SHORT' : 'LONG';
-          // Use previous SL as entry point (approximated)
-          const newCond: MarketCondition = {
-              symbol: trade.symbol,
-              price: exitPrice,
-              type: newType,
-              score: 5, // Artificial high score for immediate entry
-              support: newType === 'LONG' ? exitPrice * 0.99 : exitPrice, // tight 1% support/res
-              resistance: newType === 'SHORT' ? exitPrice * 1.01 : exitPrice,
-              isRanging: false,
-              isBreakout: true,
-              isRetestOrHold: true,
-              isLiquidityGood: true,
-              isMomentumHigh: true,
-              isOrderBookClear: true
-          };
-          
-          // Temporary boost risk for revenge trade
-          const originalRisk = this.settings.riskPerTradePerc;
-          this.settings.riskPerTradePerc = originalRisk * 2; // Double Risk
-          this.executeTrade(newCond);
-          this.settings.riskPerTradePerc = originalRisk; // Restore immediately
+          // Reversal logic now has a 30% probability of skipping if trend is total garbage
+          if (Math.random() > 0.3) {
+             const newType = trade.type === 'LONG' ? 'SHORT' : 'LONG';
+             const newCond: MarketCondition = {
+                 symbol: trade.symbol,
+                 price: exitPrice,
+                 type: newType,
+                 score: 6, 
+                 support: newType === 'LONG' ? exitPrice * 0.995 : exitPrice, 
+                 resistance: newType === 'SHORT' ? exitPrice * 1.005 : exitPrice,
+                 isRanging: false,
+                 isBreakout: true,
+                 isRetestOrHold: true,
+                 isLiquidityGood: true,
+                 isMomentumHigh: true,
+                 isOrderBookClear: true
+             };
+             
+             const originalRisk = this.settings.riskPerTradePerc;
+             // Only double risk if we have positive WinRate history, otherwise stay flat
+             const winRate = this.getStats().winRate;
+             this.settings.riskPerTradePerc = winRate > 45 ? originalRisk * 2 : originalRisk * 1.2;
+             
+             this.executeTrade(newCond);
+             this.settings.riskPerTradePerc = originalRisk;
+          }
       }
 
       // 2. Auto-Adapt Settings (التعلم الذاتي)

@@ -190,19 +190,34 @@ export async function runTradeLoop() {
 
           // Instead of fetching all prices again, just fetch the specific klines
           try {
-            let klinesRes;
-            try {
-              klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=5m&limit=100`, { timeout: 10000 });
-            } catch(apiError: any) {
-               if (apiError.response && apiError.response.status === 418) {
-                 console.log(`[BOT RUNNER] ⚠️ IP BLOCKED BY BINANCE (Error 418). Render proxy or VPN needed.`);
-                 await sleep(60000); // 1 min sleep
-               }
-               throw apiError;
-            }
-            const klines = klinesRes.data;
+            const [klinesRes, htfRes] = await Promise.all([
+               axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=5m&limit=100`, { timeout: 10000 }),
+               axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1h&limit=51`, { timeout: 10000 })
+            ]);
             
-            const currentPx = parseFloat(klines[klines.length - 1][4]); // Close price
+            const klines = klinesRes.data;
+            const htfKlines = htfRes.data;
+            
+            // 1. Calculate ATR (14 period) on 5m
+            let trSum = 0;
+            for (let i = klines.length - 15; i < klines.length - 1; i++) {
+                const high = parseFloat(klines[i][2]);
+                const low = parseFloat(klines[i][3]);
+                const prevClose = parseFloat(klines[i-1][4]);
+                const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+                trSum += tr;
+            }
+            const atr = trSum / 14;
+
+            // 2. Higher Timeframe Trend (EMA 50 on 1H)
+            const htfCloses = htfKlines.map((k: any) => parseFloat(k[4]));
+            const k50 = 2 / (50 + 1);
+            let htfEma50 = htfCloses[0];
+            for (let i = 1; i < htfCloses.length; i++) {
+                htfEma50 = (htfCloses[i] * k50) + (htfEma50 * (1 - k50));
+            }
+            const currentPx = parseFloat(klines[klines.length - 1][4]);
+            const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
 
             // --- INSTITUTIONAL ENTRY LOGIC (EMA + MACD + Volume Displacement) ---
             const computeEMA = (data: number[], period: number) => {
@@ -307,7 +322,9 @@ export async function runTradeLoop() {
                 score: coin.score, 
                 type: type,
                 support: type === 'LONG' ? ema21 : currentPx * 0.95,
-                resistance: type === 'SHORT' ? ema21 : currentPx * 1.05
+                resistance: type === 'SHORT' ? ema21 : currentPx * 1.05,
+                atr: atr,
+                htfTrend: htfTrend
               };
               
               // Allow the Sniper Engine to fire mathematically

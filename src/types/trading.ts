@@ -56,6 +56,8 @@ export interface MarketCondition {
   // Price levels
   support: number;
   resistance: number;
+  atr?: number;              // Average True Range for dynamic SL
+  htfTrend?: 'LONG' | 'SHORT' | 'FLAT'; // Higher Timeframe Trend (1H)
 }
 
 export interface BotSettings {
