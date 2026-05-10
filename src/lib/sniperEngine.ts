@@ -124,13 +124,39 @@ export class SniperEngine {
     if (condition.score <= 3) return;
 
     // 2.5 HTF Trend Alignment (The Beast Logic)
-    // Only fight the 1H trend if signal is absolute 5/5 or beastMode is active with High RVol
+    // Only fight the 1H trend if signal is absolute 5/5 or beastMode is active with High RVol or it is a TRAP trade.
     if (condition.htfTrend && condition.htfTrend !== 'FLAT' && condition.htfTrend !== condition.type) {
-       const isBeastException = this.settings.beastMode && condition.score >= 5;
+       // Traps are by definition counter-trend, so we allow them in beastMode
+       const isBeastException = this.settings.beastMode && (condition.score >= 5 || condition.rvol! > 4);
        if (!isBeastException) {
           // console.log(`[SNIPER] 🚫 Entry rejected: HTF Trend (${condition.htfTrend}) conflicts with Entry (${condition.type}).`);
           return;
        }
+    }
+
+    // 🚀 BEAST EXPLOSION DETECTOR (Open Interest Confluence)
+    // If OI is present, use it as a multiplier for probability
+    if (condition.oi && condition.oi > 0) {
+        // We look for a balance between Volume and OI. 
+        // If OI is high relative to volume, it means big players are positioning.
+        const oiVolumeRatio = (condition.oi * condition.price) / condition.volume;
+        if (this.settings.beastMode && oiVolumeRatio > 1.5) {
+            console.log(`[BEAST 🐺] 💎 INSTITUTIONAL STACKING DETECTED on ${condition.symbol}. OI/Vol Ratio: ${oiVolumeRatio.toFixed(2)}. This is a high-conviction setup.`);
+            condition.score += 1; // Direct boost to score!
+        }
+    }
+
+    // 🐋 MARKET PRESSURE DIVERGENCE (Beast Version 3.0)
+    // If we're going LONG but Taker Sell Volume is dominating, it's a "Forced Pump"
+    if (this.settings.beastMode && condition.takerBuySellRatio) {
+        if (condition.type === 'LONG' && condition.takerBuySellRatio < 0.7) {
+            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE on ${condition.symbol}: Price pumping but Taker Pressure is bearish (${condition.takerBuySellRatio.toFixed(2)}). Retail is buying, Whales are selling. Skipping.`);
+            return;
+        }
+        if (condition.type === 'SHORT' && condition.takerBuySellRatio > 1.4) {
+            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE on ${condition.symbol}: Price dropping but Taker Pressure is bullish (${condition.takerBuySellRatio.toFixed(2)}). Retail is panic-selling, Whales are absorbing. Skipping.`);
+            return;
+        }
     }
 
     // 3. Prevent duplicate trades on same symbol
@@ -149,7 +175,15 @@ export class SniperEngine {
 
     // Stop Loss Placement: Prioritize ATR for dynamic protection
     if (cond.atr && cond.atr > 0) {
-      const atrMultiplier = this.settings.beastMode ? 2.0 : 1.5; // Give more room in beast mode
+      let atrMultiplier = this.settings.beastMode ? 2.0 : 1.5; 
+      
+      // 🚀 NEURAL-VENTING: If spread is high (> 0.05%), expand the SL buffer to avoid "wick-outs"
+      if (this.settings.beastMode && cond.spread && cond.spread > 0.05) {
+          const spreadFactor = 1 + (cond.spread * 2); // e.g. 0.1 spread -> 1.2x buffer
+          atrMultiplier *= Math.min(1.5, spreadFactor);
+          console.log(`[BEAST 🐺] NEURAL-VENTING: High Spread Detected (${cond.spread?.toFixed(3)}%). Expanding SL buffer.`);
+      }
+
       sl = cond.type === 'LONG' ? entryPrice - (cond.atr * atrMultiplier) : entryPrice + (cond.atr * atrMultiplier);
     } else {
       // Fallback to Support/Resistance if ATR is missing
@@ -171,19 +205,45 @@ export class SniperEngine {
        return; // Ignore trade
     }
 
-    // 🌊 WHALE PROTECTION: Volatility/Liquidity correlation check
-    if (this.settings.beastMode && cond.rvol && cond.rvol < 2.5 && cond.volatility > 5) {
-        console.log(`[BEAST 🐺] ⚠️ WHALE TRAP DETECTED: High volatility (${cond.volatility.toFixed(2)}%) but weak RVOL (${cond.rvol.toFixed(2)}). Likely a fakeout. Skipping ${cond.symbol}.`);
-        return;
+  // 🌊 WHALE PROTECTION: Volatility/Liquidity correlation check
+    if (this.settings.beastMode && cond.rvol && cond.volatility) {
+        // If volatility is much higher than volume growth, it's a "Ghost Move" (fakeout)
+        const volEfficiency = cond.rvol / cond.volatility;
+        if (volEfficiency < 0.3 && cond.volatility > 4) {
+            console.log(`[BEAST 🐺] ⚠️ GHOST MOVE DETECTED: Volatility (${cond.volatility.toFixed(2)}%) outpaces Liquidity (${cond.rvol.toFixed(2)}). Efficiency: ${volEfficiency.toFixed(2)}. Likely exit liquidity trap. Skipping ${cond.symbol}.`);
+            return;
+        }
     }
 
-    // Take Profits
-    const tp1 = cond.type === 'LONG' ? entryPrice + (risk * 0.8) : entryPrice - (risk * 0.8); // +0.8R (Aggressive capture)
-    const tp2 = cond.type === 'LONG' ? entryPrice + (risk * 2.5) : entryPrice - (risk * 2.5); // +2.5R (The Beast Run)
+    // Take Profits: Dynamic based on Beast Mode
+    const tp1Multiplier = this.settings.beastMode ? 0.6 : 0.8; // De-risk even faster in Beast Mode
+    const tp2Multiplier = this.settings.beastMode ? 4.0 : 2.5; // Let the core hunters run wild!
+    
+    const tp1 = cond.type === 'LONG' ? entryPrice + (risk * tp1Multiplier) : entryPrice - (risk * tp1Multiplier);
+    const tp2 = cond.type === 'LONG' ? entryPrice + (risk * tp2Multiplier) : entryPrice - (risk * tp2Multiplier);
 
-    // Calculate USD value using user settings
-    const riskAmountUsd = this.settings.portfolioSize * (this.settings.riskPerTradePerc / 100); 
-    const positionSizeUsd = riskAmountUsd / riskPerc;
+    // 💰 DYNAMIC RISK MULTIPLIER (Kelly Variant)
+    let dynamicRiskPerc = this.settings.riskPerTradePerc;
+    const stats = this.getStats();
+    if (this.settings.beastMode && stats.totalTrades > 5) {
+        if (stats.winRate > 65) dynamicRiskPerc *= 1.5; // Aggressive scaling on win streaks
+        else if (stats.winRate < 40) dynamicRiskPerc *= 0.5; // Conservative retreat on loss streaks
+    }
+
+    // 💀 NIGHTMARE SCALING: Kelly Criterion + Extreme Confidence
+    if (this.settings.isNightmareMode && stats.totalTrades > 3) {
+        if (stats.winRate > 70) dynamicRiskPerc *= 2.0; // Double down on monster streaks
+        else if (stats.winRate > 55) dynamicRiskPerc *= 1.3;
+        
+        // Institutional Magnet Boost (Whale matching)
+        if (cond.takerBuySellRatio && ((cond.type === 'LONG' && cond.takerBuySellRatio > 2.2) || (cond.type === 'SHORT' && cond.takerBuySellRatio < 0.45))) {
+            dynamicRiskPerc *= 1.4;
+            console.log(`[NIGHTMARE 💀] INSTITUTIONAL MAGNET: Extreme Taker Pressure (${cond.takerBuySellRatio.toFixed(2)}) detected. Scaling risk for maximum predation.`);
+        }
+    }
+
+    const riskAmountUsd = this.settings.portfolioSize * (dynamicRiskPerc / 100); 
+    const positionSizeUsd = (riskAmountUsd / riskPerc);
 
     const trade: Trade = {
       id: Date.now().toString(),
@@ -213,7 +273,7 @@ export class SniperEngine {
   /**
    * Manage active trades (Trailing stops, Take Profits)
    */
-  public manageTrades(symbol: string, currentPrice: number, currentOI?: number, currentVol?: number) {
+  public manageTrades(symbol: string, currentPrice: number, currentOI?: number, currentVol?: number, currentTakerRatio?: number) {
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
 
@@ -271,6 +331,12 @@ export class SniperEngine {
        let smartTimeDelayLimit = this.settings.smartTimeDecayMinutes ?? 5;
        let dynamicTrailThreshold = this.settings.smartTrailingThresholdPerc ?? 0.3;
        let momentumStallLimit = this.settings.smartMomentumStallMinutes ?? 2.5;
+
+       // 💀 NIGHTMARE UPGRADE: Aggressive Tightening
+       if (this.settings.isNightmareMode) {
+           dynamicTrailThreshold *= 0.8; // Be 20% more sensitive by default
+           momentumStallLimit *= 0.7;    // Don't wait for stalls
+       }
 
        const minutesOpen = (Date.now() - trade.entryTime) / 60000;
        let liveVolatilityPerc = 0;
@@ -432,6 +498,30 @@ export class SniperEngine {
               this.closeTrade(trade, currentPrice, '📉 KINETIC_TRAILING_EXIT');
               return;
           }
+
+          // 🐋 BEAST PARABOLIC GUARD: If in high profit (> 1.0%) and Taker Ratio flips hard, get out immediately!
+          if (this.settings.beastMode && trade.pnlPerc! > 1.0 && currentTakerRatio) {
+              if (trade.type === 'LONG' && currentTakerRatio < 0.4) {
+                  console.log(`[BEAST 🐺] ⚠️ PARABOLIC REVERSAL: Taker pressure flipped hard to Sell (${currentTakerRatio.toFixed(2)}). Exiting to lock in +$${trade.pnl?.toFixed(2)}`);
+                  this.closeTrade(trade, currentPrice, '🐋 BEAST_PARABOLIC_REVERSAL');
+                  return;
+              }
+              if (trade.type === 'SHORT' && currentTakerRatio > 2.5) {
+                  console.log(`[BEAST 🐺] ⚠️ PARABOLIC REVERSAL: Taker pressure flipped hard to Buy (${currentTakerRatio.toFixed(2)}). Exiting to lock in +$${trade.pnl?.toFixed(2)}`);
+                  this.closeTrade(trade, currentPrice, '🐋 BEAST_PARABOLIC_REVERSAL');
+                  return;
+              }
+          }
+
+          // 💀 NIGHTMARE PARABOLIC SQUEEZE: Exponential tightening
+          if (this.settings.isNightmareMode && trade.pnlPerc! > 2.5) {
+              const squeeze = Math.max(0.05, dynamicTrailThreshold * (1 / (trade.pnlPerc! / 1.5)));
+              if (dropFromHighPerc >= squeeze) {
+                  console.log(`[NIGHTMARE 💀] PARABOLIC SQUEEZE TRIGGERED. Secured max profit on ${trade.symbol}: +${trade.pnlPerc?.toFixed(2)}%`);
+                  this.closeTrade(trade, currentPrice, '💀 NIGHTMARE_SQUEEZE');
+                  return;
+              }
+          }
        }
 
        // --- 4. Momentum Stagnation (فلتر تجمد الزخم) ---
@@ -585,20 +675,25 @@ export class SniperEngine {
       
       // 1. Slippage / Stop-Hunt Reversal Exploit (تحويل الانزلاق لربح بذكاء)
       if (this.settings.beastSlippageExploit && isLoss && reason === '🛑 STOP_LOSS' && timeOpenMinutes < 3) {
-          // Check if it's a "V-Shape" recovery before jumping back in
-          // Beast Mode shouldn't be blind, it should wait for a confirmation on 1m timeframe (simplified check)
-          console.log(`[BEAST 🐺] POTENTIAL LIQUIDITY SWEEP ON ${trade.symbol}. Waiting for structure confirmation...`);
+          // Check for "Whale Shadow": If stopped out but OI is still rising, it's a fakeout.
+          const lastOI = trade.oiHistory ? trade.oiHistory[trade.oiHistory.length - 1] : 0;
+          const prevOI = trade.oiHistory ? trade.oiHistory[0] : 0;
+          const oiStillRising = lastOI > prevOI;
           
-          // Reversal logic now has a 30% probability of skipping if trend is total garbage
-          if (Math.random() > 0.3) {
-             const newType = trade.type === 'LONG' ? 'SHORT' : 'LONG';
+          // Re-entry check: Is there a "Whale Shadow"? (OI rising + Taker Ratio supports original direction)
+          const takerPressureConf = trade.type === 'LONG' ? (trade.takerBuySellRatio ?? 1) > 1.2 : (trade.takerBuySellRatio ?? 1) < 0.8;
+
+          console.log(`[BEAST 🐺] STOP-HUNT DETECTED ON ${trade.symbol}. OI Rising: ${oiStillRising}. Taker Conf: ${takerPressureConf}. Preparing Counter-Strike...`);
+          
+          if (oiStillRising || takerPressureConf) {
+             // Keep the original direction but with ultra-tight SL if it's a re-entry
              const newCond: MarketCondition = {
                  symbol: trade.symbol,
                  price: exitPrice,
-                 type: newType,
+                 type: trade.type, // Re-enter original direction!
                  score: 6, 
-                 support: newType === 'LONG' ? exitPrice * 0.995 : exitPrice, 
-                 resistance: newType === 'SHORT' ? exitPrice * 1.005 : exitPrice,
+                 support: trade.type === 'LONG' ? exitPrice * 0.998 : exitPrice, 
+                 resistance: trade.type === 'SHORT' ? exitPrice * 1.002 : exitPrice,
                  isRanging: false,
                  isBreakout: true,
                  isRetestOrHold: true,
@@ -608,9 +703,7 @@ export class SniperEngine {
              };
              
              const originalRisk = this.settings.riskPerTradePerc;
-             // Only double risk if we have positive WinRate history, otherwise stay flat
-             const winRate = this.getStats().winRate;
-             this.settings.riskPerTradePerc = winRate > 45 ? originalRisk * 2 : originalRisk * 1.2;
+             this.settings.riskPerTradePerc = originalRisk * 1.5; // Aggressive Re-entry
              
              this.executeTrade(newCond);
              this.settings.riskPerTradePerc = originalRisk;
@@ -621,34 +714,16 @@ export class SniperEngine {
       if (this.settings.beastAutoAdapt) {
            let updated = false;
            // If we've had consecutive losses, tighten conditions. If winning, loosen them to catch more.
-           const recentTrades = this.tradeHistory.slice(0, 3);
-           if (recentTrades.length === 3) {
-               const allLosses = recentTrades.every(t => (t.pnl ?? 0) < 0);
-               const allWins = recentTrades.every(t => (t.pnl ?? 0) > 0);
+           const recent = this.tradeHistory.slice(0, 5);
+           const lossCount = recent.filter(t => (t.pnl ?? 0) < 0).length;
+           const winCount = recent.length - lossCount;
 
-               if (allLosses) {
-                   // Market is tough. Increase strictness.
-                   if ((this.settings.strictMinRvol ?? 1) < 4.0) {
-                      this.settings.strictMinRvol = (this.settings.strictMinRvol ?? 1.5) + (0.5 * learningRate); 
-                      updated = true;
-                   }
-                   if ((this.settings.strictMinScore ?? 4) < 6) {
-                      this.settings.strictMinScore = 6;
-                      updated = true;
-                   }
-                   console.log(`[BEAST 🐺] Consecutive Losses. ADAPTING: Tightening filters (Min RVOL: ${this.settings.strictMinRvol?.toFixed(2)}).`);
-               } else if (allWins) {
-                   // Market is easy. Loosen conditions to print more money.
-                   if ((this.settings.strictMinRvol ?? 3) > 1.2) {
-                      this.settings.strictMinRvol = (this.settings.strictMinRvol ?? 3) - (0.5 * learningRate); 
-                      updated = true;
-                   }
-                   if ((this.settings.strictMinScore ?? 6) > 4) {
-                      this.settings.strictMinScore = 4;
-                      updated = true;
-                   }
-                   console.log(`[BEAST 🐺] Hot Streak! ADAPTING: Loosening filters (Min RVOL: ${this.settings.strictMinRvol?.toFixed(2)}) to maximize opportunities.`);
-               }
+           if (lossCount >= 3) {
+               this.settings.strictMinRvol = Math.min(5, (this.settings.strictMinRvol ?? 1.5) + (0.2 * learningRate));
+               updated = true;
+           } else if (winCount >= 3) {
+               this.settings.strictMinRvol = Math.max(1.2, (this.settings.strictMinRvol ?? 1.5) - (0.2 * learningRate));
+               updated = true;
            }
 
            if (updated) {

@@ -25,6 +25,22 @@ export async function runTradeLoop() {
 
     try {
       const activeTrades = sniper.getActiveTrades();
+      const settings = sniper.getSettings();
+
+      // 1. GLOBAL PANIC DETECTION (The Nightmare Shield)
+      let isGlobalPanic = false;
+      if (settings.isNightmareMode && settings.marketPanicThreshold) {
+          try {
+              // Check 24h change of top 20 coins as a proxy for market health
+              const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
+              const tickers = res.data as any[];
+              const drops = tickers.filter(t => parseFloat(t.priceChangePercent) < -settings.marketPanicThreshold!).length;
+              if (drops > 100) { // If >100 coins are in severe drop
+                  isGlobalPanic = true;
+                  console.warn(`[NIGHTMARE 💀] MARKET PANIC DETECTED! ${drops} symbols in freefall. Pausing new entries.`);
+              }
+          } catch (e) {}
+      }
 
       // ALWAYS manage open trades (TP/SL/Trailing), even if hunting is paused!
       if (activeTrades.length > 0) {
@@ -54,18 +70,26 @@ export async function runTradeLoop() {
               // If Kinetic Engine is enabled, we need live Open Interest and Volume data
               if (sniper.getSettings().useKineticEngine) {
                  try {
-                   const [oiRes, tkrRes] = await Promise.all([
+                   const [oiRes, tkrRes, takerVRes] = await Promise.all([
                      axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${t.symbol}`, { timeout: 2000 }),
-                     axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=1`, { timeout: 2000 })
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=1`, { timeout: 2000 }),
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=5m&limit=1`, { timeout: 2000 })
                    ]);
                    currentOI = parseFloat(oiRes.data.openInterest);
                    currentVol = parseFloat(tkrRes.data[0][5]);
+                   
+                   let currentTakerRatio = 1.0;
+                   if (takerVRes.data && takerVRes.data.length > 0) {
+                      currentTakerRatio = parseFloat(takerVRes.data[0].buyVol) / parseFloat(takerVRes.data[0].sellVol);
+                   }
+                   
+                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, currentTakerRatio);
                  } catch (e) {
-                   // Ignore minor fetch errors for OI/Vol, it will retry next tick
+                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol);
                  }
+              } else {
+                 sniper.manageTrades(t.symbol, currentPx);
               }
-
-              sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol);
 
               // 🧠 SMART EXIT LOGIC: Check multiple indicators dynamically (Refined against false pullbacks)
               // We only run this if trade is still open after manageTrades, and if smart exit is enabled
@@ -160,8 +184,9 @@ export async function runTradeLoop() {
         }
       }
 
-      // ONLY hunt for new targets if bot is active
-      if (!botActive) {
+      // ONLY hunt for new targets if bot is active and no panic detected
+      if (!botActive || (isGlobalPanic && !settings.beastMode)) {
+         if (isGlobalPanic) console.log(`[BOT] 🛡️ Entry blocked due to Market Panic.`);
          isRunning = false;
          return;
       }
@@ -181,8 +206,9 @@ export async function runTradeLoop() {
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
       if (activeTrades.length < maxTrades && watchlist.length > 0) {
-        // To save API limits while still being realtime, check random 5 coins from the watchlist per tick
-        const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, 5);
+        // Increase search intensity in Beast Mode
+        const scanCount = sniper.getSettings().beastMode ? 15 : 8;
+        const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
         for (const coin of targetsToCheck) {
           // Check if already in trade
@@ -218,6 +244,60 @@ export async function runTradeLoop() {
             }
             const currentPx = parseFloat(klines[klines.length - 1][4]);
             const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
+
+            // 3. Institutional Data: Open Interest, Order Book, Funding, and Market Pressure
+            let oi = 0;
+            let spreadPerc = 0;
+            let fundingRate = 0;
+            let takerRatio = 1.0;
+
+            try {
+               const [oiRes, bookRes, fundingRes, takerRes] = await Promise.all([
+                 axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 }),
+                 axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${coin.symbol}`, { timeout: 3000 }),
+                 axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex?symbol=${coin.symbol}`, { timeout: 3000 }),
+                 axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=5m&limit=1`, { timeout: 3000 })
+               ]);
+               
+               oi = parseFloat(oiRes.data.openInterest);
+               const bid = parseFloat(bookRes.data.bidPrice);
+               const ask = parseFloat(bookRes.data.askPrice);
+               spreadPerc = ((ask - bid) / bid) * 100;
+               fundingRate = parseFloat(fundingRes.data.lastFundingRate);
+               
+               if (takerRes.data && takerRes.data.length > 0) {
+                 const buyVol = parseFloat(takerRes.data[0].buyVol);
+                 const sellVol = parseFloat(takerRes.data[0].sellVol);
+                 takerRatio = buyVol / sellVol;
+               }
+            } catch (e) {}
+
+            // 4. V2V Analysis (Volume to Value)
+            const lastK = klines[klines.length - 2];
+            const kHigh = parseFloat(lastK[2]);
+            const kLow = parseFloat(lastK[3]);
+            const kVolUsd = parseFloat(lastK[7]); // Quote volume (USDT)
+            const kRvol = coin.rvol;
+            
+            // If spread is too high (> 0.2%), whale manipulation is easier. Beast avoids it.
+            const spreadPass = spreadPerc < 0.2;
+            
+            // If price moved > 1.2% but RVOL is low (< 0.8), it's a void (Ghost Move)
+            const bodyPerc = Math.abs(kHigh - kLow) / kLow * 100;
+            const isLiquidityVoid = bodyPerc > 1.2 && kRvol < 0.8;
+            
+            // --- BEAST TRAP LOGIC (Advanced) ---
+            // A move is a TRAP if: Price moves aggressively but OI falls (unwinding)
+            let isTrapTrade = false;
+            let trapType: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
+
+            // Placeholder for OI change detection (would need historical OI in a real app, 
+            // but we can simulate with current volume/price correlation)
+            if (isLiquidityVoid && sniper.getSettings().beastMode) {
+                const moveUp = parseFloat(klines[klines.length - 1][4]) > parseFloat(klines[klines.length - 1][1]);
+                trapType = moveUp ? 'SHORT' : 'LONG'; 
+                isTrapTrade = true;
+            }
 
             // --- INSTITUTIONAL ENTRY LOGIC (EMA + MACD + Volume Displacement) ---
             const computeEMA = (data: number[], period: number) => {
@@ -271,11 +351,26 @@ export async function runTradeLoop() {
             }
 
             const RequiredRvol = sniper.getSettings().strictMinRvol ?? 3.0;
-            const RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
+            // 🚀 BEAST UPGRADE: Relax score if HTF Trend is aligned, but be stricter if against it.
+            let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
+            if (htfTrend === type && type !== 'NEUTRAL') {
+                RequiredScore = Math.max(4, RequiredScore - 1); // Confluence bonus!
+            }
+
             const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;
             const UseRsi = isStrict ? (sniper.getSettings().strictRsiFilter !== false) : false;
 
             let strictPass = true;
+            
+            // Block Liquidity Voids or High Spread (Ghost moves are dangerous)
+            if (isLiquidityVoid || !spreadPass) strictPass = false;
+
+            // NEW: Anti-Whale Funding Filter
+            // If funding is extremely positive (> 0.05%), buying is expensive. If extremely negative (< -0.05%), selling is expensive.
+            if (isStrict) {
+                if (type === 'LONG' && fundingRate > 0.05) strictPass = false;
+                if (type === 'SHORT' && fundingRate < -0.05) strictPass = false;
+            }
 
             if (isStrict && isValidEntry) {
                 // Filter 1: Strict Volume (RVOL >= dynamic)
@@ -309,6 +404,14 @@ export async function runTradeLoop() {
             }
 
             if (isValidEntry && coin.score >= RequiredScore && strictPass) {
+              const finalType = isTrapTrade ? trapType : type;
+              if (finalType === 'NEUTRAL') continue;
+
+              // Factor in Taker Ratio into the score
+              let finalScore = isTrapTrade ? 6 : coin.score;
+              if (finalType === 'LONG' && takerRatio > 1.5) finalScore += 0.5;
+              if (finalType === 'SHORT' && takerRatio < 0.6) finalScore += 0.5;
+
               // Construct strictly passing MarketCondition
               const condition: MarketCondition = {
                 symbol: coin.symbol,
@@ -319,12 +422,16 @@ export async function runTradeLoop() {
                 isLiquidityGood: true,
                 isMomentumHigh: true,
                 isOrderBookClear: true,
-                score: coin.score, 
-                type: type,
-                support: type === 'LONG' ? ema21 : currentPx * 0.95,
-                resistance: type === 'SHORT' ? ema21 : currentPx * 1.05,
+                score: finalScore, 
+                type: finalType,
+                support: finalType === 'LONG' ? ema21 : currentPx * 0.95,
+                resistance: finalType === 'SHORT' ? ema21 : currentPx * 1.05,
                 atr: atr,
-                htfTrend: htfTrend
+                htfTrend: htfTrend,
+                oi: oi,
+                spread: spreadPerc,
+                fundingRate: fundingRate,
+                takerBuySellRatio: takerRatio
               };
               
               // Allow the Sniper Engine to fire mathematically

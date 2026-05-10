@@ -58,6 +58,12 @@ export interface MarketCondition {
   resistance: number;
   atr?: number;              // Average True Range for dynamic SL
   htfTrend?: 'LONG' | 'SHORT' | 'FLAT'; // Higher Timeframe Trend (1H)
+  oi?: number;               // Open Interest
+  oiChange24h?: number;      // OI Change percentage
+  vol24h?: number;           // 24h Volume
+  spread?: number;           // Bid/Ask Spread
+  fundingRate?: number;      // Current Funding Rate
+  takerBuySellRatio?: number; // Active market pressure
 }
 
 export interface BotSettings {
@@ -105,4 +111,6 @@ export interface BotSettings {
   beastLowCapHunting?: boolean;         // صيد العملات الضعيفة والماركت كاب المنخفض
   beastAutoAdapt?: boolean;             // التعديل التلقائي الذاتي للاعدادات
   beastLearnRate?: number;              // سرعة التعلم من الخسائر وإعادة التعديل
+  isNightmareMode?: boolean;            // 🔥 وضع الكابوس: استراتيجية هجومية شاملة ومنيعة
+  marketPanicThreshold?: number;        // عتبة الذعر: إيقاف التداول عند هبوط عام (مثال 3% في 5 دقائق)
 }
