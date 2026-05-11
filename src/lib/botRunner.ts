@@ -35,7 +35,7 @@ export async function runTradeLoop() {
               const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
               const tickers = res.data as any[];
               const drops = tickers.filter(t => parseFloat(t.priceChangePercent) < -settings.marketPanicThreshold!).length;
-              if (drops > 100) { // If >100 coins are in severe drop
+              if (drops > 150) { // Increased threshold to 150 for more flexibility
                   isGlobalPanic = true;
                   console.warn(`[NIGHTMARE 💀] MARKET PANIC DETECTED! ${drops} symbols in freefall. Pausing new entries.`);
               }
@@ -209,6 +209,10 @@ export async function runTradeLoop() {
         // Increase search intensity in Beast Mode
         const scanCount = sniper.getSettings().beastMode ? 15 : 8;
         const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
+        
+        if (botActive) {
+            console.log(`[BEAST 🐺] Scanning ${targetsToCheck.length} potential high-value targets...`);
+        }
 
         for (const coin of targetsToCheck) {
           // Check if already in trade
@@ -242,16 +246,15 @@ export async function runTradeLoop() {
             for (let i = 1; i < htfCloses.length; i++) {
                 htfEma50 = (htfCloses[i] * k50) + (htfEma50 * (1 - k50));
             }
-            // 2. Bollinger Squeeze & Volatility Check (v4.0)
+            // 2. Bollinger Squeeze & Volatility Check (v4.1)
             const computeSD = (data: number[]) => {
                 const mean = data.reduce((a, b) => a + b) / data.length;
                 return Math.sqrt(data.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / data.length);
             };
             const recentCloses = klines.slice(-20).map((k: any) => parseFloat(k[4]));
             const sd20 = computeSD(recentCloses);
-            const bbWidth = (sd20 * 4) / computeEMA(recentCloses, 20) * 100; // Width in percentage
+            const bbWidth = (sd20 * 4) / computeEMA(recentCloses, 20) * 100; 
             
-            // Calculate a benchmark for "squeeze" (min width over last 100 periods)
             let minWidth = 100;
             for (let i = 0; i < klines.length - 21; i++) {
                 const window = klines.slice(i, i + 20).map((k: any) => parseFloat(k[4]));
@@ -259,7 +262,10 @@ export async function runTradeLoop() {
                 const wWidth = (wSd * 4) / computeEMA(window, 20) * 100;
                 if (wWidth < minWidth) minWidth = wWidth;
             }
-            const isSqueezed = bbWidth < minWidth * 1.5; // Breaking out of a tight range
+            // A Squeeze is active if current width is tight. 
+            // V4.1: A breakout is active if width is expanding rapidly with volume.
+            const isSqueezed = bbWidth < minWidth * 1.5;
+            const isExpanding = bbWidth > minWidth * 2.0 && coin.rvol > 2.0;
 
             const currentPx = parseFloat(klines[klines.length - 1][4]);
             const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
@@ -353,25 +359,29 @@ export async function runTradeLoop() {
             let type: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
             let isValidEntry = false;
 
-            // V4.0 Squeeze Requirement
-            const squeezePass = settings.beastVolatilitySqueeze ? isSqueezed : true;
+            // V4.1 Squeeze/Expansion Requirement
+            const squeezePass = settings.beastVolatilitySqueeze ? (isSqueezed || isExpanding) : true;
 
             // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
             if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG' && squeezePass) {
-                // If it's a squeeze breakout, require even higher volume to confirm it's not a head-fake
-                const minRvol = isSqueezed ? 2.5 : 1.5;
+                // If it's a squeeze/expansion breakout, require even higher volume to confirm it's not a head-fake
+                const minRvol = (isSqueezed || isExpanding) ? 2.5 : 1.5;
                 if (rvolLocal >= minRvol) {
                     const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
-                    if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
+                    const maxAllowedDist = settings.isNightmareMode ? 2.5 : 1.5; // Nightmare chases more aggressively
+                    
+                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.5) {
                         type = 'LONG';
                         isValidEntry = true;
                     }
                 }
             } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT' && squeezePass) {
-                const minRvol = isSqueezed ? 2.5 : 1.5;
+                const minRvol = (isSqueezed || isExpanding) ? 2.5 : 1.5;
                 if (rvolLocal >= minRvol) {
                     const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
-                    if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
+                    const maxAllowedDist = settings.isNightmareMode ? 2.5 : 1.5;
+                    
+                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.5) {
                         type = 'SHORT';
                         isValidEntry = true;
                     }
@@ -379,55 +389,30 @@ export async function runTradeLoop() {
             }
 
             const RequiredRvol = sniper.getSettings().strictMinRvol ?? 3.0;
-            // 🚀 BEAST UPGRADE: Relax score if HTF Trend is aligned, but be stricter if against it.
             let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
             if (htfTrend === type && type !== 'NEUTRAL') {
-                RequiredScore = Math.max(4, RequiredScore - 1); // Confluence bonus!
+                RequiredScore = Math.max(4, RequiredScore - 1); 
             }
 
             const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;
             const UseRsi = isStrict ? (sniper.getSettings().strictRsiFilter !== false) : false;
 
             let strictPass = true;
+            let rejectReason = '';
             
-            // Block Liquidity Voids or High Spread (Ghost moves are dangerous)
-            if (isLiquidityVoid || !spreadPass) strictPass = false;
+            if (isLiquidityVoid) { strictPass = false; rejectReason = 'Liquidity Void (Ghost Move)'; }
+            if (!spreadPass) { strictPass = false; rejectReason = `High Spread (${spreadPerc.toFixed(2)}%)`; }
 
-            // NEW: Anti-Whale Funding Filter
-            // If funding is extremely positive (> 0.05%), buying is expensive. If extremely negative (< -0.05%), selling is expensive.
             if (isStrict) {
-                if (type === 'LONG' && fundingRate > 0.05) strictPass = false;
-                if (type === 'SHORT' && fundingRate < -0.05) strictPass = false;
+                if (type === 'LONG' && fundingRate > 0.05) { strictPass = false; rejectReason = 'High Funding (Expensive Long)'; }
+                if (type === 'SHORT' && fundingRate < -0.05) { strictPass = false; rejectReason = 'Negative Funding (Expensive Short)'; }
             }
 
-            if (isStrict && isValidEntry) {
-                // Filter 1: Strict Volume (RVOL >= dynamic)
-                if (coin.rvol < RequiredRvol) strictPass = false;
-
-                // Filter 3: BTC Align (if enabled)
+            if (isStrict && isValidEntry && strictPass) {
+                if (coin.rvol < RequiredRvol) { strictPass = false; rejectReason = `Low RVOL (${coin.rvol.toFixed(1)} < ${RequiredRvol})`; }
                 if (UseBTC) {
-                    if (type === 'LONG' && btcTrend !== 'LONG') strictPass = false;
-                    if (type === 'SHORT' && btcTrend !== 'SHORT') strictPass = false;
-                }
-
-                // Filter 5: Overbought/Oversold Rejection (RSI Filter - if enabled)
-                if (UseRsi) {
-                    let gains = 0, losses = 0;
-                    for (let i = klines.length - 15; i < klines.length - 1; i++) {
-                       if (i <= 0) continue;
-                       const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
-                       if (change > 0) gains += change;
-                       else losses -= change;
-                    }
-                    const avgGain = gains / 14;
-                    const avgLoss = losses / 14;
-                    const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
-
-                    const rsiHi = sniper.getSettings().strictRsiHigh ?? 75;
-                    const rsiLo = sniper.getSettings().strictRsiLow ?? 25;
-
-                    if (type === 'LONG' && rsi > rsiHi) strictPass = false; // Overbought Reject
-                    if (type === 'SHORT' && rsi < rsiLo) strictPass = false; // Oversold Reject
+                    if (type === 'LONG' && btcTrend !== 'LONG') { strictPass = false; rejectReason = 'BTC Trend Mismatch'; }
+                    if (type === 'SHORT' && btcTrend !== 'SHORT') { strictPass = false; rejectReason = 'BTC Trend Mismatch'; }
                 }
             }
 
@@ -464,6 +449,9 @@ export async function runTradeLoop() {
               
               // Allow the Sniper Engine to fire mathematically
               sniper.evaluateSignal(condition);
+            } else if (isValidEntry) {
+                // Only log if it WAS an entry candidate but failed a sub-filter
+                console.log(`[BEAST 🐺] ⚠️ Filtered out ${coin.symbol}: ${rejectReason || 'Low Score'}`);
             }
 
           } catch (e: any) {
