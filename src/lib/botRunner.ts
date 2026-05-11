@@ -28,6 +28,22 @@ export function getRecentAnalyses() {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const computeEMA = (data: number[], period: number) => {
+  if (data.length === 0) return 0;
+  let k = 2 / (period + 1);
+  let ema = data[0];
+  for (let i = 1; i < data.length; i++) {
+    ema = data[i] * k + ema * (1 - k);
+  }
+  return ema;
+};
+
+const computeSD = (data: number[]) => {
+  if (data.length === 0) return 0;
+  const mean = data.reduce((a, b) => a + b) / data.length;
+  return Math.sqrt(data.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / data.length);
+};
+
 export function setBotActive(state: boolean) {
   botActive = state;
   console.log(`[BOT RUNNER] Hunting Mode is now: ${botActive ? 'ACTIVE 🟢' : 'PAUSED 🔴'}`);
@@ -283,10 +299,6 @@ export async function runTradeLoop() {
                 htfEma50 = (htfCloses[i] * k50) + (htfEma50 * (1 - k50));
             }
             // 2. Bollinger Squeeze & Volatility Check (v4.1)
-            const computeSD = (data: number[]) => {
-                const mean = data.reduce((a, b) => a + b) / data.length;
-                return Math.sqrt(data.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / data.length);
-            };
             const recentCloses = klines.slice(-20).map((k: any) => parseFloat(k[4]));
             const sd20 = computeSD(recentCloses);
             const bbWidth = (sd20 * 4) / computeEMA(recentCloses, 20) * 100; 
@@ -361,15 +373,6 @@ export async function runTradeLoop() {
             }
 
             // --- INSTITUTIONAL ENTRY LOGIC (EMA + MACD + Volume Displacement) ---
-            const computeEMA = (data: number[], period: number) => {
-               let k = 2 / (period + 1);
-               let ema = data[0];
-               for (let i = 1; i < data.length; i++) {
-                 ema = data[i] * k + ema * (1 - k);
-               }
-               return ema;
-            };
-
             const closes = klines.map((k: any) => parseFloat(k[4]));
             const ema9 = computeEMA(closes, 9);
             const ema21 = computeEMA(closes, 21);
