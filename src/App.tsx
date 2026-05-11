@@ -53,7 +53,9 @@ export default function App() {
         fetch('/api/stats'),
         fetch('/api/bot/status')
       ]);
-      setWatchlist(await wlRes.json());
+      const wlData = await wlRes.json();
+      setWatchlist(wlData.coins || []);
+      // Optional: you could store wlData.lastScan etc in state if you want to show it
       setActiveTrades(await activeRes.json());
       setHistoryTrades(await histRes.json());
       setStats(await statsRes.json());
@@ -475,6 +477,23 @@ export default function App() {
                             <Activity className="w-5 h-5 animate-pulse" />
                             تخصيص عدوانية الوحش 🩸
                          </h4>
+                          <label className="flex items-start gap-4 cursor-pointer p-4 bg-black/40 border-2 border-rose-600 hover:border-rose-400 transition-all rounded-lg group animate-pulse mb-6">
+                            <div className="relative flex items-start pt-1">
+                               <input 
+                                 type="checkbox"
+                                 checked={(settings as any).isNightmareMode || false}
+                                 onChange={e => setSettings({...settings, isNightmareMode: e.target.checked} as any)}
+                                 className="w-6 h-6 accent-rose-600 bg-slate-900 border-rose-700 rounded cursor-pointer"
+                               />
+                            </div>
+                            <div>
+                               <span className="block text-rose-500 font-black text-lg mb-1 group-hover:text-rose-400 transition-colors">🩸 وضع الكابوس الـ4.2 (Nightmare Mode)</span>
+                               <span className="text-xs text-rose-200/70 block leading-relaxed">
+                                  <b>تحذير:</b> هذا الوضع يلغي جميع ضوابط الأمان العادية لتحقيق أقصى ربحية هجومية.
+                               </span>
+                            </div>
+                          </label>
+
                          
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                            <div>
@@ -558,21 +577,20 @@ export default function App() {
                              <input type="number" step="1"
                                className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
                                value={typeof (settings as any).smartTimeDecayMinutes === 'number' ? (settings as any).smartTimeDecayMinutes : 5}
-                               onChange={e => setSettings({...settings, smartTimeDecayMinutes: parseInt(e.target.value)} as any)}
-                             />
-                             <p className="text-[10px] text-slate-400 mt-1">يتسارع أو يتباطأ ديناميكياً مع حية السوق.</p>
-                           </div>
-                           <div>
-                             <label className="block text-slate-300 text-xs mb-1">مرجع الملاحقة الديناميكية المتغيرة (%)</label>
-                             <input type="number" step="0.1"
-                               className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
-                               value={typeof (settings as any).smartTrailingThresholdPerc === 'number' ? (settings as any).smartTrailingThresholdPerc : 0.3}
-                               onChange={e => setSettings({...settings, smartTrailingThresholdPerc: parseFloat(e.target.value)} as any)}
-                             />
-                             <p className="text-[10px] text-slate-400 mt-1">مرجع لنسبة التراجع. يتقلص ويتمدد برمجياً.</p>
-                           </div>
-                           <div>
-                             <label className="block text-slate-300 text-xs mb-1">زمن تجمد الزخم (دقائق)</label>
+                               onChange={e => setSettings({...settings, smartTimeDecayMinutes: parseInt(e.target.value)} as any)} />
+                              <p className="text-[10px] text-slate-400 mt-1">يتسارع أو يتباطأ ديناميكياً مع حية السوق.</p>
+                            </div>
+                            <div>
+                              <label className="block text-slate-300 text-xs mb-1">مرجع الملاحقة الديناميكية المتغيرة (%)</label>
+                              <input type="number" step="0.1"
+                                className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+                                value={typeof (settings as any).smartTrailingThresholdPerc === 'number' ? (settings as any).smartTrailingThresholdPerc : 0.3}
+                                onChange={e => setSettings({...settings, smartTrailingThresholdPerc: parseFloat(e.target.value)} as any)}
+                              />
+                              <p className="text-[10px] text-slate-400 mt-1">مرجع لنسبة التراجع. يتقلص ويتمدد برمجياً.</p>
+                            </div>
+                            <div>
+                              <label className="block text-slate-300 text-xs mb-1">زمن تجمد الزخم (دقائق)</label>
                              <input type="number" step="0.5"
                                className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
                                value={typeof (settings as any).smartMomentumStallMinutes === 'number' ? (settings as any).smartMomentumStallMinutes : 2.5}
@@ -586,7 +604,7 @@ export default function App() {
                            <h5 className="text-purple-300 text-sm font-bold mb-3 flex items-center gap-2">
                              محركات السيولة الحية للمنصة (True Flow)
                            </h5>
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                              <label className="flex items-start gap-3 cursor-pointer p-3 bg-slate-900/80 border border-slate-700 rounded hover:border-purple-500/50 transition-colors">
                                <input 
                                  type="checkbox"

@@ -120,8 +120,9 @@ export class SniperEngine {
     // 1. Mandatory Filter: Range Market avoids ALL trades.
     if (condition.isRanging) return;
 
-    // 2. Score threshold: Must be 4/5 or 5/5
-    if (condition.score <= 3) return;
+    // 2. Score threshold: Nightmare Mode is hungry, it doesn't wait for 5/5
+    const minScore = (this.settings.isNightmareMode) ? 3.5 : 4;
+    if (condition.score < minScore) return;
 
     // 2.5 HTF Trend Alignment (The Beast Logic)
     // Only fight the 1H trend if signal is absolute 5/5 or beastMode is active with High RVol or it is a TRAP trade.
@@ -146,15 +147,17 @@ export class SniperEngine {
         }
     }
 
-    // 🐋 MARKET PRESSURE DIVERGENCE (Beast Version 3.0)
-    // If we're going LONG but Taker Sell Volume is dominating, it's a "Forced Pump"
+    // 🐋 MARKET PRESSURE DIVERGENCE (Beast Version 4.2)
+    // Relaxed for power-pumps and predatory momentum
     if (this.settings.beastMode && condition.takerBuySellRatio) {
-        if (condition.type === 'LONG' && condition.takerBuySellRatio < 0.7) {
-            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE on ${condition.symbol}: Price pumping but Taker Pressure is bearish (${condition.takerBuySellRatio.toFixed(2)}). Retail is buying, Whales are selling. Skipping.`);
+        const threshold = this.settings.isNightmareMode ? 0.5 : 0.7; // Nightmare allows more divergence
+        if (condition.type === 'LONG' && condition.takerBuySellRatio < threshold) {
+            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE (Relaxed): Taker Pressure is bearish (${condition.takerBuySellRatio.toFixed(2)}). Skipping.`);
             return;
         }
-        if (condition.type === 'SHORT' && condition.takerBuySellRatio > 1.4) {
-            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE on ${condition.symbol}: Price dropping but Taker Pressure is bullish (${condition.takerBuySellRatio.toFixed(2)}). Retail is panic-selling, Whales are absorbing. Skipping.`);
+        const shortThreshold = this.settings.isNightmareMode ? 2.0 : 1.4;
+        if (condition.type === 'SHORT' && condition.takerBuySellRatio > shortThreshold) {
+            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE (Relaxed): Taker Pressure is bullish (${condition.takerBuySellRatio.toFixed(2)}). Skipping.`);
             return;
         }
     }
@@ -175,13 +178,13 @@ export class SniperEngine {
 
     // Stop Loss Placement: Prioritize ATR for dynamic protection
     if (cond.atr && cond.atr > 0) {
-      let atrMultiplier = this.settings.beastMode ? 2.0 : 1.5; 
+      let atrMultiplier = this.settings.isNightmareMode ? 2.8 : (this.settings.beastMode ? 2.0 : 1.5); 
       
       // 🚀 NEURAL-VENTING: If spread is high (> 0.05%), expand the SL buffer to avoid "wick-outs"
       if (this.settings.beastMode && cond.spread && cond.spread > 0.05) {
-          const spreadFactor = 1 + (cond.spread * 2); // e.g. 0.1 spread -> 1.2x buffer
-          atrMultiplier *= Math.min(1.5, spreadFactor);
-          console.log(`[BEAST 🐺] NEURAL-VENTING: High Spread Detected (${cond.spread?.toFixed(3)}%). Expanding SL buffer.`);
+          const spreadFactor = 1 + (cond.spread * 3); // More aggressive buffer
+          atrMultiplier *= Math.min(1.8, spreadFactor);
+          console.log(`[BEAST 🐺] NEURAL-VENTING: High Spread Detected (${cond.spread?.toFixed(3)}%). Expanding SL buffer to ${atrMultiplier.toFixed(2)}x ATR.`);
       }
 
       sl = cond.type === 'LONG' ? entryPrice - (cond.atr * atrMultiplier) : entryPrice + (cond.atr * atrMultiplier);
@@ -524,14 +527,17 @@ export class SniperEngine {
               }
           }
 
-          // 🐋 BEAST PYRAMIDING (الافتراس المتتالي)
-          if (this.settings.beastPyramiding && trade.pnlPerc! > 1.5 && !trade.isBreakeven && isMomentumActive) {
-              // If momentum is still high and profit is good, double down half and lock breakeven
-              console.log(`[BEAST 🐺] 🥩 PYRAMIDING: Increasing position on ${trade.symbol} due to extreme momentum continuation.`);
-              trade.amount *= 1.5; // Scale up 50%
-              trade.isBreakeven = true; 
-              trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.005 : trade.entryPrice * 0.995;
-              updated = true;
+    // 🐋 BEAST PYRAMIDING (الافتراس المتتالي)
+          if (this.settings.beastPyramiding && trade.pnlPerc! > 1.2 && isMomentumActive) {
+              // If momentum is still high and profit is good, double down and lock breakeven
+              if (!trade.pyramidCount || trade.pyramidCount < 2) {
+                  console.log(`[BEAST 🐺] 🥩 PYRAMIDING: Increasing position on ${trade.symbol} due to extreme momentum continuation.`);
+                  trade.amount *= 1.4; // Scale up 40%
+                  trade.pyramidCount = (trade.pyramidCount || 0) + 1;
+                  trade.isBreakeven = true; 
+                  trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.006 : trade.entryPrice * 0.994;
+                  updated = true;
+              }
           }
        }
 

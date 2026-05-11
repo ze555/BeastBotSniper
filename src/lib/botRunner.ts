@@ -263,9 +263,9 @@ export async function runTradeLoop() {
                 if (wWidth < minWidth) minWidth = wWidth;
             }
             // A Squeeze is active if current width is tight. 
-            // V4.1: A breakout is active if width is expanding rapidly with volume.
+            // V4.2: Breakout detection is now faster (1.5x expansion).
             const isSqueezed = bbWidth < minWidth * 1.5;
-            const isExpanding = bbWidth > minWidth * 2.0 && coin.rvol > 2.0;
+            const isExpanding = bbWidth > minWidth * 1.5 && coin.rvol > 1.8;
 
             const currentPx = parseFloat(klines[klines.length - 1][4]);
             const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
@@ -359,39 +359,39 @@ export async function runTradeLoop() {
             let type: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
             let isValidEntry = false;
 
-            // V4.1 Squeeze/Expansion Requirement
+            // V4.2 Squeeze/Expansion Requirement
             const squeezePass = settings.beastVolatilitySqueeze ? (isSqueezed || isExpanding) : true;
 
             // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
             if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG' && squeezePass) {
-                // If it's a squeeze/expansion breakout, require even higher volume to confirm it's not a head-fake
-                const minRvol = (isSqueezed || isExpanding) ? 2.5 : 1.5;
+                // If it's a squeeze/expansion breakout, require enough volume to confirm
+                const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
                 if (rvolLocal >= minRvol) {
                     const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
-                    const maxAllowedDist = settings.isNightmareMode ? 2.5 : 1.5; // Nightmare chases more aggressively
+                    const maxAllowedDist = settings.isNightmareMode ? 3.0 : 1.8; // Nightmare chases more aggressively
                     
-                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.5) {
+                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.8) {
                         type = 'LONG';
                         isValidEntry = true;
                     }
                 }
             } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT' && squeezePass) {
-                const minRvol = (isSqueezed || isExpanding) ? 2.5 : 1.5;
+                const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
                 if (rvolLocal >= minRvol) {
                     const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
-                    const maxAllowedDist = settings.isNightmareMode ? 2.5 : 1.5;
+                    const maxAllowedDist = settings.isNightmareMode ? 3.0 : 1.8;
                     
-                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.5) {
+                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.8) {
                         type = 'SHORT';
                         isValidEntry = true;
                     }
                 }
             }
 
-            const RequiredRvol = sniper.getSettings().strictMinRvol ?? 3.0;
+            const RequiredRvol = sniper.getSettings().strictMinRvol ?? (settings.isNightmareMode ? 2.0 : 3.0);
             let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
             if (htfTrend === type && type !== 'NEUTRAL') {
-                RequiredScore = Math.max(4, RequiredScore - 1); 
+                RequiredScore = Math.max(4, RequiredScore - (settings.isNightmareMode ? 2 : 1)); 
             }
 
             const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;

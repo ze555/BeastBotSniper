@@ -28,13 +28,26 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Local cache for Golden Watchlist
 let goldenWatchlist: ScannedCoin[] = [];
+let isScanning = false;
+let lastScanTime = 0;
+let totalProcessed = 0;
 
 export function getWatchlist() {
-  return goldenWatchlist;
+  return {
+    coins: goldenWatchlist,
+    lastScan: lastScanTime,
+    isScanning,
+    totalProcessed
+  };
 }
 
 export async function runBinanceScanner() {
-  console.log('[SCANNER] 🔍 Starting 15-minute market scan for best 10-20 coins...');
+  if (isScanning) return;
+  isScanning = true;
+  lastScanTime = Date.now();
+  totalProcessed = 0;
+  
+  console.log('[SCANNER] 🔍 Starting market scan for best targets...');
   
   try {
     // 1. Fetch 24hr Tickers
@@ -84,6 +97,7 @@ export async function runBinanceScanner() {
 
     // Analyze each valid coin
     for (const ticker of validTickers) {
+      totalProcessed++;
       const symbol = ticker.symbol;
       const price = parseFloat(ticker.lastPrice);
       const high = parseFloat(ticker.highPrice);
@@ -227,19 +241,23 @@ export async function runBinanceScanner() {
         });
       }
 
-      // Add a 200ms delay between coins to avoid Rate Limits (418 / 429 errors)
-      await sleep(200);
+      // Add a 100ms delay between coins (faster scanning, risky but needed for aggression)
+      await sleep(100);
     }
 
-    // Sort by score descending, then by volume
-    candidates.sort((a, b) => b.score - a.score || b.volume - a.volume);
+    // Sort by score descending, then by rvol for aggression
+    candidates.sort((a, b) => b.score - a.score || b.rvol - a.rvol);
     
-    // Take top 20
-    goldenWatchlist = candidates.slice(0, 20);
+    // Take top 25 high-value targets
+    goldenWatchlist = candidates.slice(0, 25);
     console.log(`[SCANNER] ✅ Scan Complete. Found ${goldenWatchlist.length} Golden Coins.`);
-    // goldenWatchlist.forEach(c => console.log(`   🔥 ${c.symbol} (Score: ${c.score}/5) | RVOL: ${c.rvol.toFixed(2)} | Volatility: ${c.volatility.toFixed(2)}%`));
+    isScanning = false;
 
+    // Schedule next scan in 8 minutes to keep data fresh
+    setTimeout(runBinanceScanner, 8 * 60 * 1000);
   } catch (error) {
     console.error('[SCANNER] Error during scan:', error);
+    isScanning = false;
+    setTimeout(runBinanceScanner, 2 * 60 * 1000); // Retry sooner on error
   }
 }

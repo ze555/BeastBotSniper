@@ -17,9 +17,8 @@ async function startServer() {
   app.use(express.json());
 
   // Background Tasks
-  // Run scanner immediately on boot, then every 1 hour
+  // Run scanner immediately on boot (library handles its own loop now)
   runBinanceScanner();
-  setInterval(runBinanceScanner, 15 * 60 * 1000); // 15 minutes
   
   // Start the tick-by-tick sniper evaluation loop
   runTradeLoop();

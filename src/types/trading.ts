@@ -36,6 +36,7 @@ export interface Trade {
   tickHistory?: number[]; // Live Data: Tracks every incoming price tick
   oiHistory?: number[]; // Open Interest history
   volHistory?: number[]; // Volume history
+  pyramidCount?: number; // عدد مرات تعزيز المركز (الافتراس المتتالي)
 }
 
 export interface MarketCondition {
