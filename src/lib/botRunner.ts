@@ -8,6 +8,12 @@ let isRunning = false;
 let botActive = false; // State to control if hunting is active
 let recentAnalyses: { symbol: string, reason: string, time: number, score: number, type: string }[] = [];
 
+export async function forceScan() {
+    if (isRunning) return { status: 'running' };
+    await runTradeLoop();
+    return { status: 'completed' };
+}
+
 export function getRecentAnalyses() {
     return recentAnalyses;
 }
@@ -211,12 +217,12 @@ export async function runTradeLoop() {
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
       if (activeTrades.length < maxTrades && watchlist.length > 0) {
-        // Increase search intensity in Beast Mode
-        const scanCount = sniper.getSettings().beastMode ? 15 : 8;
-        const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
+        // Increase search intensity in Beast/Nightmare Mode
+        const scanCount = settings.isNightmareMode ? 25 : (sniper.getSettings().beastMode ? 15 : 8);
+        const targetsToCheck = [...watchlist].sort((a, b) => b.score - a.score).slice(0, scanCount);
         
-        if (botActive) {
-            console.log(`[BEAST 🐺] Scanning ${targetsToCheck.length} potential high-value targets...`);
+        if (botActive || true) { // Always log scanning activity for radar
+            // console.log(`[BEAST 🐺] Scanning ${targetsToCheck.length} potential high-value targets...`);
         }
 
         for (const coin of targetsToCheck) {
@@ -408,10 +414,10 @@ export async function runTradeLoop() {
                 entryRejectReason = 'EMA/Displacement Mismatch';
             }
 
-            const RequiredRvol = sniper.getSettings().strictMinRvol ?? (settings.isNightmareMode ? 2.0 : 3.0);
+            const RequiredRvol = sniper.getSettings().strictMinRvol ?? (settings.isNightmareMode ? 1.5 : 3.0);
             let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
             if (htfTrend === type && type !== 'NEUTRAL') {
-                RequiredScore = Math.max(4, RequiredScore - (settings.isNightmareMode ? 2 : 1)); 
+                RequiredScore = Math.max(settings.isNightmareMode ? 3 : 4, RequiredScore - (settings.isNightmareMode ? 2 : 1)); 
             }
 
             const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;
@@ -467,18 +473,25 @@ export async function runTradeLoop() {
                 takerBuySellRatio: takerRatio
               };
               
-              // Allow the Sniper Engine to fire mathematically
-              sniper.evaluateSignal(condition);
-              
-              recentAnalyses.unshift({ symbol: coin.symbol, reason: 'ENTRY_EXECUTED', time: Date.now(), score: finalScore, type: finalType });
+              if (botActive) {
+                // Allow the Sniper Engine to fire mathematically
+                sniper.evaluateSignal(condition);
+                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'ENTRY_EXECUTED 🎯', time: Date.now(), score: finalScore, type: finalType });
+              } else {
+                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'SIGNAL_READY (Bot Paused)', time: Date.now(), score: finalScore, type: finalType });
+              }
             } else {
                 // VERY AGGRESSIVE LOGGING FOR TRANSPARENCY
-                if (coin.score >= 3) {
-                    const reason = !isValidEntry ? entryRejectReason : (!strictPass ? rejectReason : `Low Score (${coin.score} < ${RequiredScore})`);
-                    console.log(`[SCANNER 🔎] Analysed ${coin.symbol}: ${reason}`);
-                    
-                    recentAnalyses.unshift({ symbol: coin.symbol, reason, time: Date.now(), score: coin.score, type: isValidEntry ? type : 'NEUTRAL' });
-                }
+                const reason = !isValidEntry ? entryRejectReason : (!strictPass ? rejectReason : `Low Score (${coin.score} < ${RequiredScore})`);
+                
+                // Add to recent analyses even if rejected so user knows WHY
+                recentAnalyses.unshift({ 
+                    symbol: coin.symbol, 
+                    reason: reason || 'Unknown rejection', 
+                    time: Date.now(), 
+                    score: coin.score, 
+                    type: (type && type !== 'NEUTRAL') ? type : 'NEUTRAL' 
+                });
             }
             
             // Keep only latest 30 analyses

@@ -19,7 +19,7 @@ export default function App() {
     fetchSettings(); // initial settings Load
     const interval = setInterval(() => {
       fetchData();
-    }, 5000); // UI poll every 5s
+    }, 2000); // UI poll every 2s for radar feel
 
     return () => clearInterval(interval);
   }, []);
@@ -68,7 +68,10 @@ export default function App() {
 
   const manualRefreshScanner = async () => {
     setLoading(true);
-    await fetchData();
+    try {
+      await fetch('/api/bot/scan', { method: 'POST' });
+      await fetchData();
+    } catch(e) {}
     setLoading(false);
   }
 
