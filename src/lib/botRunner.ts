@@ -8,10 +8,18 @@ let isRunning = false;
 let botActive = false; // State to control if hunting is active
 let recentAnalyses: { symbol: string, reason: string, time: number, score: number, type: string }[] = [];
 
+let loopStarted = false;
+
 export async function forceScan() {
-    if (isRunning) return { status: 'running' };
-    await runTradeLoop();
-    return { status: 'completed' };
+    if (isRunning) return { status: 'already_running' };
+    console.log('[BOT RUNNER] ⚡ Manual Scan Triggered...');
+    // We don't call runTradeLoop here because it's already running as an interval.
+    // Instead, we just let the next tick handle it, or we could trigger a one-off.
+    // For now, let's keep it simple and ensure the interval is active.
+    if (!loopStarted) {
+        runTradeLoop();
+    }
+    return { status: 'triggered' };
 }
 
 export function getRecentAnalyses() {
@@ -30,7 +38,10 @@ export function isBotActive(): boolean {
 }
 
 export async function runTradeLoop() {
-  setInterval(async () => {
+  if (loopStarted) return;
+  loopStarted = true;
+
+  const tick = async () => {
     if (isRunning) return;
     isRunning = true;
 
@@ -202,10 +213,18 @@ export async function runTradeLoop() {
          return;
       }
 
-      const watchlist = getWatchlist();
+      const watchlistData = getWatchlist();
+      const watchlist = watchlistData.coins;
       const maxTrades = sniper.getSettings().maxConcurrentTrades;
       const isStrict = sniper.getSettings().strictMode;
 
+      // 1.5 Update Radar with Scan Heartbeat if empty
+      if (watchlist.length === 0) {
+          if (recentAnalyses.length === 0 || Date.now() - recentAnalyses[0].time > 10000) {
+            recentAnalyses.unshift({ symbol: 'SCANNER', reason: 'Searching for Golden Targets...', time: Date.now(), score: 0, type: 'NEUTRAL' });
+          }
+      }
+      
       // Check BTC trend for strict mode (Filter 3: BTC Trend Filter)
       let btcTrend = 'FLAT';
       if (isStrict && botActive) {
@@ -221,8 +240,11 @@ export async function runTradeLoop() {
         const scanCount = settings.isNightmareMode ? 25 : (sniper.getSettings().beastMode ? 15 : 8);
         const targetsToCheck = [...watchlist].sort((a, b) => b.score - a.score).slice(0, scanCount);
         
-        if (botActive || true) { // Always log scanning activity for radar
-            // console.log(`[BEAST 🐺] Scanning ${targetsToCheck.length} potential high-value targets...`);
+        if (botActive || true) { 
+            // Add a small delay to radar to show intensive scanning
+            if (recentAnalyses.length === 0 || Date.now() - recentAnalyses[0].time > 5000) {
+               recentAnalyses.unshift({ symbol: 'SYSTEM', reason: `Scanning ${targetsToCheck.length} high-value targets...`, time: Date.now(), score: 0, type: 'NEUTRAL' });
+            }
         }
 
         for (const coin of targetsToCheck) {
@@ -511,5 +533,9 @@ export async function runTradeLoop() {
     } finally {
       isRunning = false;
     }
-  }, 3000); // Poll every 3s for tracking active trades and scanning targets
+  };
+
+  // Run immediately then set interval
+  tick();
+  setInterval(tick, 3000); 
 }

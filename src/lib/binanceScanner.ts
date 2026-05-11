@@ -253,11 +253,12 @@ export async function runBinanceScanner() {
     console.log(`[SCANNER] ✅ Scan Complete. Found ${goldenWatchlist.length} Golden Coins.`);
     isScanning = false;
 
-    // Schedule next scan in 8 minutes to keep data fresh
-    setTimeout(runBinanceScanner, 8 * 60 * 1000);
+    // Schedule next scan - 1 minute for Nightmare Mode, 5 minutes otherwise
+    const nextScanMs = sniper.getSettings().isNightmareMode ? 1 * 60 * 1000 : 5 * 60 * 1000;
+    setTimeout(runBinanceScanner, nextScanMs);
   } catch (error) {
     console.error('[SCANNER] Error during scan:', error);
     isScanning = false;
-    setTimeout(runBinanceScanner, 2 * 60 * 1000); // Retry sooner on error
+    setTimeout(runBinanceScanner, 30 * 1000); // Retry sooner on error
   }
 }
