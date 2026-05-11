@@ -8,6 +8,7 @@ export default function App() {
   const [historyTrades, setHistoryTrades] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalPnl: 0, winRate: 0, openCount: 0, totalTrades: 0 });
   const [botActive, setBotActive] = useState(false);
+  const [recentAnalyses, setRecentAnalyses] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState({ portfolioSize: 1000, riskPerTradePerc: 1, maxConcurrentTrades: 3 });
   const [savingSettings, setSavingSettings] = useState(false);
@@ -46,21 +47,22 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [wlRes, activeRes, histRes, statsRes, statusRes] = await Promise.all([
+      const [wlRes, activeRes, histRes, statsRes, statusRes, analysesRes] = await Promise.all([
         fetch('/api/scanner/watchlist'),
         fetch('/api/trades/active'),
         fetch('/api/trades/history'),
         fetch('/api/stats'),
-        fetch('/api/bot/status')
+        fetch('/api/bot/status'),
+        fetch('/api/bot/analyses')
       ]);
       const wlData = await wlRes.json();
       setWatchlist(wlData.coins || []);
-      // Optional: you could store wlData.lastScan etc in state if you want to show it
       setActiveTrades(await activeRes.json());
       setHistoryTrades(await histRes.json());
       setStats(await statsRes.json());
       const statusData = await statusRes.json();
       setBotActive(statusData.active);
+      setRecentAnalyses(await analysesRes.json());
     } catch(e) { }
   }
 
@@ -187,8 +189,8 @@ export default function App() {
                            </div>
                            
                            <div className="mt-4 pt-4 border-t border-slate-800 grid grid-cols-2 gap-2 text-xs text-slate-400">
-                              <div>وقف الخسارة: <span className="font-mono text-slate-200 block">{parseFloat(t.sl).toFixed(4)}</span></div>
-                              <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
+                               <div>وقف الخسارة: <span className="font-mono text-slate-200 block">{parseFloat(t.sl).toFixed(4)}</span></div>
+                               <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
                            </div>
                         </div>
                       ))}
@@ -197,64 +199,98 @@ export default function App() {
                 </div>
               )}
 
-              {/* Watchlist Table */}
-              <div className="mt-8 rounded-xl bg-slate-800/50 border border-slate-700/50 overflow-hidden">
-                <div className="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/80">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <Target className="w-5 h-5 text-emerald-400" />
-                    قائمة المراقبة الذهبية (يتحدث تلقائياً)
-                  </h3>
-                  <button onClick={manualRefreshScanner} disabled={loading} className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors flex items-center gap-2 text-sm font-medium">
-                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                    تحديث
-                  </button>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right text-sm">
-                     <thead className="bg-slate-800/30 text-slate-400">
-                      <tr>
-                        <th className="px-5 py-3 font-medium">العملة</th>
-                        <th className="px-5 py-3 font-medium">التقييم</th>
-                        <th className="px-5 py-3 font-medium">الاتجاه</th>
-                        <th className="px-5 py-3 font-medium">RVOL</th>
-                        <th className="px-5 py-3 font-medium">التذبذب</th>
-                        <th className="px-5 py-3 font-medium">حالة الفحوصات</th>
-                      </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-700/50">
-                        {watchlist.length === 0 && !loading && (
-                           <tr>
-                             <td colSpan={6} className="py-8 text-center text-slate-500">جاري مسح الأسواق أو لا توجد عملات استوفت الشروط...</td>
-                           </tr>
-                        )}
-                        {watchlist.map((coin, i) => (
-                           <tr key={i} className="hover:bg-slate-700/20 transition-colors">
-                              <td className="px-5 py-4 font-bold font-mono text-emerald-400">{coin.symbol}</td>
-                              <td className="px-5 py-4">
-                                <span className={`px-2 py-1 rounded inline-flex items-center gap-1 font-bold ${coin.score >= 5 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-yellow-500/10 text-yellow-500'}`}>
-                                  {coin.score}/5
-                                  {coin.score >= 5 && <span className="text-xs">🔥</span>}
-                                </span>
-                              </td>
-                              <td className="px-5 py-4 text-slate-300 flex items-center gap-2 mt-2">
-                                {coin.trend === 'LONG' ? <TrendingUp className="w-4 h-4 text-emerald-400"/> : coin.trend === 'SHORT' ? <TrendingDown className="w-4 h-4 text-rose-400" /> : '-'}
-                                {coin.trend}
-                              </td>
-                              <td className="px-5 py-4 font-mono text-slate-300">{coin.rvol.toFixed(2)}x</td>
-                              <td className="px-5 py-4 font-mono text-slate-300">{coin.volatility.toFixed(1)}%</td>
-                              <td className="px-5 py-4 flex gap-1 items-center h-full mt-3 flex-wrap">
-                                <CheckBadge active={coin.checks.volumePass} label="VOL" />
-                                <CheckBadge active={coin.checks.rvolPass} label="RVOL" />
-                                <CheckBadge active={coin.checks.volatilityPass} label="VOLA" />
-                                <CheckBadge active={coin.checks.spreadPass} label="SPR" />
-                                <CheckBadge active={coin.checks.oiPass} label="OI" />
-                              </td>
-                           </tr>
-                        ))}
-                     </tbody>
-                  </table>
-                </div>
+              {/* NEW: Live Radar & Watchlist Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Column: Analyses Radar */}
+                  <div className="lg:col-span-1 rounded-xl bg-slate-800/80 border border-slate-700/50 flex flex-col h-[500px]">
+                    <div className="p-4 border-b border-slate-700/50 flex items-center justify-between bg-black/20">
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-emerald-400">
+                        <Activity className="w-4 h-4" />
+                        رادار الفحص الحي (Live Radar)
+                      </h3>
+                      <span className="text-[10px] text-slate-500 font-mono text-left">Real-time</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                      {recentAnalyses.length === 0 ? (
+                        <div className="h-full flex items-center justify-center text-slate-600 text-xs text-center p-8">
+                          بانتظار دورة الفحص القادمة...
+                        </div>
+                      ) : recentAnalyses.map((item, id) => (
+                        <div key={id} className={`p-2 rounded border border-transparent hover:border-slate-700 transition-colors flex items-center justify-between gap-3 ${item.reason === 'ENTRY_EXECUTED' ? 'bg-emerald-500/10' : 'bg-slate-900/40'}`}>
+                           <div className="flex items-center gap-2">
+                             <div className={`w-1.5 h-1.5 rounded-full ${item.reason === 'ENTRY_EXECUTED' ? 'bg-emerald-500 animate-ping' : 'bg-slate-700'}`}></div>
+                             <span className="font-mono text-xs font-bold text-white leading-none">{item.symbol}</span>
+                             {item.type !== 'NEUTRAL' && (
+                               <span className={`text-[8px] font-black px-1 rounded ${item.type === 'LONG' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'}`}>
+                                 {item.type}
+                               </span>
+                             )}
+                           </div>
+                           <div className="flex-1 text-right overflow-hidden">
+                             <span className={`text-[10px] truncate block ${item.reason === 'ENTRY_EXECUTED' ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+                               {item.reason}
+                             </span>
+                           </div>
+                           <div className="text-[9px] font-mono text-slate-600">
+                              {new Date(item.time).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Watchlist */}
+                  <div className="lg:col-span-2 rounded-xl bg-slate-800/80 border border-slate-700/50 overflow-hidden">
+                    <div className="p-4 border-b border-slate-700/50 flex justify-between items-center bg-black/20">
+                      <h3 className="text-sm font-bold flex items-center gap-2 text-emerald-400">
+                        <Target className="w-4 h-4" />
+                        المرشحين الأعلى تقييماً (Watchlist)
+                      </h3>
+                      <button onClick={manualRefreshScanner} disabled={loading} className="p-1 px-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors flex items-center gap-2 text-[10px] font-medium font-mono text-left">
+                        REFRESH
+                      </button>
+                    </div>
+                    
+                    <div className="overflow-x-auto h-[444px]">
+                      <table className="w-full text-right text-xs">
+                         <thead className="bg-slate-900/50 text-slate-500 sticky top-0 uppercase tracking-wider font-bold">
+                          <tr>
+                            <th className="px-5 py-3 border-b border-slate-700/50">العملة</th>
+                            <th className="px-5 py-3 border-b border-slate-700/50">التقييم</th>
+                            <th className="px-5 py-3 border-b border-slate-700/50">الاتجاه</th>
+                            <th className="px-5 py-3 border-b border-slate-700/50">RVOL</th>
+                            <th className="px-5 py-3 border-b border-slate-700/50">الفحص</th>
+                          </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-700/30">
+                            {watchlist.map((coin, i) => (
+                               <tr key={i} className="hover:bg-slate-700/20 transition-colors border-b border-slate-700/10">
+                                  <td className="px-5 py-3 font-bold font-mono text-white text-sm">{coin.symbol}</td>
+                                  <td className="px-5 py-3">
+                                    <span className={`px-2 py-0.5 rounded inline-flex items-center gap-1 font-bold ${coin.score >= 5 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-500'}`}>
+                                      {coin.score}/5
+                                    </span>
+                                  </td>
+                                  <td className="px-5 py-3 font-bold truncate">
+                                    <span className={`flex items-center gap-1 ${coin.trend === 'LONG' ? 'text-emerald-400' : coin.trend === 'SHORT' ? 'text-rose-400' : 'text-slate-500'}`}>
+                                      {coin.trend === 'LONG' ? <TrendingUp className="w-3 h-3"/> : coin.trend === 'SHORT' ? <TrendingDown className="w-3 h-3" /> : null}
+                                      {coin.trend}
+                                    </span>
+                                  </td>
+                                  <td className="px-5 py-3 font-mono text-slate-300 font-bold">{coin.rvol.toFixed(2)}x</td>
+                                  <td className="px-5 py-3">
+                                    <div className="flex gap-1">
+                                      <CheckBadge active={coin.checks.oiPass} label="OI" />
+                                      <CheckBadge active={coin.checks.rvolPass} label="RV" />
+                                      <CheckBadge active={coin.checks.spreadPass} label="SP" />
+                                    </div>
+                                  </td>
+                               </tr>
+                            ))}
+                         </tbody>
+                      </table>
+                    </div>
+                  </div>
               </div>
             </>
           )}

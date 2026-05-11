@@ -4,7 +4,7 @@ import path from "path";
 import AdmZip from "adm-zip";
 import fs from "fs";
 import { runBinanceScanner, getWatchlist } from "./src/lib/binanceScanner.js";
-import { runTradeLoop, setBotActive, isBotActive } from "./src/lib/botRunner.js";
+import { runTradeLoop, setBotActive, isBotActive, getRecentAnalyses } from "./src/lib/botRunner.js";
 import { sniper } from "./src/lib/sniperEngine.js";
 
 // __dirname is natively available in CommonJS. Since this file is compiled to CommonJS via esbuild, we don't need fileURLToPath.
@@ -46,6 +46,10 @@ async function startServer() {
 
   app.get("/api/bot/status", (req, res) => {
     res.json({ active: isBotActive() });
+  });
+
+  app.get("/api/bot/analyses", (req, res) => {
+    res.json(getRecentAnalyses());
   });
 
   app.post("/api/bot/toggle", (req, res) => {

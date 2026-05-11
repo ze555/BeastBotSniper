@@ -6,6 +6,11 @@ import { MarketCondition } from '../types/trading.js';
 const BINANCE_FAPI = 'https://fapi.binance.com';
 let isRunning = false;
 let botActive = false; // State to control if hunting is active
+let recentAnalyses: { symbol: string, reason: string, time: number, score: number, type: string }[] = [];
+
+export function getRecentAnalyses() {
+    return recentAnalyses;
+}
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -361,6 +366,7 @@ export async function runTradeLoop() {
 
             // V4.2 Squeeze/Expansion Requirement
             const squeezePass = settings.beastVolatilitySqueeze ? (isSqueezed || isExpanding) : true;
+            let entryRejectReason = '';
 
             // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
             if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG' && squeezePass) {
@@ -368,24 +374,38 @@ export async function runTradeLoop() {
                 const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
                 if (rvolLocal >= minRvol) {
                     const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
-                    const maxAllowedDist = settings.isNightmareMode ? 3.0 : 1.8; // Nightmare chases more aggressively
+                    const maxAllowedDist = settings.isNightmareMode ? 3.5 : 1.8; // More chase in Nightmare
                     
-                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.8) {
+                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -1.0) {
                         type = 'LONG';
                         isValidEntry = true;
+                    } else {
+                        entryRejectReason = `Distance from EMA too high (${distanceFromEma.toFixed(2)}%)`;
                     }
+                } else {
+                    entryRejectReason = `RVOL too low for entry (${rvolLocal.toFixed(2)} < ${minRvol})`;
                 }
             } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT' && squeezePass) {
                 const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
                 if (rvolLocal >= minRvol) {
                     const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
-                    const maxAllowedDist = settings.isNightmareMode ? 3.0 : 1.8;
+                    const maxAllowedDist = settings.isNightmareMode ? 3.5 : 1.8;
                     
-                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -0.8) {
+                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -1.5) {
                         type = 'SHORT';
                         isValidEntry = true;
+                    } else {
+                        entryRejectReason = `Distance from EMA too high (${distanceFromEma.toFixed(2)}%)`;
                     }
+                } else {
+                    entryRejectReason = `RVOL too low for entry (${rvolLocal.toFixed(2)} < ${minRvol})`;
                 }
+            } else if (!squeezePass) {
+                entryRejectReason = 'Volatility Squeeze not triggered yet';
+            } else if (coin.trend === 'FLAT') {
+                entryRejectReason = 'Coin trend is FLAT';
+            } else {
+                entryRejectReason = 'EMA/Displacement Mismatch';
             }
 
             const RequiredRvol = sniper.getSettings().strictMinRvol ?? (settings.isNightmareMode ? 2.0 : 3.0);
@@ -449,10 +469,20 @@ export async function runTradeLoop() {
               
               // Allow the Sniper Engine to fire mathematically
               sniper.evaluateSignal(condition);
-            } else if (isValidEntry) {
-                // Only log if it WAS an entry candidate but failed a sub-filter
-                console.log(`[BEAST 🐺] ⚠️ Filtered out ${coin.symbol}: ${rejectReason || 'Low Score'}`);
+              
+              recentAnalyses.unshift({ symbol: coin.symbol, reason: 'ENTRY_EXECUTED', time: Date.now(), score: finalScore, type: finalType });
+            } else {
+                // VERY AGGRESSIVE LOGGING FOR TRANSPARENCY
+                if (coin.score >= 3) {
+                    const reason = !isValidEntry ? entryRejectReason : (!strictPass ? rejectReason : `Low Score (${coin.score} < ${RequiredScore})`);
+                    console.log(`[SCANNER 🔎] Analysed ${coin.symbol}: ${reason}`);
+                    
+                    recentAnalyses.unshift({ symbol: coin.symbol, reason, time: Date.now(), score: coin.score, type: isValidEntry ? type : 'NEUTRAL' });
+                }
             }
+            
+            // Keep only latest 30 analyses
+            if (recentAnalyses.length > 30) recentAnalyses = recentAnalyses.slice(0, 30);
 
           } catch (e: any) {
              if (e.response && (e.response.status === 429 || e.response.status === 418)) {
