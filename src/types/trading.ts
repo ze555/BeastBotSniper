@@ -113,4 +113,6 @@ export interface BotSettings {
   beastLearnRate?: number;              // سرعة التعلم من الخسائر وإعادة التعديل
   isNightmareMode?: boolean;            // 🔥 وضع الكابوس: استراتيجية هجومية شاملة ومنيعة
   marketPanicThreshold?: number;        // عتبة الذعر: إيقاف التداول عند هبوط عام (مثال 3% في 5 دقائق)
+  beastPyramiding?: boolean;            // نظام الافتراس المتتالي: إضافة كميات للصفقات الرابحة
+  beastVolatilitySqueeze?: boolean;     // فلتر الصمت قبل العاصفة: الدخول فقط عند ضغوط سعرية عالية
 }

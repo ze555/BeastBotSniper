@@ -242,6 +242,25 @@ export async function runTradeLoop() {
             for (let i = 1; i < htfCloses.length; i++) {
                 htfEma50 = (htfCloses[i] * k50) + (htfEma50 * (1 - k50));
             }
+            // 2. Bollinger Squeeze & Volatility Check (v4.0)
+            const computeSD = (data: number[]) => {
+                const mean = data.reduce((a, b) => a + b) / data.length;
+                return Math.sqrt(data.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / data.length);
+            };
+            const recentCloses = klines.slice(-20).map((k: any) => parseFloat(k[4]));
+            const sd20 = computeSD(recentCloses);
+            const bbWidth = (sd20 * 4) / computeEMA(recentCloses, 20) * 100; // Width in percentage
+            
+            // Calculate a benchmark for "squeeze" (min width over last 100 periods)
+            let minWidth = 100;
+            for (let i = 0; i < klines.length - 21; i++) {
+                const window = klines.slice(i, i + 20).map((k: any) => parseFloat(k[4]));
+                const wSd = computeSD(window);
+                const wWidth = (wSd * 4) / computeEMA(window, 20) * 100;
+                if (wWidth < minWidth) minWidth = wWidth;
+            }
+            const isSqueezed = bbWidth < minWidth * 1.5; // Breaking out of a tight range
+
             const currentPx = parseFloat(klines[klines.length - 1][4]);
             const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
 
@@ -334,19 +353,28 @@ export async function runTradeLoop() {
             let type: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
             let isValidEntry = false;
 
+            // V4.0 Squeeze Requirement
+            const squeezePass = settings.beastVolatilitySqueeze ? isSqueezed : true;
+
             // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
-            if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG') {
-                // Ensure we are not buying the absolute top by restricting distance from EMA9
-                const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
-                if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
-                   type = 'LONG';
-                   isValidEntry = true;
+            if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG' && squeezePass) {
+                // If it's a squeeze breakout, require even higher volume to confirm it's not a head-fake
+                const minRvol = isSqueezed ? 2.5 : 1.5;
+                if (rvolLocal >= minRvol) {
+                    const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
+                    if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
+                        type = 'LONG';
+                        isValidEntry = true;
+                    }
                 }
-            } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT') {
-                const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
-                if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
-                   type = 'SHORT';
-                   isValidEntry = true;
+            } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT' && squeezePass) {
+                const minRvol = isSqueezed ? 2.5 : 1.5;
+                if (rvolLocal >= minRvol) {
+                    const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
+                    if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
+                        type = 'SHORT';
+                        isValidEntry = true;
+                    }
                 }
             }
 

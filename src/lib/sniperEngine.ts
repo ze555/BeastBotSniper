@@ -232,13 +232,14 @@ export class SniperEngine {
 
     // 💀 NIGHTMARE SCALING: Kelly Criterion + Extreme Confidence
     if (this.settings.isNightmareMode && stats.totalTrades > 3) {
-        if (stats.winRate > 70) dynamicRiskPerc *= 2.0; // Double down on monster streaks
-        else if (stats.winRate > 55) dynamicRiskPerc *= 1.3;
+        if (stats.winRate > 70) dynamicRiskPerc *= 2.5; // Aggressive scale-up
+        else if (stats.winRate > 55) dynamicRiskPerc *= 1.5;
+        else if (stats.winRate < 25) dynamicRiskPerc *= 0.4; // Emergency brake (Nightmare shield)
         
         // Institutional Magnet Boost (Whale matching)
-        if (cond.takerBuySellRatio && ((cond.type === 'LONG' && cond.takerBuySellRatio > 2.2) || (cond.type === 'SHORT' && cond.takerBuySellRatio < 0.45))) {
-            dynamicRiskPerc *= 1.4;
-            console.log(`[NIGHTMARE 💀] INSTITUTIONAL MAGNET: Extreme Taker Pressure (${cond.takerBuySellRatio.toFixed(2)}) detected. Scaling risk for maximum predation.`);
+        if (cond.takerBuySellRatio && ((cond.type === 'LONG' && cond.takerBuySellRatio > 2.5) || (cond.type === 'SHORT' && cond.takerBuySellRatio < 0.4))) {
+            dynamicRiskPerc *= 1.8;
+            console.log(`[NIGHTMARE 💀] PREDATORY MAGNET: Extreme Whale pressure detected. Maximizing predation size.`);
         }
     }
 
@@ -514,13 +515,23 @@ export class SniperEngine {
           }
 
           // 💀 NIGHTMARE PARABOLIC SQUEEZE: Exponential tightening
-          if (this.settings.isNightmareMode && trade.pnlPerc! > 2.5) {
-              const squeeze = Math.max(0.05, dynamicTrailThreshold * (1 / (trade.pnlPerc! / 1.5)));
+          if (this.settings.isNightmareMode && trade.pnlPerc! > 2.0) {
+              const squeeze = Math.max(0.04, dynamicTrailThreshold * (1 / (trade.pnlPerc! / 1.2)));
               if (dropFromHighPerc >= squeeze) {
-                  console.log(`[NIGHTMARE 💀] PARABOLIC SQUEEZE TRIGGERED. Secured max profit on ${trade.symbol}: +${trade.pnlPerc?.toFixed(2)}%`);
+                  console.log(`[NIGHTMARE 💀] PARABOLIC SQUEEZE TRIGGERED. Dropped ${dropFromHighPerc.toFixed(3)}% from high. Secured +${trade.pnlPerc?.toFixed(2)}%`);
                   this.closeTrade(trade, currentPrice, '💀 NIGHTMARE_SQUEEZE');
                   return;
               }
+          }
+
+          // 🐋 BEAST PYRAMIDING (الافتراس المتتالي)
+          if (this.settings.beastPyramiding && trade.pnlPerc! > 1.5 && !trade.isBreakeven && isMomentumActive) {
+              // If momentum is still high and profit is good, double down half and lock breakeven
+              console.log(`[BEAST 🐺] 🥩 PYRAMIDING: Increasing position on ${trade.symbol} due to extreme momentum continuation.`);
+              trade.amount *= 1.5; // Scale up 50%
+              trade.isBreakeven = true; 
+              trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.005 : trade.entryPrice * 0.995;
+              updated = true;
           }
        }
 
