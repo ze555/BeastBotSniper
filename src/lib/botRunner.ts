@@ -243,13 +243,16 @@ export async function runTradeLoop() {
         if (botActive || true) { 
             // Add a small delay to radar to show intensive scanning
             if (recentAnalyses.length === 0 || Date.now() - recentAnalyses[0].time > 5000) {
-               recentAnalyses.unshift({ symbol: 'SYSTEM', reason: `Scanning ${targetsToCheck.length} high-value targets...`, time: Date.now(), score: 0, type: 'NEUTRAL' });
+               recentAnalyses.unshift({ symbol: 'RADAR 📡', reason: `[BEAST 🐺] Scanning ${targetsToCheck.length} institutional targets...`, time: Date.now(), score: 0, type: 'NEUTRAL' });
             }
         }
 
         for (const coin of targetsToCheck) {
           // Check if already in trade
           if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
+
+          // Add a small delay between coin analysis to respect rate limits
+          await sleep(200); 
 
           // Instead of fetching all prices again, just fetch the specific klines
           try {
@@ -408,10 +411,10 @@ export async function runTradeLoop() {
                         type = 'LONG';
                         isValidEntry = true;
                     } else {
-                        entryRejectReason = `Distance from EMA too high (${distanceFromEma.toFixed(2)}%)`;
+                        entryRejectReason = `Price chasing too far from EMA9 (${distanceFromEma.toFixed(2)}%)`;
                     }
                 } else {
-                    entryRejectReason = `RVOL too low for entry (${rvolLocal.toFixed(2)} < ${minRvol})`;
+                    entryRejectReason = `Momentum too weak (RVOL ${rvolLocal.toFixed(2)} < ${minRvol})`;
                 }
             } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT' && squeezePass) {
                 const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
@@ -423,10 +426,10 @@ export async function runTradeLoop() {
                         type = 'SHORT';
                         isValidEntry = true;
                     } else {
-                        entryRejectReason = `Distance from EMA too high (${distanceFromEma.toFixed(2)}%)`;
+                        entryRejectReason = `Price chasing too far from EMA9 (${distanceFromEma.toFixed(2)}%)`;
                     }
                 } else {
-                    entryRejectReason = `RVOL too low for entry (${rvolLocal.toFixed(2)} < ${minRvol})`;
+                    entryRejectReason = `Momentum too weak (RVOL ${rvolLocal.toFixed(2)} < ${minRvol})`;
                 }
             } else if (!squeezePass) {
                 entryRejectReason = 'Volatility Squeeze not triggered yet';
@@ -498,33 +501,38 @@ export async function runTradeLoop() {
               if (botActive) {
                 // Allow the Sniper Engine to fire mathematically
                 sniper.evaluateSignal(condition);
-                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'ENTRY_EXECUTED 🎯', time: Date.now(), score: finalScore, type: finalType });
+                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'ENTRY_EXECUTED 🐺🎯', time: Date.now(), score: finalScore, type: finalType });
               } else {
-                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'SIGNAL_READY (Bot Paused)', time: Date.now(), score: finalScore, type: finalType });
+                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'SIGNAL_READY (HUNTING PAUSED)', time: Date.now(), score: finalScore, type: finalType });
               }
             } else {
-                // VERY AGGRESSIVE LOGGING FOR TRANSPARENCY
-                const reason = !isValidEntry ? entryRejectReason : (!strictPass ? rejectReason : `Low Score (${coin.score} < ${RequiredScore})`);
+                const reason = !isValidEntry ? entryRejectReason : (!strictPass ? rejectReason : `Insufficient Beast Score (${coin.score.toFixed(1)} < ${RequiredScore})`);
                 
-                // Add to recent analyses even if rejected so user knows WHY
                 recentAnalyses.unshift({ 
                     symbol: coin.symbol, 
-                    reason: reason || 'Unknown rejection', 
+                    reason: `[BEAST 🐺] ⚠️ Rejected: ${reason || 'Sub-filter fail'}`, 
                     time: Date.now(), 
                     score: coin.score, 
                     type: (type && type !== 'NEUTRAL') ? type : 'NEUTRAL' 
                 });
             }
             
-            // Keep only latest 30 analyses
-            if (recentAnalyses.length > 30) recentAnalyses = recentAnalyses.slice(0, 30);
+            if (recentAnalyses.length > 40) recentAnalyses = recentAnalyses.slice(0, 40);
 
           } catch (e: any) {
+             const errorMsg = e.response ? `API Error (${e.response.status})` : (e.message || 'Unknown Error');
+             recentAnalyses.unshift({ 
+                symbol: coin.symbol, 
+                reason: `❌ Analysis Failed: ${errorMsg}`, 
+                time: Date.now(), 
+                score: 0, 
+                type: 'NEUTRAL' 
+             });
+             
              if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-               console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 15m. Pausing Loop...`);
-               await sleep(10000);
+               console.log(`[BOT RUNNER] ⚠️ Rate limit hit. Pausing Loop...`);
+               await sleep(15000);
              }
-            // Ignore API limit errors silently otherwise
           }
         }
       }

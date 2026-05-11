@@ -219,9 +219,9 @@ export default function App() {
                           بانتظار دورة الفحص القادمة...
                         </div>
                       ) : recentAnalyses.map((item, id) => (
-                        <div key={id} className={`p-2 rounded border border-transparent hover:border-slate-700 transition-colors flex items-center justify-between gap-3 ${item.reason === 'ENTRY_EXECUTED' ? 'bg-emerald-500/10' : 'bg-slate-900/40'}`}>
+                        <div key={id} className={`p-2 rounded border border-transparent hover:border-slate-700 transition-colors flex items-center justify-between gap-3 ${item.reason.includes('ENTRY_EXECUTED') ? 'bg-emerald-500/20 border-emerald-500/50' : item.reason.includes('❌') ? 'bg-rose-500/10' : 'bg-slate-900/40'}`}>
                            <div className="flex items-center gap-2">
-                             <div className={`w-1.5 h-1.5 rounded-full ${item.reason === 'ENTRY_EXECUTED' ? 'bg-emerald-500 animate-ping' : 'bg-slate-700'}`}></div>
+                             <div className={`w-1.5 h-1.5 rounded-full ${item.reason.includes('ENTRY_EXECUTED') ? 'bg-emerald-500 animate-ping' : item.reason.includes('❌') ? 'bg-rose-500' : 'bg-slate-700'}`}></div>
                              <span className="font-mono text-xs font-bold text-white leading-none">{item.symbol}</span>
                              {item.type !== 'NEUTRAL' && (
                                <span className={`text-[8px] font-black px-1 rounded ${item.type === 'LONG' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'}`}>
@@ -230,7 +230,7 @@ export default function App() {
                              )}
                            </div>
                            <div className="flex-1 text-right overflow-hidden">
-                             <span className={`text-[10px] truncate block ${item.reason === 'ENTRY_EXECUTED' ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+                             <span className={`text-[10px] block ${item.reason.includes('ENTRY_EXECUTED') ? 'text-emerald-400 font-bold' : item.reason.includes('⚠️') ? 'text-yellow-500/80' : item.reason.includes('❌') ? 'text-rose-400' : 'text-slate-500'}`}>
                                {item.reason}
                              </span>
                            </div>
