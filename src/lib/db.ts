@@ -64,6 +64,9 @@ export const initDB = () => {
           smartTrailingThresholdPerc REAL DEFAULT 0.3,
           smartMomentumStallMinutes REAL DEFAULT 2.5,
           useKineticEngine INTEGER DEFAULT 0,
+          kineticUseOpenInterest INTEGER DEFAULT 1,
+          kineticUseVolume INTEGER DEFAULT 1,
+          kineticSensitivty REAL DEFAULT 1.0,
           beastMode INTEGER DEFAULT 0,
           strategyAdxThreshold REAL DEFAULT 25,
           strategyAtrMultiplier REAL DEFAULT 1.5,
@@ -87,6 +90,9 @@ export const initDB = () => {
         "smartTrailingThresholdPerc REAL DEFAULT 0.3",
         "smartMomentumStallMinutes REAL DEFAULT 2.5",
         "useKineticEngine INTEGER DEFAULT 0",
+        "kineticUseOpenInterest INTEGER DEFAULT 1",
+        "kineticUseVolume INTEGER DEFAULT 1",
+        "kineticSensitivty REAL DEFAULT 1.0",
         "beastMode INTEGER DEFAULT 0",
         "strictMinVolume REAL DEFAULT 5000000",
         "strictMinRvol REAL DEFAULT 3.0",
@@ -190,29 +196,24 @@ export function loadActiveTrades(): Promise<Trade[]> {
 export function saveSettingsToDB(settings: any) {
   db.run(`
     INSERT INTO settings (
-      id, portfolioSize, riskPerTradePerc, maxConcurrentTrades, strictMode, useSmartExit,
-      useSmartControl, smartTpUsd, smartTrailingStartUsd, smartTimeDecayMinutes, smartTrailingThresholdPerc, smartMomentumStallMinutes,
-      useKineticEngine, beastMode,
+      id, portfolioSize, riskPerTradePerc, maxConcurrentTrades, leverage, strictMode,
       strictMinVolume, strictMinRvol, strictMaxRisk, strictMinScore,
-      kineticUseOpenInterest, kineticUseVolume, kineticSensitivty,
+      strictBtcAlignment, strictRsiFilter, strictRetest, strictFastBreakevenPerc,
+      strictRsiHigh, strictRsiLow, strictRetestPullbackPerc, strictBreakoutDistancePerc,
+      useSmartExit, useSmartControl, smartTpUsd, smartTrailingStartUsd, smartTimeDecayMinutes, 
+      smartTrailingThresholdPerc, smartMomentumStallMinutes,
+      useKineticEngine, kineticUseOpenInterest, kineticUseVolume, kineticSensitivty, 
+      beastMode,
       strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
       useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
       maxConcurrentTrades=excluded.maxConcurrentTrades,
+      leverage=excluded.leverage,
       strictMode=excluded.strictMode,
-      useSmartExit=excluded.useSmartExit,
-      useSmartControl=excluded.useSmartControl,
-      smartTpUsd=excluded.smartTpUsd,
-      smartTrailingStartUsd=excluded.smartTrailingStartUsd,
-      smartTimeDecayMinutes=excluded.smartTimeDecayMinutes,
-      smartTrailingThresholdPerc=excluded.smartTrailingThresholdPerc,
-      smartMomentumStallMinutes=excluded.smartMomentumStallMinutes,
-      useKineticEngine=excluded.useKineticEngine,
-      beastMode=excluded.beastMode,
       strictMinVolume=excluded.strictMinVolume,
       strictMinRvol=excluded.strictMinRvol,
       strictMaxRisk=excluded.strictMaxRisk,
@@ -221,11 +222,22 @@ export function saveSettingsToDB(settings: any) {
       strictRsiFilter=excluded.strictRsiFilter,
       strictRetest=excluded.strictRetest,
       strictFastBreakevenPerc=excluded.strictFastBreakevenPerc,
-      leverage=excluded.leverage,
       strictRsiHigh=excluded.strictRsiHigh,
       strictRsiLow=excluded.strictRsiLow,
       strictRetestPullbackPerc=excluded.strictRetestPullbackPerc,
       strictBreakoutDistancePerc=excluded.strictBreakoutDistancePerc,
+      useSmartExit=excluded.useSmartExit,
+      useSmartControl=excluded.useSmartControl,
+      smartTpUsd=excluded.smartTpUsd,
+      smartTrailingStartUsd=excluded.smartTrailingStartUsd,
+      smartTimeDecayMinutes=excluded.smartTimeDecayMinutes,
+      smartTrailingThresholdPerc=excluded.smartTrailingThresholdPerc,
+      smartMomentumStallMinutes=excluded.smartMomentumStallMinutes,
+      useKineticEngine=excluded.useKineticEngine,
+      kineticUseOpenInterest=excluded.kineticUseOpenInterest,
+      kineticUseVolume=excluded.kineticUseVolume,
+      kineticSensitivty=excluded.kineticSensitivty,
+      beastMode=excluded.beastMode,
       strategyAdxThreshold=excluded.strategyAdxThreshold,
       strategyAtrMultiplier=excluded.strategyAtrMultiplier,
       strategyMinConfidence=excluded.strategyMinConfidence,
@@ -235,33 +247,19 @@ export function saveSettingsToDB(settings: any) {
       useStrategyConfidenceGate=excluded.useStrategyConfidenceGate,
       useStrategyMomentumRule=excluded.useStrategyMomentumRule
   `, [
-    settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.strictMode ? 1 : 0, settings.useSmartExit ? 1 : 0,
-    settings.useSmartControl ? 1 : 0, settings.smartTpUsd ?? 1.0, settings.smartTrailingStartUsd ?? 0.4, settings.smartTimeDecayMinutes ?? 5,
+    settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.strictMode ? 1 : 0,
+    settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
+    settings.strictBtcAlignment ? 1 : 0, settings.strictRsiFilter ? 1 : 0, settings.strictRetest ? 1 : 0, settings.strictFastBreakevenPerc ?? 0.75,
+    settings.strictRsiHigh ?? 75, settings.strictRsiLow ?? 25, settings.strictRetestPullbackPerc ?? 3.0, settings.strictBreakoutDistancePerc ?? 0.5,
+    settings.useSmartExit ? 1 : 0, settings.useSmartControl ? 1 : 0, settings.smartTpUsd ?? 1.0, settings.smartTrailingStartUsd ?? 0.4, settings.smartTimeDecayMinutes ?? 5,
     settings.smartTrailingThresholdPerc ?? 0.3, settings.smartMomentumStallMinutes ?? 2.5,
-    settings.useKineticEngine ? 1 : 0,
+    settings.useKineticEngine ? 1 : 0, settings.kineticUseOpenInterest ? 1 : 0, settings.kineticUseVolume ? 1 : 0, settings.kineticSensitivty ?? 1.0,
     settings.beastMode ? 1 : 0,
-    settings.strictMinVolume ?? 5000000, 
-    settings.strictMinRvol ?? 3.0, 
-    settings.strictMaxRisk ?? 1.0, 
-    settings.strictMinScore ?? 6,
-    settings.strictBtcAlignment ? 1 : 0, 
-    settings.strictRsiFilter ? 1 : 0, 
-    settings.strictRetest ? 1 : 0, 
-    settings.strictFastBreakevenPerc ?? 0.75,
-    settings.leverage ?? 10,
-    settings.strictRsiHigh ?? 75,
-    settings.strictRsiLow ?? 25,
-    settings.strictRetestPullbackPerc ?? 3.0,
-    settings.strictBreakoutDistancePerc ?? 0.5,
-    settings.strategyAdxThreshold ?? 25,
-    settings.strategyAtrMultiplier ?? 1.5,
-    settings.strategyMinConfidence ?? 0.6,
-    settings.strategyRvolThreshold ?? 1.5,
-    settings.useStrategyTrendFilter ? 1 : 0,
-    settings.useStrategyVolatilityRule ? 1 : 0,
-    settings.useStrategyConfidenceGate ? 1 : 0,
-    settings.useStrategyMomentumRule ? 1 : 0
-  ]);
+    settings.strategyAdxThreshold ?? 25, settings.strategyAtrMultiplier ?? 1.5, settings.strategyMinConfidence ?? 0.6, settings.strategyRvolThreshold ?? 1.5,
+    settings.useStrategyTrendFilter ? 1 : 0, settings.useStrategyVolatilityRule ? 1 : 0, settings.useStrategyConfidenceGate ? 1 : 0, settings.useStrategyMomentumRule ? 1 : 0
+  ], (err) => {
+    if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
+  });
 }
 
 export function loadSettingsFromDB(): Promise<any> {
@@ -277,6 +275,8 @@ export function loadSettingsFromDB(): Promise<any> {
         row.strictBtcAlignment = row.strictBtcAlignment === 1;
         row.strictRsiFilter = row.strictRsiFilter === 1;
         row.strictRetest = row.strictRetest === 1;
+        row.kineticUseOpenInterest = row.kineticUseOpenInterest === 1;
+        row.kineticUseVolume = row.kineticUseVolume === 1;
         row.useStrategyTrendFilter = row.useStrategyTrendFilter !== 0; // Default to true if not 0
         row.useStrategyVolatilityRule = row.useStrategyVolatilityRule !== 0;
         row.useStrategyConfidenceGate = row.useStrategyConfidenceGate !== 0;
