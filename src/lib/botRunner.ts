@@ -6,43 +6,8 @@ import { MarketCondition } from '../types/trading.js';
 const BINANCE_FAPI = 'https://fapi.binance.com';
 let isRunning = false;
 let botActive = false; // State to control if hunting is active
-let recentAnalyses: { symbol: string, reason: string, time: number, score: number, type: string }[] = [];
-
-let loopStarted = false;
-
-export async function forceScan() {
-    if (isRunning) return { status: 'already_running' };
-    console.log('[BOT RUNNER] ⚡ Manual Scan Triggered...');
-    // We don't call runTradeLoop here because it's already running as an interval.
-    // Instead, we just let the next tick handle it, or we could trigger a one-off.
-    // For now, let's keep it simple and ensure the interval is active.
-    if (!loopStarted) {
-        runTradeLoop();
-    }
-    return { status: 'triggered' };
-}
-
-export function getRecentAnalyses() {
-    return recentAnalyses;
-}
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-const computeEMA = (data: number[], period: number) => {
-  if (data.length === 0) return 0;
-  let k = 2 / (period + 1);
-  let ema = data[0];
-  for (let i = 1; i < data.length; i++) {
-    ema = data[i] * k + ema * (1 - k);
-  }
-  return ema;
-};
-
-const computeSD = (data: number[]) => {
-  if (data.length === 0) return 0;
-  const mean = data.reduce((a, b) => a + b) / data.length;
-  return Math.sqrt(data.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / data.length);
-};
 
 export function setBotActive(state: boolean) {
   botActive = state;
@@ -54,10 +19,7 @@ export function isBotActive(): boolean {
 }
 
 export async function runTradeLoop() {
-  if (loopStarted) return;
-  loopStarted = true;
-
-  const tick = async () => {
+  setInterval(async () => {
     if (isRunning) return;
     isRunning = true;
 
@@ -73,7 +35,7 @@ export async function runTradeLoop() {
               const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
               const tickers = res.data as any[];
               const drops = tickers.filter(t => parseFloat(t.priceChangePercent) < -settings.marketPanicThreshold!).length;
-              if (drops > 150) { // Increased threshold to 150 for more flexibility
+              if (drops > 100) { // If >100 coins are in severe drop
                   isGlobalPanic = true;
                   console.warn(`[NIGHTMARE 💀] MARKET PANIC DETECTED! ${drops} symbols in freefall. Pausing new entries.`);
               }
@@ -229,18 +191,10 @@ export async function runTradeLoop() {
          return;
       }
 
-      const watchlistData = getWatchlist();
-      const watchlist = watchlistData.coins;
+      const watchlist = getWatchlist();
       const maxTrades = sniper.getSettings().maxConcurrentTrades;
       const isStrict = sniper.getSettings().strictMode;
 
-      // 1.5 Update Radar with Scan Heartbeat if empty
-      if (watchlist.length === 0) {
-          if (recentAnalyses.length === 0 || Date.now() - recentAnalyses[0].time > 10000) {
-            recentAnalyses.unshift({ symbol: 'SCANNER', reason: 'Searching for Golden Targets...', time: Date.now(), score: 0, type: 'NEUTRAL' });
-          }
-      }
-      
       // Check BTC trend for strict mode (Filter 3: BTC Trend Filter)
       let btcTrend = 'FLAT';
       if (isStrict && botActive) {
@@ -252,23 +206,13 @@ export async function runTradeLoop() {
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
       if (activeTrades.length < maxTrades && watchlist.length > 0) {
-        // Increase search intensity in Beast/Nightmare Mode
-        const scanCount = settings.isNightmareMode ? 25 : (sniper.getSettings().beastMode ? 15 : 8);
-        const targetsToCheck = [...watchlist].sort((a, b) => b.score - a.score).slice(0, scanCount);
-        
-        if (botActive || true) { 
-            // Add a small delay to radar to show intensive scanning
-            if (recentAnalyses.length === 0 || Date.now() - recentAnalyses[0].time > 5000) {
-               recentAnalyses.unshift({ symbol: 'RADAR 📡', reason: `[BEAST 🐺] Scanning ${targetsToCheck.length} institutional targets...`, time: Date.now(), score: 0, type: 'NEUTRAL' });
-            }
-        }
+        // Increase search intensity in Beast Mode
+        const scanCount = sniper.getSettings().beastMode ? 15 : 8;
+        const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
         for (const coin of targetsToCheck) {
           // Check if already in trade
           if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
-
-          // Add a small delay between coin analysis to respect rate limits
-          await sleep(200); 
 
           // Instead of fetching all prices again, just fetch the specific klines
           try {
@@ -298,23 +242,6 @@ export async function runTradeLoop() {
             for (let i = 1; i < htfCloses.length; i++) {
                 htfEma50 = (htfCloses[i] * k50) + (htfEma50 * (1 - k50));
             }
-            // 2. Bollinger Squeeze & Volatility Check (v4.1)
-            const recentCloses = klines.slice(-20).map((k: any) => parseFloat(k[4]));
-            const sd20 = computeSD(recentCloses);
-            const bbWidth = (sd20 * 4) / computeEMA(recentCloses, 20) * 100; 
-            
-            let minWidth = 100;
-            for (let i = 0; i < klines.length - 21; i++) {
-                const window = klines.slice(i, i + 20).map((k: any) => parseFloat(k[4]));
-                const wSd = computeSD(window);
-                const wWidth = (wSd * 4) / computeEMA(window, 20) * 100;
-                if (wWidth < minWidth) minWidth = wWidth;
-            }
-            // A Squeeze is active if current width is tight. 
-            // V4.2: Breakout detection is now faster (1.5x expansion).
-            const isSqueezed = bbWidth < minWidth * 1.5;
-            const isExpanding = bbWidth > minWidth * 1.5 && coin.rvol > 1.8;
-
             const currentPx = parseFloat(klines[klines.length - 1][4]);
             const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
 
@@ -373,6 +300,15 @@ export async function runTradeLoop() {
             }
 
             // --- INSTITUTIONAL ENTRY LOGIC (EMA + MACD + Volume Displacement) ---
+            const computeEMA = (data: number[], period: number) => {
+               let k = 2 / (period + 1);
+               let ema = data[0];
+               for (let i = 1; i < data.length; i++) {
+                 ema = data[i] * k + ema * (1 - k);
+               }
+               return ema;
+            };
+
             const closes = klines.map((k: any) => parseFloat(k[4]));
             const ema9 = computeEMA(closes, 9);
             const ema21 = computeEMA(closes, 21);
@@ -398,75 +334,72 @@ export async function runTradeLoop() {
             let type: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
             let isValidEntry = false;
 
-            // V4.2 Squeeze/Expansion Requirement
-            const squeezePass = settings.beastVolatilitySqueeze ? (isSqueezed || isExpanding) : true;
-            let entryRejectReason = '';
-
             // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
-            if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG' && squeezePass) {
-                // If it's a squeeze/expansion breakout, require enough volume to confirm
-                const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
-                if (rvolLocal >= minRvol) {
-                    const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
-                    const maxAllowedDist = settings.isNightmareMode ? 3.5 : 1.8; // More chase in Nightmare
-                    
-                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -1.0) {
-                        type = 'LONG';
-                        isValidEntry = true;
-                    } else {
-                        entryRejectReason = `Price chasing too far from EMA9 (${distanceFromEma.toFixed(2)}%)`;
-                    }
-                } else {
-                    entryRejectReason = `Momentum too weak (RVOL ${rvolLocal.toFixed(2)} < ${minRvol})`;
+            if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG') {
+                // Ensure we are not buying the absolute top by restricting distance from EMA9
+                const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
+                if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
+                   type = 'LONG';
+                   isValidEntry = true;
                 }
-            } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT' && squeezePass) {
-                const minRvol = (isSqueezed || isExpanding) ? 1.8 : 1.2;
-                if (rvolLocal >= minRvol) {
-                    const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
-                    const maxAllowedDist = settings.isNightmareMode ? 3.5 : 1.8;
-                    
-                    if (distanceFromEma <= maxAllowedDist && distanceFromEma >= -1.5) {
-                        type = 'SHORT';
-                        isValidEntry = true;
-                    } else {
-                        entryRejectReason = `Price chasing too far from EMA9 (${distanceFromEma.toFixed(2)}%)`;
-                    }
-                } else {
-                    entryRejectReason = `Momentum too weak (RVOL ${rvolLocal.toFixed(2)} < ${minRvol})`;
+            } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT') {
+                const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
+                if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
+                   type = 'SHORT';
+                   isValidEntry = true;
                 }
-            } else if (!squeezePass) {
-                entryRejectReason = 'Volatility Squeeze not triggered yet';
-            } else if (coin.trend === 'FLAT') {
-                entryRejectReason = 'Coin trend is FLAT';
-            } else {
-                entryRejectReason = 'EMA/Displacement Mismatch';
             }
 
-            const RequiredRvol = sniper.getSettings().strictMinRvol ?? (settings.isNightmareMode ? 1.5 : 3.0);
+            const RequiredRvol = sniper.getSettings().strictMinRvol ?? 3.0;
+            // 🚀 BEAST UPGRADE: Relax score if HTF Trend is aligned, but be stricter if against it.
             let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
             if (htfTrend === type && type !== 'NEUTRAL') {
-                RequiredScore = Math.max(settings.isNightmareMode ? 3 : 4, RequiredScore - (settings.isNightmareMode ? 2 : 1)); 
+                RequiredScore = Math.max(4, RequiredScore - 1); // Confluence bonus!
             }
 
             const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;
             const UseRsi = isStrict ? (sniper.getSettings().strictRsiFilter !== false) : false;
 
             let strictPass = true;
-            let rejectReason = '';
             
-            if (isLiquidityVoid) { strictPass = false; rejectReason = 'Liquidity Void (Ghost Move)'; }
-            if (!spreadPass) { strictPass = false; rejectReason = `High Spread (${spreadPerc.toFixed(2)}%)`; }
+            // Block Liquidity Voids or High Spread (Ghost moves are dangerous)
+            if (isLiquidityVoid || !spreadPass) strictPass = false;
 
+            // NEW: Anti-Whale Funding Filter
+            // If funding is extremely positive (> 0.05%), buying is expensive. If extremely negative (< -0.05%), selling is expensive.
             if (isStrict) {
-                if (type === 'LONG' && fundingRate > 0.05) { strictPass = false; rejectReason = 'High Funding (Expensive Long)'; }
-                if (type === 'SHORT' && fundingRate < -0.05) { strictPass = false; rejectReason = 'Negative Funding (Expensive Short)'; }
+                if (type === 'LONG' && fundingRate > 0.05) strictPass = false;
+                if (type === 'SHORT' && fundingRate < -0.05) strictPass = false;
             }
 
-            if (isStrict && isValidEntry && strictPass) {
-                if (coin.rvol < RequiredRvol) { strictPass = false; rejectReason = `Low RVOL (${coin.rvol.toFixed(1)} < ${RequiredRvol})`; }
+            if (isStrict && isValidEntry) {
+                // Filter 1: Strict Volume (RVOL >= dynamic)
+                if (coin.rvol < RequiredRvol) strictPass = false;
+
+                // Filter 3: BTC Align (if enabled)
                 if (UseBTC) {
-                    if (type === 'LONG' && btcTrend !== 'LONG') { strictPass = false; rejectReason = 'BTC Trend Mismatch'; }
-                    if (type === 'SHORT' && btcTrend !== 'SHORT') { strictPass = false; rejectReason = 'BTC Trend Mismatch'; }
+                    if (type === 'LONG' && btcTrend !== 'LONG') strictPass = false;
+                    if (type === 'SHORT' && btcTrend !== 'SHORT') strictPass = false;
+                }
+
+                // Filter 5: Overbought/Oversold Rejection (RSI Filter - if enabled)
+                if (UseRsi) {
+                    let gains = 0, losses = 0;
+                    for (let i = klines.length - 15; i < klines.length - 1; i++) {
+                       if (i <= 0) continue;
+                       const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
+                       if (change > 0) gains += change;
+                       else losses -= change;
+                    }
+                    const avgGain = gains / 14;
+                    const avgLoss = losses / 14;
+                    const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+
+                    const rsiHi = sniper.getSettings().strictRsiHigh ?? 75;
+                    const rsiLo = sniper.getSettings().strictRsiLow ?? 25;
+
+                    if (type === 'LONG' && rsi > rsiHi) strictPass = false; // Overbought Reject
+                    if (type === 'SHORT' && rsi < rsiLo) strictPass = false; // Oversold Reject
                 }
             }
 
@@ -501,41 +434,16 @@ export async function runTradeLoop() {
                 takerBuySellRatio: takerRatio
               };
               
-              if (botActive) {
-                // Allow the Sniper Engine to fire mathematically
-                sniper.evaluateSignal(condition);
-                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'ENTRY_EXECUTED 🐺🎯', time: Date.now(), score: finalScore, type: finalType });
-              } else {
-                recentAnalyses.unshift({ symbol: coin.symbol, reason: 'SIGNAL_READY (HUNTING PAUSED)', time: Date.now(), score: finalScore, type: finalType });
-              }
-            } else {
-                const reason = !isValidEntry ? entryRejectReason : (!strictPass ? rejectReason : `Insufficient Beast Score (${coin.score.toFixed(1)} < ${RequiredScore})`);
-                
-                recentAnalyses.unshift({ 
-                    symbol: coin.symbol, 
-                    reason: `[BEAST 🐺] ⚠️ Rejected: ${reason || 'Sub-filter fail'}`, 
-                    time: Date.now(), 
-                    score: coin.score, 
-                    type: (type && type !== 'NEUTRAL') ? type : 'NEUTRAL' 
-                });
+              // Allow the Sniper Engine to fire mathematically
+              sniper.evaluateSignal(condition);
             }
-            
-            if (recentAnalyses.length > 40) recentAnalyses = recentAnalyses.slice(0, 40);
 
           } catch (e: any) {
-             const errorMsg = e.response ? `API Error (${e.response.status})` : (e.message || 'Unknown Error');
-             recentAnalyses.unshift({ 
-                symbol: coin.symbol, 
-                reason: `❌ Analysis Failed: ${errorMsg}`, 
-                time: Date.now(), 
-                score: 0, 
-                type: 'NEUTRAL' 
-             });
-             
              if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-               console.log(`[BOT RUNNER] ⚠️ Rate limit hit. Pausing Loop...`);
-               await sleep(15000);
+               console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 15m. Pausing Loop...`);
+               await sleep(10000);
              }
+            // Ignore API limit errors silently otherwise
           }
         }
       }
@@ -544,9 +452,5 @@ export async function runTradeLoop() {
     } finally {
       isRunning = false;
     }
-  };
-
-  // Run immediately then set interval
-  tick();
-  setInterval(tick, 3000); 
+  }, 3000); // Poll every 3s for tracking active trades and scanning targets
 }

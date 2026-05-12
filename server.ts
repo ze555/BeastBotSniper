@@ -4,7 +4,7 @@ import path from "path";
 import AdmZip from "adm-zip";
 import fs from "fs";
 import { runBinanceScanner, getWatchlist } from "./src/lib/binanceScanner.js";
-import { runTradeLoop, setBotActive, isBotActive, getRecentAnalyses, forceScan } from "./src/lib/botRunner.js";
+import { runTradeLoop, setBotActive, isBotActive } from "./src/lib/botRunner.js";
 import { sniper } from "./src/lib/sniperEngine.js";
 
 // __dirname is natively available in CommonJS. Since this file is compiled to CommonJS via esbuild, we don't need fileURLToPath.
@@ -17,8 +17,9 @@ async function startServer() {
   app.use(express.json());
 
   // Background Tasks
-  // Run scanner immediately on boot (library handles its own loop now)
+  // Run scanner immediately on boot, then every 1 hour
   runBinanceScanner();
+  setInterval(runBinanceScanner, 15 * 60 * 1000); // 15 minutes
   
   // Start the tick-by-tick sniper evaluation loop
   runTradeLoop();
@@ -48,19 +49,10 @@ async function startServer() {
     res.json({ active: isBotActive() });
   });
 
-  app.get("/api/bot/analyses", (req, res) => {
-    res.json(getRecentAnalyses());
-  });
-
   app.post("/api/bot/toggle", (req, res) => {
     const currentState = isBotActive();
     setBotActive(!currentState);
     res.json({ active: isBotActive() });
-  });
-
-  app.post("/api/bot/scan", async (req, res) => {
-    const result = await forceScan();
-    res.json(result);
   });
 
   app.get("/api/settings", (req, res) => {

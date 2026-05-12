@@ -8,7 +8,6 @@ export default function App() {
   const [historyTrades, setHistoryTrades] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalPnl: 0, winRate: 0, openCount: 0, totalTrades: 0 });
   const [botActive, setBotActive] = useState(false);
-  const [recentAnalyses, setRecentAnalyses] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState({ portfolioSize: 1000, riskPerTradePerc: 1, maxConcurrentTrades: 3 });
   const [savingSettings, setSavingSettings] = useState(false);
@@ -19,7 +18,7 @@ export default function App() {
     fetchSettings(); // initial settings Load
     const interval = setInterval(() => {
       fetchData();
-    }, 2000); // UI poll every 2s for radar feel
+    }, 5000); // UI poll every 5s
 
     return () => clearInterval(interval);
   }, []);
@@ -47,31 +46,25 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [wlRes, activeRes, histRes, statsRes, statusRes, analysesRes] = await Promise.all([
+      const [wlRes, activeRes, histRes, statsRes, statusRes] = await Promise.all([
         fetch('/api/scanner/watchlist'),
         fetch('/api/trades/active'),
         fetch('/api/trades/history'),
         fetch('/api/stats'),
-        fetch('/api/bot/status'),
-        fetch('/api/bot/analyses')
+        fetch('/api/bot/status')
       ]);
-      const wlData = await wlRes.json();
-      setWatchlist(wlData.coins || []);
+      setWatchlist(await wlRes.json());
       setActiveTrades(await activeRes.json());
       setHistoryTrades(await histRes.json());
       setStats(await statsRes.json());
       const statusData = await statusRes.json();
       setBotActive(statusData.active);
-      setRecentAnalyses(await analysesRes.json());
     } catch(e) { }
   }
 
   const manualRefreshScanner = async () => {
     setLoading(true);
-    try {
-      await fetch('/api/bot/scan', { method: 'POST' });
-      await fetchData();
-    } catch(e) {}
+    await fetchData();
     setLoading(false);
   }
 
@@ -192,8 +185,8 @@ export default function App() {
                            </div>
                            
                            <div className="mt-4 pt-4 border-t border-slate-800 grid grid-cols-2 gap-2 text-xs text-slate-400">
-                               <div>وقف الخسارة: <span className="font-mono text-slate-200 block">{parseFloat(t.sl).toFixed(4)}</span></div>
-                               <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
+                              <div>وقف الخسارة: <span className="font-mono text-slate-200 block">{parseFloat(t.sl).toFixed(4)}</span></div>
+                              <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
                            </div>
                         </div>
                       ))}
@@ -202,98 +195,64 @@ export default function App() {
                 </div>
               )}
 
-              {/* NEW: Live Radar & Watchlist Section */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Left Column: Analyses Radar */}
-                  <div className="lg:col-span-1 rounded-xl bg-slate-800/80 border border-slate-700/50 flex flex-col h-[500px]">
-                    <div className="p-4 border-b border-slate-700/50 flex items-center justify-between bg-black/20">
-                      <h3 className="text-sm font-bold flex items-center gap-2 text-emerald-400">
-                        <Activity className="w-4 h-4" />
-                        رادار الفحص الحي (Live Radar)
-                      </h3>
-                      <span className="text-[10px] text-slate-500 font-mono text-left">Real-time</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                      {recentAnalyses.length === 0 ? (
-                        <div className="h-full flex items-center justify-center text-slate-600 text-xs text-center p-8">
-                          بانتظار دورة الفحص القادمة...
-                        </div>
-                      ) : recentAnalyses.map((item, id) => (
-                        <div key={id} className={`p-2 rounded border border-transparent hover:border-slate-700 transition-colors flex items-center justify-between gap-3 ${item.reason.includes('ENTRY_EXECUTED') ? 'bg-emerald-500/20 border-emerald-500/50' : item.reason.includes('❌') ? 'bg-rose-500/10' : 'bg-slate-900/40'}`}>
-                           <div className="flex items-center gap-2">
-                             <div className={`w-1.5 h-1.5 rounded-full ${item.reason.includes('ENTRY_EXECUTED') ? 'bg-emerald-500 animate-ping' : item.reason.includes('❌') ? 'bg-rose-500' : 'bg-slate-700'}`}></div>
-                             <span className="font-mono text-xs font-bold text-white leading-none">{item.symbol}</span>
-                             {item.type !== 'NEUTRAL' && (
-                               <span className={`text-[8px] font-black px-1 rounded ${item.type === 'LONG' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'}`}>
-                                 {item.type}
-                               </span>
-                             )}
-                           </div>
-                           <div className="flex-1 text-right overflow-hidden">
-                             <span className={`text-[10px] block ${item.reason.includes('ENTRY_EXECUTED') ? 'text-emerald-400 font-bold' : item.reason.includes('⚠️') ? 'text-yellow-500/80' : item.reason.includes('❌') ? 'text-rose-400' : 'text-slate-500'}`}>
-                               {item.reason}
-                             </span>
-                           </div>
-                           <div className="text-[9px] font-mono text-slate-600">
-                              {new Date(item.time).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Right Column: Watchlist */}
-                  <div className="lg:col-span-2 rounded-xl bg-slate-800/80 border border-slate-700/50 overflow-hidden">
-                    <div className="p-4 border-b border-slate-700/50 flex justify-between items-center bg-black/20">
-                      <h3 className="text-sm font-bold flex items-center gap-2 text-emerald-400">
-                        <Target className="w-4 h-4" />
-                        المرشحين الأعلى تقييماً (Watchlist)
-                      </h3>
-                      <button onClick={manualRefreshScanner} disabled={loading} className="p-1 px-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors flex items-center gap-2 text-[10px] font-medium font-mono text-left">
-                        REFRESH
-                      </button>
-                    </div>
-                    
-                    <div className="overflow-x-auto h-[444px]">
-                      <table className="w-full text-right text-xs">
-                         <thead className="bg-slate-900/50 text-slate-500 sticky top-0 uppercase tracking-wider font-bold">
-                          <tr>
-                            <th className="px-5 py-3 border-b border-slate-700/50">العملة</th>
-                            <th className="px-5 py-3 border-b border-slate-700/50">التقييم</th>
-                            <th className="px-5 py-3 border-b border-slate-700/50">الاتجاه</th>
-                            <th className="px-5 py-3 border-b border-slate-700/50">RVOL</th>
-                            <th className="px-5 py-3 border-b border-slate-700/50">الفحص</th>
-                          </tr>
-                         </thead>
-                         <tbody className="divide-y divide-slate-700/30">
-                            {watchlist.map((coin, i) => (
-                               <tr key={i} className="hover:bg-slate-700/20 transition-colors border-b border-slate-700/10">
-                                  <td className="px-5 py-3 font-bold font-mono text-white text-sm">{coin.symbol}</td>
-                                  <td className="px-5 py-3">
-                                    <span className={`px-2 py-0.5 rounded inline-flex items-center gap-1 font-bold ${coin.score >= 5 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-500'}`}>
-                                      {coin.score}/5
-                                    </span>
-                                  </td>
-                                  <td className="px-5 py-3 font-bold truncate">
-                                    <span className={`flex items-center gap-1 ${coin.trend === 'LONG' ? 'text-emerald-400' : coin.trend === 'SHORT' ? 'text-rose-400' : 'text-slate-500'}`}>
-                                      {coin.trend === 'LONG' ? <TrendingUp className="w-3 h-3"/> : coin.trend === 'SHORT' ? <TrendingDown className="w-3 h-3" /> : null}
-                                      {coin.trend}
-                                    </span>
-                                  </td>
-                                  <td className="px-5 py-3 font-mono text-slate-300 font-bold">{coin.rvol.toFixed(2)}x</td>
-                                  <td className="px-5 py-3">
-                                    <div className="flex gap-1">
-                                      <CheckBadge active={coin.checks.oiPass} label="OI" />
-                                      <CheckBadge active={coin.checks.rvolPass} label="RV" />
-                                      <CheckBadge active={coin.checks.spreadPass} label="SP" />
-                                    </div>
-                                  </td>
-                               </tr>
-                            ))}
-                         </tbody>
-                      </table>
-                    </div>
-                  </div>
+              {/* Watchlist Table */}
+              <div className="mt-8 rounded-xl bg-slate-800/50 border border-slate-700/50 overflow-hidden">
+                <div className="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/80">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Target className="w-5 h-5 text-emerald-400" />
+                    قائمة المراقبة الذهبية (يتحدث تلقائياً)
+                  </h3>
+                  <button onClick={manualRefreshScanner} disabled={loading} className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors flex items-center gap-2 text-sm font-medium">
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    تحديث
+                  </button>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-sm">
+                     <thead className="bg-slate-800/30 text-slate-400">
+                      <tr>
+                        <th className="px-5 py-3 font-medium">العملة</th>
+                        <th className="px-5 py-3 font-medium">التقييم</th>
+                        <th className="px-5 py-3 font-medium">الاتجاه</th>
+                        <th className="px-5 py-3 font-medium">RVOL</th>
+                        <th className="px-5 py-3 font-medium">التذبذب</th>
+                        <th className="px-5 py-3 font-medium">حالة الفحوصات</th>
+                      </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-700/50">
+                        {watchlist.length === 0 && !loading && (
+                           <tr>
+                             <td colSpan={6} className="py-8 text-center text-slate-500">جاري مسح الأسواق أو لا توجد عملات استوفت الشروط...</td>
+                           </tr>
+                        )}
+                        {watchlist.map((coin, i) => (
+                           <tr key={i} className="hover:bg-slate-700/20 transition-colors">
+                              <td className="px-5 py-4 font-bold font-mono text-emerald-400">{coin.symbol}</td>
+                              <td className="px-5 py-4">
+                                <span className={`px-2 py-1 rounded inline-flex items-center gap-1 font-bold ${coin.score >= 5 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-yellow-500/10 text-yellow-500'}`}>
+                                  {coin.score}/5
+                                  {coin.score >= 5 && <span className="text-xs">🔥</span>}
+                                </span>
+                              </td>
+                              <td className="px-5 py-4 text-slate-300 flex items-center gap-2 mt-2">
+                                {coin.trend === 'LONG' ? <TrendingUp className="w-4 h-4 text-emerald-400"/> : coin.trend === 'SHORT' ? <TrendingDown className="w-4 h-4 text-rose-400" /> : '-'}
+                                {coin.trend}
+                              </td>
+                              <td className="px-5 py-4 font-mono text-slate-300">{coin.rvol.toFixed(2)}x</td>
+                              <td className="px-5 py-4 font-mono text-slate-300">{coin.volatility.toFixed(1)}%</td>
+                              <td className="px-5 py-4 flex gap-1 items-center h-full mt-3 flex-wrap">
+                                <CheckBadge active={coin.checks.volumePass} label="VOL" />
+                                <CheckBadge active={coin.checks.rvolPass} label="RVOL" />
+                                <CheckBadge active={coin.checks.volatilityPass} label="VOLA" />
+                                <CheckBadge active={coin.checks.spreadPass} label="SPR" />
+                                <CheckBadge active={coin.checks.oiPass} label="OI" />
+                              </td>
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+                </div>
               </div>
             </>
           )}
@@ -516,23 +475,6 @@ export default function App() {
                             <Activity className="w-5 h-5 animate-pulse" />
                             تخصيص عدوانية الوحش 🩸
                          </h4>
-                          <label className="flex items-start gap-4 cursor-pointer p-4 bg-black/40 border-2 border-rose-600 hover:border-rose-400 transition-all rounded-lg group animate-pulse mb-6">
-                            <div className="relative flex items-start pt-1">
-                               <input 
-                                 type="checkbox"
-                                 checked={(settings as any).isNightmareMode || false}
-                                 onChange={e => setSettings({...settings, isNightmareMode: e.target.checked} as any)}
-                                 className="w-6 h-6 accent-rose-600 bg-slate-900 border-rose-700 rounded cursor-pointer"
-                               />
-                            </div>
-                            <div>
-                               <span className="block text-rose-500 font-black text-lg mb-1 group-hover:text-rose-400 transition-colors">🩸 وضع الكابوس الـ4.2 (Nightmare Mode)</span>
-                               <span className="text-xs text-rose-200/70 block leading-relaxed">
-                                  <b>تحذير:</b> هذا الوضع يلغي جميع ضوابط الأمان العادية لتحقيق أقصى ربحية هجومية.
-                               </span>
-                            </div>
-                          </label>
-
                          
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                            <div>
@@ -616,20 +558,21 @@ export default function App() {
                              <input type="number" step="1"
                                className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
                                value={typeof (settings as any).smartTimeDecayMinutes === 'number' ? (settings as any).smartTimeDecayMinutes : 5}
-                               onChange={e => setSettings({...settings, smartTimeDecayMinutes: parseInt(e.target.value)} as any)} />
-                              <p className="text-[10px] text-slate-400 mt-1">يتسارع أو يتباطأ ديناميكياً مع حية السوق.</p>
-                            </div>
-                            <div>
-                              <label className="block text-slate-300 text-xs mb-1">مرجع الملاحقة الديناميكية المتغيرة (%)</label>
-                              <input type="number" step="0.1"
-                                className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
-                                value={typeof (settings as any).smartTrailingThresholdPerc === 'number' ? (settings as any).smartTrailingThresholdPerc : 0.3}
-                                onChange={e => setSettings({...settings, smartTrailingThresholdPerc: parseFloat(e.target.value)} as any)}
-                              />
-                              <p className="text-[10px] text-slate-400 mt-1">مرجع لنسبة التراجع. يتقلص ويتمدد برمجياً.</p>
-                            </div>
-                            <div>
-                              <label className="block text-slate-300 text-xs mb-1">زمن تجمد الزخم (دقائق)</label>
+                               onChange={e => setSettings({...settings, smartTimeDecayMinutes: parseInt(e.target.value)} as any)}
+                             />
+                             <p className="text-[10px] text-slate-400 mt-1">يتسارع أو يتباطأ ديناميكياً مع حية السوق.</p>
+                           </div>
+                           <div>
+                             <label className="block text-slate-300 text-xs mb-1">مرجع الملاحقة الديناميكية المتغيرة (%)</label>
+                             <input type="number" step="0.1"
+                               className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
+                               value={typeof (settings as any).smartTrailingThresholdPerc === 'number' ? (settings as any).smartTrailingThresholdPerc : 0.3}
+                               onChange={e => setSettings({...settings, smartTrailingThresholdPerc: parseFloat(e.target.value)} as any)}
+                             />
+                             <p className="text-[10px] text-slate-400 mt-1">مرجع لنسبة التراجع. يتقلص ويتمدد برمجياً.</p>
+                           </div>
+                           <div>
+                             <label className="block text-slate-300 text-xs mb-1">زمن تجمد الزخم (دقائق)</label>
                              <input type="number" step="0.5"
                                className="w-full bg-slate-900/80 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-purple-500 focus:outline-none"
                                value={typeof (settings as any).smartMomentumStallMinutes === 'number' ? (settings as any).smartMomentumStallMinutes : 2.5}
@@ -643,7 +586,7 @@ export default function App() {
                            <h5 className="text-purple-300 text-sm font-bold mb-3 flex items-center gap-2">
                              محركات السيولة الحية للمنصة (True Flow)
                            </h5>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                              <label className="flex items-start gap-3 cursor-pointer p-3 bg-slate-900/80 border border-slate-700 rounded hover:border-purple-500/50 transition-colors">
                                <input 
                                  type="checkbox"

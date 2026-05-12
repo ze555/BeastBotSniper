@@ -28,26 +28,13 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Local cache for Golden Watchlist
 let goldenWatchlist: ScannedCoin[] = [];
-let isScanning = false;
-let lastScanTime = 0;
-let totalProcessed = 0;
 
 export function getWatchlist() {
-  return {
-    coins: goldenWatchlist,
-    lastScan: lastScanTime,
-    isScanning,
-    totalProcessed
-  };
+  return goldenWatchlist;
 }
 
 export async function runBinanceScanner() {
-  if (isScanning) return;
-  isScanning = true;
-  lastScanTime = Date.now();
-  totalProcessed = 0;
-  
-  console.log('[SCANNER] 🔍 Starting market scan for best targets...');
+  console.log('[SCANNER] 🔍 Starting 15-minute market scan for best 10-20 coins...');
   
   try {
     // 1. Fetch 24hr Tickers
@@ -97,7 +84,6 @@ export async function runBinanceScanner() {
 
     // Analyze each valid coin
     for (const ticker of validTickers) {
-      totalProcessed++;
       const symbol = ticker.symbol;
       const price = parseFloat(ticker.lastPrice);
       const high = parseFloat(ticker.highPrice);
@@ -241,24 +227,19 @@ export async function runBinanceScanner() {
         });
       }
 
-      // Add a 100ms delay between coins (faster scanning, risky but needed for aggression)
-      await sleep(100);
+      // Add a 200ms delay between coins to avoid Rate Limits (418 / 429 errors)
+      await sleep(200);
     }
 
-    // Sort by score descending, then by rvol for aggression
-    candidates.sort((a, b) => b.score - a.score || b.rvol - a.rvol);
+    // Sort by score descending, then by volume
+    candidates.sort((a, b) => b.score - a.score || b.volume - a.volume);
     
-    // Take top 25 high-value targets
-    goldenWatchlist = candidates.slice(0, 25);
+    // Take top 20
+    goldenWatchlist = candidates.slice(0, 20);
     console.log(`[SCANNER] ✅ Scan Complete. Found ${goldenWatchlist.length} Golden Coins.`);
-    isScanning = false;
+    // goldenWatchlist.forEach(c => console.log(`   🔥 ${c.symbol} (Score: ${c.score}/5) | RVOL: ${c.rvol.toFixed(2)} | Volatility: ${c.volatility.toFixed(2)}%`));
 
-    // Schedule next scan - 1 minute for Nightmare Mode, 5 minutes otherwise
-    const nextScanMs = sniper.getSettings().isNightmareMode ? 1 * 60 * 1000 : 5 * 60 * 1000;
-    setTimeout(runBinanceScanner, nextScanMs);
   } catch (error) {
     console.error('[SCANNER] Error during scan:', error);
-    isScanning = false;
-    setTimeout(runBinanceScanner, 30 * 1000); // Retry sooner on error
   }
 }
