@@ -64,7 +64,15 @@ export const initDB = () => {
           smartTrailingThresholdPerc REAL DEFAULT 0.3,
           smartMomentumStallMinutes REAL DEFAULT 2.5,
           useKineticEngine INTEGER DEFAULT 0,
-          beastMode INTEGER DEFAULT 0
+          beastMode INTEGER DEFAULT 0,
+          strategyAdxThreshold REAL DEFAULT 25,
+          strategyAtrMultiplier REAL DEFAULT 1.5,
+          strategyMinConfidence REAL DEFAULT 0.6,
+          strategyRvolThreshold REAL DEFAULT 1.5,
+          useStrategyTrendFilter INTEGER DEFAULT 1,
+          useStrategyVolatilityRule INTEGER DEFAULT 1,
+          useStrategyConfidenceGate INTEGER DEFAULT 1,
+          useStrategyMomentumRule INTEGER DEFAULT 1
         )
       `);
       
@@ -92,7 +100,15 @@ export const initDB = () => {
         "strictRsiHigh REAL DEFAULT 75",
         "strictRsiLow REAL DEFAULT 25",
         "strictRetestPullbackPerc REAL DEFAULT 3.0",
-        "strictBreakoutDistancePerc REAL DEFAULT 0.5"
+        "strictBreakoutDistancePerc REAL DEFAULT 0.5",
+        "strategyAdxThreshold REAL DEFAULT 25",
+        "strategyAtrMultiplier REAL DEFAULT 1.5",
+        "strategyMinConfidence REAL DEFAULT 0.6",
+        "strategyRvolThreshold REAL DEFAULT 1.5",
+        "useStrategyTrendFilter INTEGER DEFAULT 1",
+        "useStrategyVolatilityRule INTEGER DEFAULT 1",
+        "useStrategyConfidenceGate INTEGER DEFAULT 1",
+        "useStrategyMomentumRule INTEGER DEFAULT 1"
       ];
       
       let pending = newCols.length;
@@ -178,10 +194,11 @@ export function saveSettingsToDB(settings: any) {
       useSmartControl, smartTpUsd, smartTrailingStartUsd, smartTimeDecayMinutes, smartTrailingThresholdPerc, smartMomentumStallMinutes,
       useKineticEngine, beastMode,
       strictMinVolume, strictMinRvol, strictMaxRisk, strictMinScore,
-      strictBtcAlignment, strictRsiFilter, strictRetest, strictFastBreakevenPerc, leverage,
-      strictRsiHigh, strictRsiLow, strictRetestPullbackPerc, strictBreakoutDistancePerc
+      kineticUseOpenInterest, kineticUseVolume, kineticSensitivty,
+      strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
+      useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -208,7 +225,15 @@ export function saveSettingsToDB(settings: any) {
       strictRsiHigh=excluded.strictRsiHigh,
       strictRsiLow=excluded.strictRsiLow,
       strictRetestPullbackPerc=excluded.strictRetestPullbackPerc,
-      strictBreakoutDistancePerc=excluded.strictBreakoutDistancePerc
+      strictBreakoutDistancePerc=excluded.strictBreakoutDistancePerc,
+      strategyAdxThreshold=excluded.strategyAdxThreshold,
+      strategyAtrMultiplier=excluded.strategyAtrMultiplier,
+      strategyMinConfidence=excluded.strategyMinConfidence,
+      strategyRvolThreshold=excluded.strategyRvolThreshold,
+      useStrategyTrendFilter=excluded.useStrategyTrendFilter,
+      useStrategyVolatilityRule=excluded.useStrategyVolatilityRule,
+      useStrategyConfidenceGate=excluded.useStrategyConfidenceGate,
+      useStrategyMomentumRule=excluded.useStrategyMomentumRule
   `, [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.strictMode ? 1 : 0, settings.useSmartExit ? 1 : 0,
     settings.useSmartControl ? 1 : 0, settings.smartTpUsd ?? 1.0, settings.smartTrailingStartUsd ?? 0.4, settings.smartTimeDecayMinutes ?? 5,
@@ -227,7 +252,15 @@ export function saveSettingsToDB(settings: any) {
     settings.strictRsiHigh ?? 75,
     settings.strictRsiLow ?? 25,
     settings.strictRetestPullbackPerc ?? 3.0,
-    settings.strictBreakoutDistancePerc ?? 0.5
+    settings.strictBreakoutDistancePerc ?? 0.5,
+    settings.strategyAdxThreshold ?? 25,
+    settings.strategyAtrMultiplier ?? 1.5,
+    settings.strategyMinConfidence ?? 0.6,
+    settings.strategyRvolThreshold ?? 1.5,
+    settings.useStrategyTrendFilter ? 1 : 0,
+    settings.useStrategyVolatilityRule ? 1 : 0,
+    settings.useStrategyConfidenceGate ? 1 : 0,
+    settings.useStrategyMomentumRule ? 1 : 0
   ]);
 }
 
@@ -244,6 +277,10 @@ export function loadSettingsFromDB(): Promise<any> {
         row.strictBtcAlignment = row.strictBtcAlignment === 1;
         row.strictRsiFilter = row.strictRsiFilter === 1;
         row.strictRetest = row.strictRetest === 1;
+        row.useStrategyTrendFilter = row.useStrategyTrendFilter !== 0; // Default to true if not 0
+        row.useStrategyVolatilityRule = row.useStrategyVolatilityRule !== 0;
+        row.useStrategyConfidenceGate = row.useStrategyConfidenceGate !== 0;
+        row.useStrategyMomentumRule = row.useStrategyMomentumRule !== 0;
         resolve(row);
       }
     });

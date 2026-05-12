@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square } from 'lucide-react';
+import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -7,6 +7,9 @@ export default function App() {
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
   const [historyTrades, setHistoryTrades] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalPnl: 0, winRate: 0, openCount: 0, totalTrades: 0 });
+  const [marketContext, setMarketContext] = useState<any>(null);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [panicActive, setPanicActive] = useState(false);
   const [botActive, setBotActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState({ portfolioSize: 1000, riskPerTradePerc: 1, maxConcurrentTrades: 3 });
@@ -46,12 +49,14 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [wlRes, activeRes, histRes, statsRes, statusRes] = await Promise.all([
+      const [wlRes, activeRes, histRes, statsRes, statusRes, contextRes, logsRes] = await Promise.all([
         fetch('/api/scanner/watchlist'),
         fetch('/api/trades/active'),
         fetch('/api/trades/history'),
         fetch('/api/stats'),
-        fetch('/api/bot/status')
+        fetch('/api/bot/status'),
+        fetch('/api/market/context'),
+        fetch('/api/system/logs')
       ]);
       setWatchlist(await wlRes.json());
       setActiveTrades(await activeRes.json());
@@ -59,8 +64,25 @@ export default function App() {
       setStats(await statsRes.json());
       const statusData = await statusRes.json();
       setBotActive(statusData.active);
+      setMarketContext(await contextRes.json());
+      setLogs(await logsRes.json());
     } catch(e) { }
   }
+
+  const togglePanic = async () => {
+    const newState = !panicActive;
+    try {
+      const res = await fetch('/api/bot/panic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: newState })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPanicActive(newState);
+      }
+    } catch(e) {}
+  };
 
   const manualRefreshScanner = async () => {
     setLoading(true);
@@ -92,6 +114,7 @@ export default function App() {
           <nav className="flex flex-col gap-2 px-2 md:px-4">
             <NavItem icon={<Activity />} label="لوحة التحكم ومراقبة السوق" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
             <NavItem icon={<BarChart2 />} label="سجل الصفقات" active={activeTab === 'trades'} onClick={() => setActiveTab('trades')} />
+            <NavItem icon={<Sliders />} label="بناء الاستراتيجية" active={activeTab === 'strategy'} onClick={() => setActiveTab('strategy')} />
             <NavItem icon={<Settings />} label="إعدادات المخاطرة" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
           </nav>
         </div>
@@ -107,6 +130,20 @@ export default function App() {
              {botActive ? <Square className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
              <span className="hidden md:block font-bold mt-0.5">
                {botActive ? 'إيقاف الصيد' : 'بدء الصيد التلقائي'}
+             </span>
+          </button>
+
+          <button 
+             onClick={togglePanic}
+             className={`w-full mt-3 flex items-center justify-center gap-3 px-3 py-3 rounded-lg border transition-all ${
+               panicActive 
+                 ? 'bg-rose-600 border-rose-500 text-white shadow-[0_0_20px_-3px_rgba(225,29,72,0.6)] animate-pulse' 
+                 : 'bg-slate-950 border-slate-700 text-slate-500 hover:border-rose-500/50 hover:text-rose-400'
+             }`}
+          >
+             <ShieldCheck className={`w-5 h-5 ${panicActive ? 'animate-bounce' : ''}`} />
+             <span className="hidden md:block font-bold mt-0.5 whitespace-nowrap text-xs">
+               {panicActive ? 'وضع الطوارئ نشط' : 'زر الذعر (Panic)'}
              </span>
           </button>
         </div>
@@ -144,6 +181,50 @@ export default function App() {
                    <StatCard title="إجمالي الأرباح" value={`$${stats.totalPnl.toFixed(2)}`} trend="" positive={stats.totalPnl >= 0} />
                    <StatCard title="نسبة الدقة (Win Rate)" value={`${stats.winRate.toFixed(1)}%`} trend={`${stats.totalTrades} صفقات`} />
                    <StatCard title="الصفقات المفتوحة" value={stats.openCount.toString()}  />
+              </div>
+
+              {/* Intelligence Hub */}
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-6 relative overflow-hidden group">
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] -mr-32 -mt-32"></div>
+                 <div className="relative z-10">
+                    <div className="flex items-center justify-between mb-4">
+                       <h3 className="text-lg font-bold flex items-center gap-2 text-slate-100">
+                          <Activity className="w-5 h-5 text-emerald-400" />
+                          مركز ذكاء القناص (7-Layer Intelligence Hub)
+                       </h3>
+                       <div className="flex gap-2">
+                          <div className="px-2 py-1 rounded bg-slate-900 border border-emerald-500/20 text-[10px] text-emerald-400 font-mono">CORE_ENGINE: ACTIVE</div>
+                          <div className="px-2 py-1 rounded bg-slate-900 border border-purple-500/20 text-[10px] text-purple-400 font-mono">RISK_SHIELD: ARMED</div>
+                       </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                       <IntelligenceLayer 
+                          label="حالة السوق العالمية" 
+                          value={marketContext?.marketSentiment?.replace('_', ' ') || 'NEUTRAL'} 
+                          color={marketContext?.marketSentiment?.includes('GREED') ? 'text-emerald-400' : marketContext?.marketSentiment?.includes('FEAR') ? 'text-rose-400' : 'text-blue-400'} 
+                          sub={`Top 20 Sentiment`} 
+                       />
+                       <IntelligenceLayer 
+                          label="ارتباط الثيران" 
+                          value={`${((marketContext?.bullishRatio || 0) * 100).toFixed(0)}% Bullish`} 
+                          color="text-amber-400" 
+                          sub="Global Structure" 
+                       />
+                       <IntelligenceLayer 
+                          label="إجمالي السيولة (24h)" 
+                          value={`$${((marketContext?.totalVolume24h || 0) / 1e9).toFixed(1)}B`} 
+                          color="text-blue-400" 
+                          sub="USDT Pairs Volume" 
+                       />
+                       <IntelligenceLayer 
+                          label="نظام الهجوم" 
+                          value={botActive ? "Sniper Precision" : "Standby"} 
+                          color="text-emerald-400" 
+                          sub={botActive ? "Execution 3/3" : "Awaiting Strategy"} 
+                       />
+                    </div>
+                 </div>
               </div>
 
               {/* Active Trades */}
@@ -218,6 +299,7 @@ export default function App() {
                         <th className="px-5 py-3 font-medium">RVOL</th>
                         <th className="px-5 py-3 font-medium">التذبذب</th>
                         <th className="px-5 py-3 font-medium">حالة الفحوصات</th>
+                        <th className="px-5 py-3 font-medium">محرك القرار (7-Layers)</th>
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
@@ -248,11 +330,64 @@ export default function App() {
                                 <CheckBadge active={coin.checks.spreadPass} label="SPR" />
                                 <CheckBadge active={coin.checks.oiPass} label="OI" />
                               </td>
+                              <td className="px-5 py-4">
+                                {coin.decision ? (
+                                   <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-2">
+                                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                           coin.decision.action === 'ATTACK' ? 'bg-rose-500 text-white animate-pulse' : 
+                                           coin.decision.action === 'SLEEP' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'
+                                         }`}>
+                                           {coin.decision.action === 'ATTACK' ? '🔥 الهجوم' : coin.decision.action === 'SLEEP' ? '😴 خمول' : '⏳ انتظار'}
+                                         </span>
+                                         <span className="text-[10px] text-slate-400 font-mono">{(coin.decision.confidence * 100).toFixed(0)}%</span>
+                                      </div>
+                                      <div className="text-[10px] text-emerald-400/80 font-medium">
+                                         {coin.decision.regime}
+                                      </div>
+                                      <div className="text-[9px] text-slate-500 truncate max-w-[120px]" title={coin.decision.reason}>
+                                         {coin.decision.reason}
+                                      </div>
+                                   </div>
+                                ) : (
+                                   <span className="text-slate-600 font-mono text-[10px]">No Data</span>
+                                )}
+                              </td>
                            </tr>
                         ))}
                      </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* System Execution Logs */}
+              <div className="mt-8 rounded-xl bg-slate-900 border border-slate-800 overflow-hidden shadow-2xl">
+                 <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                    <h3 className="text-xs font-bold text-slate-400 flex items-center gap-2 tracking-widest uppercase">
+                       <Activity className="w-4 h-4 text-emerald-500" />
+                       سجل التنفيذ المباشر (Live Core Logs)
+                    </h3>
+                    <div className="flex gap-2">
+                       <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                       <span className="text-[10px] text-emerald-500/70 font-mono italic">STREAMING_ACTIVE</span>
+                    </div>
+                 </div>
+                 <div className="p-4 h-48 overflow-y-auto font-mono text-[11px] space-y-1 bg-black/20">
+                    {logs.length === 0 ? (
+                       <div className="text-slate-600 italic">بانتظار أحداث النظام...</div>
+                    ) : logs.slice().reverse().map((log, i) => (
+                       <div key={i} className="flex gap-3 border-b border-slate-800/30 pb-1">
+                          <span className="text-slate-500">[{new Date(log.time).toLocaleTimeString()}]</span>
+                          <span className={`${
+                             log.level === 'error' ? 'text-rose-500' : 
+                             log.level === 'warn' ? 'text-amber-500' : 'text-emerald-400/80'
+                          }`}>
+                             {log.level.toUpperCase()}
+                          </span>
+                          <span className="text-slate-300">{log.msg}</span>
+                       </div>
+                    ))}
+                 </div>
               </div>
             </>
           )}
@@ -307,6 +442,199 @@ export default function App() {
                      </tbody>
                   </table>
                 </div>
+             </div>
+          )}
+
+          {activeTab === 'strategy' && (
+             <div className="rounded-xl bg-slate-800/50 border border-slate-700/50 p-6 md:p-8 max-w-2xl mx-auto shadow-2xl">
+                <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-700/50">
+                   <Sliders className="w-8 h-8 text-amber-500" />
+                   <div>
+                     <h3 className="text-xl font-bold">بناء وتخصيص الاستراتيجية (Strategy Builder)</h3>
+                     <p className="text-slate-400 text-sm mt-1">تحديد العتبات الرياضية لمحرك القرار Core Engine</p>
+                   </div>
+                </div>
+
+                <form onSubmit={saveSettings} className="space-y-8">
+                   <div className="grid grid-cols-1 gap-8">
+                      {/* Trend Filter Toggle */}
+                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                         <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyTrendFilter ? 'bg-amber-500/20 text-amber-500' : 'bg-slate-800 text-slate-500'}`}>
+                                  <TrendingUp className="w-5 h-5" />
+                               </div>
+                               <div>
+                                  <h4 className="font-bold text-slate-200">فلتر الاتجاه (Trend Filter)</h4>
+                                  <p className="text-[10px] text-slate-500 uppercase font-mono">ADX_VALIDATION_PROTOCOL</p>
+                               </div>
+                            </div>
+                            <button 
+                               type="button"
+                               onClick={() => setSettings({...settings, useStrategyTrendFilter: !(settings as any).useStrategyTrendFilter} as any)}
+                               className={`w-12 h-6 rounded-full transition-all relative ${
+                                  (settings as any).useStrategyTrendFilter ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.4)]' : 'bg-slate-700'
+                               }`}
+                            >
+                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                  (settings as any).useStrategyTrendFilter ? 'left-7' : 'left-1'
+                               }`} />
+                            </button>
+                         </div>
+
+                         {(settings as any).useStrategyTrendFilter && (
+                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                               <div className="flex justify-between items-center">
+                                  <label className="text-xs text-slate-400 font-bold">الحد الأدنى لقوة الترند (ADX)</label>
+                                  <span className="text-amber-400 font-mono text-sm font-bold">{(settings as any).strategyAdxThreshold ?? 25}</span>
+                               </div>
+                               <input type="range" min="10" max="60" step="1"
+                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                  value={(settings as any).strategyAdxThreshold ?? 25}
+                                  onChange={e => setSettings({...settings, strategyAdxThreshold: parseInt(e.target.value)} as any)}
+                               />
+                               <p className="text-[10px] text-slate-500 italic">* يتجاهل البوت أي عملة لا تمتلك ترند واضح (ADX &gt; عتبة الاختيار).</p>
+                            </div>
+                         )}
+                      </div>
+
+                      {/* Volatility Rule Toggle */}
+                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                         <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyVolatilityRule ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-800 text-slate-500'}`}>
+                                  <Activity className="w-5 h-5" />
+                               </div>
+                               <div>
+                                  <h4 className="font-bold text-slate-200">قاعدة التقلب (Volatility Rule)</h4>
+                                  <p className="text-[10px] text-slate-500 uppercase font-mono">ATR_DYNAMIC_PROTECTION</p>
+                               </div>
+                            </div>
+                            <button 
+                               type="button"
+                               onClick={() => setSettings({...settings, useStrategyVolatilityRule: !(settings as any).useStrategyVolatilityRule} as any)}
+                               className={`w-12 h-6 rounded-full transition-all relative ${
+                                  (settings as any).useStrategyVolatilityRule ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-slate-700'
+                               }`}
+                            >
+                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                  (settings as any).useStrategyVolatilityRule ? 'left-7' : 'left-1'
+                               }`} />
+                            </button>
+                         </div>
+
+                         {(settings as any).useStrategyVolatilityRule && (
+                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                               <div className="flex justify-between items-center">
+                                  <label className="text-xs text-slate-400 font-bold">معامل تمدد الوقف (ATR Multiplier)</label>
+                                  <span className="text-blue-400 font-mono text-sm font-bold">{(settings as any).strategyAtrMultiplier ?? 1.5}x</span>
+                               </div>
+                               <input type="range" min="1.0" max="5.0" step="0.1"
+                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                  value={(settings as any).strategyAtrMultiplier ?? 1.5}
+                                  onChange={e => setSettings({...settings, strategyAtrMultiplier: parseFloat(e.target.value)} as any)}
+                               />
+                               <p className="text-[10px] text-slate-500 italic">* استخدام ATR لوضع وقف خسارة ديناميكي يتنفس مع حركة السوق.</p>
+                            </div>
+                         )}
+                      </div>
+
+                      {/* Confidence Gate Toggle */}
+                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                         <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyConfidenceGate ? 'bg-emerald-500/20 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
+                                  <ShieldCheck className="w-5 h-5" />
+                               </div>
+                               <div>
+                                  <h4 className="font-bold text-slate-200">بوابة الثقة (Confidence Gate)</h4>
+                                  <p className="text-[10px] text-slate-500 uppercase font-mono">AI_PROBABILITY_FILTER</p>
+                               </div>
+                            </div>
+                            <button 
+                               type="button"
+                               onClick={() => setSettings({...settings, useStrategyConfidenceGate: !(settings as any).useStrategyConfidenceGate} as any)}
+                               className={`w-12 h-6 rounded-full transition-all relative ${
+                                  (settings as any).useStrategyConfidenceGate ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-700'
+                               }`}
+                            >
+                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                  (settings as any).useStrategyConfidenceGate ? 'left-7' : 'left-1'
+                               }`} />
+                            </button>
+                         </div>
+
+                         {(settings as any).useStrategyConfidenceGate && (
+                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                               <div className="flex justify-between items-center">
+                                  <label className="text-xs text-slate-400 font-bold">الحد الأدنى لليقين (Confidence)</label>
+                                  <span className="text-emerald-400 font-mono text-sm font-bold">{Math.round(((settings as any).strategyMinConfidence ?? 0.6) * 100)}%</span>
+                               </div>
+                               <input type="range" min="0.1" max="1.0" step="0.1"
+                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                  value={(settings as any).strategyMinConfidence ?? 0.6}
+                                  onChange={e => setSettings({...settings, strategyMinConfidence: parseFloat(e.target.value)} as any)}
+                               />
+                               <p className="text-[10px] text-slate-500 italic">* تصفية الإشارات بناءً على نسبة نجاحها الإحصائية المتوقعة.</p>
+                            </div>
+                         )}
+                      </div>
+
+                      {/* Momentum Rule Toggle */}
+                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                         <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyMomentumRule ? 'bg-purple-500/20 text-purple-500' : 'bg-slate-800 text-slate-500'}`}>
+                                  <Zap className="w-5 h-5" />
+                               </div>
+                               <div>
+                                  <h4 className="font-bold text-slate-200">قاعدة الزخم (Momentum Rule)</h4>
+                                  <p className="text-[10px] text-slate-500 uppercase font-mono">RVOL_VELOCITY_CHECK</p>
+                               </div>
+                            </div>
+                            <button 
+                               type="button"
+                               onClick={() => setSettings({...settings, useStrategyMomentumRule: !(settings as any).useStrategyMomentumRule} as any)}
+                               className={`w-12 h-6 rounded-full transition-all relative ${
+                                  (settings as any).useStrategyMomentumRule ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.4)]' : 'bg-slate-700'
+                               }`}
+                            >
+                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                  (settings as any).useStrategyMomentumRule ? 'left-7' : 'left-1'
+                               }`} />
+                            </button>
+                         </div>
+
+                         {(settings as any).useStrategyMomentumRule && (
+                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                               <div className="flex justify-between items-center">
+                                  <label className="text-xs text-slate-400 font-bold">عتبة الزخم النسبي (RVOL)</label>
+                                  <span className="text-purple-400 font-mono text-sm font-bold">{(settings as any).strategyRvolThreshold ?? 1.5}x</span>
+                               </div>
+                               <input type="range" min="1.0" max="10.0" step="0.5"
+                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                  value={(settings as any).strategyRvolThreshold ?? 1.5}
+                                  onChange={e => setSettings({...settings, strategyRvolThreshold: parseFloat(e.target.value)} as any)}
+                               />
+                               <p className="text-[10px] text-slate-500 italic">* لا يدخل البوت إلا إذا كان حجم التداول الحالي أقوى من المتوسط (سيولة انفجارية).</p>
+                            </div>
+                         )}
+                      </div>
+                   </div>
+
+                   <div className="pt-6 border-t border-slate-700/50 flex flex-col gap-4">
+                      <button 
+                        type="submit" 
+                        className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-lg transition-all shadow-lg shadow-amber-500/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                      >
+                        {savingSettings ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
+                        حقن وتطبيق الاستراتيجية الجديدة
+                      </button>
+                      <p className="text-[10px] text-center text-slate-500 uppercase tracking-widest font-mono">
+                         CORE_ENGINE: PROTOCOL_INJECTION_ACTIVE
+                      </p>
+                   </div>
+                </form>
              </div>
           )}
 
@@ -774,6 +1102,16 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
       <div className={`flex-shrink-0 ${active ? 'text-emerald-400' : 'text-slate-500'}`}>{icon}</div>
       <span className="font-semibold text-sm hidden md:block">{label}</span>
     </button>
+  );
+}
+
+function IntelligenceLayer({ label, value, sub, color }: { label: string, value: string, sub: string, color: string }) {
+  return (
+    <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3 hover:border-slate-700 transition-colors">
+       <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{label}</span>
+       <div className={`text-sm font-bold mt-1 ${color}`}>{value}</div>
+       <div className="text-[9px] text-slate-600 mt-0.5">{sub}</div>
+    </div>
   );
 }
 

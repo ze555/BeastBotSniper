@@ -1,16 +1,39 @@
 import axios from 'axios';
 import { sniper } from './sniperEngine.js';
 import { getWatchlist } from './binanceScanner.js';
-import { MarketCondition } from '../types/trading.js';
+import { MarketCondition, GlobalContext } from '../types/trading.js';
 
 const BINANCE_FAPI = 'https://fapi.binance.com';
 let isRunning = false;
 let botActive = false; // State to control if hunting is active
+let globalContext: GlobalContext = {
+  avgAdx: 25,
+  avgAtrPerc: 2,
+  bullishRatio: 0.5,
+  totalVolume24h: 0,
+  marketSentiment: 'NEUTRAL'
+};
+
+export function getGlobalMarketContext() {
+  return globalContext;
+}
+
+const systemLogs: { time: number; msg: string; level: string }[] = [];
+
+export function addLog(msg: string, level: string = 'info') {
+  systemLogs.push({ time: Date.now(), msg, level });
+  if (systemLogs.length > 50) systemLogs.shift();
+}
+
+export function getSystemLogs() {
+  return systemLogs;
+}
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function setBotActive(state: boolean) {
   botActive = state;
+  addLog(`Bot ${state ? 'STARTED 🔥' : 'STOPPED 🛑'}`, state ? 'info' : 'warn');
   console.log(`[BOT RUNNER] Hunting Mode is now: ${botActive ? 'ACTIVE 🟢' : 'PAUSED 🔴'}`);
 }
 
@@ -27,19 +50,39 @@ export async function runTradeLoop() {
       const activeTrades = sniper.getActiveTrades();
       const settings = sniper.getSettings();
 
-      // 1. GLOBAL PANIC DETECTION (The Nightmare Shield)
+      // 1. GLOBAL PANIC DETECTION & CONTEXT (The Cloud Layer)
       let isGlobalPanic = false;
-      if (settings.isNightmareMode && settings.marketPanicThreshold) {
-          try {
-              // Check 24h change of top 20 coins as a proxy for market health
-              const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
-              const tickers = res.data as any[];
-              const drops = tickers.filter(t => parseFloat(t.priceChangePercent) < -settings.marketPanicThreshold!).length;
-              if (drops > 100) { // If >100 coins are in severe drop
-                  isGlobalPanic = true;
-                  console.warn(`[NIGHTMARE 💀] MARKET PANIC DETECTED! ${drops} symbols in freefall. Pausing new entries.`);
-              }
-          } catch (e) {}
+      try {
+        const tickersRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
+        const tickers = tickersRes.data as any[];
+        const sorted = tickers.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+        const top20 = sorted.slice(0, 20);
+        
+        const avgChange = top20.reduce((acc, t) => acc + parseFloat(t.priceChangePercent), 0) / 20;
+        const totalVol = tickers.reduce((acc, t) => acc + parseFloat(t.quoteVolume), 0);
+        const bullishCount = top20.filter(t => parseFloat(t.priceChangePercent) > 0).length;
+
+        globalContext = {
+            avgAdx: 25,
+            avgAtrPerc: 1.5,
+            bullishRatio: bullishCount / 20,
+            totalVolume24h: totalVol,
+            marketSentiment: avgChange > 2.5 ? 'EXTREME_GREED' : 
+                            avgChange > 0.5 ? 'GREED' : 
+                            avgChange > -0.5 ? 'NEUTRAL' : 
+                            avgChange > -3 ? 'FEAR' : 'EXTREME_FEAR'
+        };
+
+        if (settings.isNightmareMode && settings.marketPanicThreshold) {
+            const drops = tickers.filter(t => parseFloat(t.priceChangePercent) < -settings.marketPanicThreshold!).length;
+            if (drops > 80) { // Slightly more sensitive
+                isGlobalPanic = true;
+                addLog(`MARKET PANIC: ${drops} coins dropping!`, 'warn');
+                console.warn(`[NIGHTMARE 💀] MARKET PANIC DETECTED! ${drops} symbols in freefall.`);
+            }
+        }
+      } catch (e) {
+         addLog(`Global Context Error: ${e.message}`, 'error');
       }
 
       // ALWAYS manage open trades (TP/SL/Trailing), even if hunting is paused!
@@ -435,7 +478,8 @@ export async function runTradeLoop() {
               };
               
               // Allow the Sniper Engine to fire mathematically
-              sniper.evaluateSignal(condition);
+              sniper.evaluateSignal(condition, klines, htfKlines, globalContext);
+              coin.decision = condition.decision; // Link back to watchlist for UI insight
             }
 
           } catch (e: any) {

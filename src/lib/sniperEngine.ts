@@ -1,10 +1,18 @@
 import { Trade, MarketCondition, BotSettings } from '../types/trading.js';
 import { saveTrade, loadClosedTrades, loadActiveTrades, saveSettingsToDB, loadSettingsFromDB, initDB } from './db.js';
+import { CoreEngine } from './engine/CoreEngine.js';
+import { RiskEngine } from './engine/RiskEngine.js';
+import { PositionManager } from './engine/PositionManager.js';
+import { MarketMetrics, MarketRegime, TrapType, GlobalContext } from '../types/trading.js';
+import { addLog } from './botRunner.js';
 
 export class SniperEngine {
   private mode: 'PAPER' | 'LIVE' = 'PAPER';
   private activeTrades: Map<string, Trade> = new Map();
   private tradeHistory: Trade[] = [];
+  private core = new CoreEngine();
+  private risk = new RiskEngine();
+  private manager = new PositionManager();
   
   private settings: BotSettings = {
     portfolioSize: 2000,
@@ -16,7 +24,15 @@ export class SniperEngine {
     strictFastBreakevenPerc: 0.3,
     useSmartExit: true,
     useKineticEngine: true,
-    beastMode: false
+    beastMode: false,
+    strategyAdxThreshold: 25,
+    strategyAtrMultiplier: 1.5,
+    strategyMinConfidence: 0.6,
+    strategyRvolThreshold: 1.5,
+    useStrategyTrendFilter: true,
+    useStrategyVolatilityRule: true,
+    useStrategyConfidenceGate: true,
+    useStrategyMomentumRule: true
   };
 
   constructor() {
@@ -72,7 +88,15 @@ export class SniperEngine {
              useSmartExit: dbSettings.useSmartExit ?? false,
              useKineticEngine: dbSettings.useKineticEngine ?? false,
              useSmartControl: dbSettings.useSmartControl ?? false,
-             beastMode: dbSettings.beastMode ?? false
+             beastMode: dbSettings.beastMode ?? false,
+             strategyAdxThreshold: dbSettings.strategyAdxThreshold ?? 25,
+             strategyAtrMultiplier: dbSettings.strategyAtrMultiplier ?? 1.5,
+             strategyMinConfidence: dbSettings.strategyMinConfidence ?? 0.6,
+             strategyRvolThreshold: dbSettings.strategyRvolThreshold ?? 1.5,
+             useStrategyTrendFilter: dbSettings.useStrategyTrendFilter ?? true,
+             useStrategyVolatilityRule: dbSettings.useStrategyVolatilityRule ?? true,
+             useStrategyConfidenceGate: dbSettings.useStrategyConfidenceGate ?? true,
+             useStrategyMomentumRule: dbSettings.useStrategyMomentumRule ?? true
            };
          }
          console.log('[SNIPER] Loaded settings from database', this.settings);
@@ -98,6 +122,15 @@ export class SniperEngine {
     return this.tradeHistory;
   }
 
+  public triggerPanic(active: boolean) {
+    this.core.killSwitch.setManualPanic(active);
+    if (active) {
+       console.warn("[SNIPER] 🔴 EMERGENCY PANIC TRIGGERED MANUALLY!");
+    } else {
+       console.info("[SNIPER] 🟢 Emergency recovered.");
+    }
+  }
+
   public getStats() {
     const closed = this.tradeHistory.filter(t => t.status === 'CLOSED');
     const wins = closed.filter(t => (t.pnlPerc || 0) > 0).length;
@@ -114,136 +147,82 @@ export class SniperEngine {
   }
 
   /**
-   * Evaluate a symbol against the strict 5/5 criteria
+   * Evaluate a symbol against the new 7-layer architecture
    */
-  public evaluateSignal(condition: MarketCondition): void {
-    // 1. Mandatory Filter: Range Market avoids ALL trades.
-    if (condition.isRanging) return;
+  public evaluateSignal(condition: MarketCondition, klines: any[], htfKlines: any[], global?: GlobalContext): void {
+    // 1. Map MarketCondition to MarketMetrics
+    const metrics: MarketMetrics = {
+      symbol: condition.symbol,
+      price: condition.price,
+      adx: 25, // TODO: calculate accurately
+      atr: condition.atr || 0,
+      atrPerc: condition.atr ? (condition.atr / condition.price) * 100 : 0,
+      rsi: 50, // TODO: calculate accurately
+      volume: condition.vol24h || 0,
+      rvol: condition.isMomentumHigh ? 2 : 1, // mapping RVOL roughly
+      spread: condition.spread || 0,
+      fundingRate: condition.fundingRate,
+      openInterest: condition.oi,
+      takerRatio: condition.takerBuySellRatio,
+      isChop: condition.isRanging
+    };
 
-    // 2. Score threshold: Must be 4/5 or 5/5
-    if (condition.score <= 3) return;
+    // 2. Clear Decision from the Core
+    const decision = this.core.process(metrics, klines, htfKlines, this.settings, global);
+    condition.decision = decision; // Attach to condition for UI
 
-    // 2.5 HTF Trend Alignment (The Beast Logic)
-    // Only fight the 1H trend if signal is absolute 5/5 or beastMode is active with High RVol or it is a TRAP trade.
-    if (condition.htfTrend && condition.htfTrend !== 'FLAT' && condition.htfTrend !== condition.type) {
-       // Traps are by definition counter-trend, so we allow them in beastMode
-       const isBeastException = this.settings.beastMode && (condition.score >= 5 || condition.rvol! > 4);
-       if (!isBeastException) {
-          // console.log(`[SNIPER] 🚫 Entry rejected: HTF Trend (${condition.htfTrend}) conflicts with Entry (${condition.type}).`);
-          return;
-       }
-    }
-
-    // 🚀 BEAST EXPLOSION DETECTOR (Open Interest Confluence)
-    // If OI is present, use it as a multiplier for probability
-    if (condition.oi && condition.oi > 0) {
-        // We look for a balance between Volume and OI. 
-        // If OI is high relative to volume, it means big players are positioning.
-        const oiVolumeRatio = (condition.oi * condition.price) / condition.volume;
-        if (this.settings.beastMode && oiVolumeRatio > 1.5) {
-            console.log(`[BEAST 🐺] 💎 INSTITUTIONAL STACKING DETECTED on ${condition.symbol}. OI/Vol Ratio: ${oiVolumeRatio.toFixed(2)}. This is a high-conviction setup.`);
-            condition.score += 1; // Direct boost to score!
-        }
-    }
-
-    // 🐋 MARKET PRESSURE DIVERGENCE (Beast Version 3.0)
-    // If we're going LONG but Taker Sell Volume is dominating, it's a "Forced Pump"
-    if (this.settings.beastMode && condition.takerBuySellRatio) {
-        if (condition.type === 'LONG' && condition.takerBuySellRatio < 0.7) {
-            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE on ${condition.symbol}: Price pumping but Taker Pressure is bearish (${condition.takerBuySellRatio.toFixed(2)}). Retail is buying, Whales are selling. Skipping.`);
-            return;
-        }
-        if (condition.type === 'SHORT' && condition.takerBuySellRatio > 1.4) {
-            console.log(`[BEAST 🐺] ⚠️ PRESSURE DIVERGENCE on ${condition.symbol}: Price dropping but Taker Pressure is bullish (${condition.takerBuySellRatio.toFixed(2)}). Retail is panic-selling, Whales are absorbing. Skipping.`);
-            return;
-        }
+    if (decision.action === 'SLEEP' || decision.action === 'WAIT') {
+       // console.log(`[CORE] ${condition.symbol} -> Decision: ${decision.action} (${decision.reason})`);
+       return;
     }
 
     // 3. Prevent duplicate trades on same symbol
     if (this.activeTrades.has(condition.symbol)) return;
 
-    console.log(`[SNIPER] 🔥 Signal Detected: ${condition.symbol} | Score: ${condition.score}/5 | Type: ${condition.type}`);
+    // 4. Execution Logic (If Attack)
+    addLog(`ATTACK DETECTED: ${condition.symbol} | Regime: ${decision.regime}`, 'info');
+    console.log(`[CORE] 🔥 ATTACK TRIGGERED on ${condition.symbol} | Regime: ${decision.regime} | Trap: ${decision.trap} | Confidence: ${decision.confidence * 100}%`);
+    
+    // We override direction if a Trap is detected
+    if (decision.trap === TrapType.LONG_TRAP) {
+       condition.type = 'SHORT'; 
+    } else if (decision.trap === TrapType.SHORT_TRAP) {
+       condition.type = 'LONG';
+    }
+
     this.executeTrade(condition);
   }
 
   /**
-   * Execute trade and calculate strict Risk/Reward (1R and 2R)
+   * Execute trade and calculate strict Risk/Reward
    */
   private executeTrade(cond: MarketCondition) {
     const entryPrice = cond.price;
     let sl = 0;
 
-    // Stop Loss Placement: Prioritize ATR for dynamic protection
-    if (cond.atr && cond.atr > 0) {
-      let atrMultiplier = this.settings.beastMode ? 2.0 : 1.5; 
-      
-      // 🚀 NEURAL-VENTING: If spread is high (> 0.05%), expand the SL buffer to avoid "wick-outs"
-      if (this.settings.beastMode && cond.spread && cond.spread > 0.05) {
-          const spreadFactor = 1 + (cond.spread * 2); // e.g. 0.1 spread -> 1.2x buffer
-          atrMultiplier *= Math.min(1.5, spreadFactor);
-          console.log(`[BEAST 🐺] NEURAL-VENTING: High Spread Detected (${cond.spread?.toFixed(3)}%). Expanding SL buffer.`);
-      }
-
+    // 1. Stop Loss Placement: Prioritize ATR for dynamic protection
+    if (cond.atr && cond.atr > 0 && this.settings.useStrategyVolatilityRule) {
+      let atrMultiplier = this.settings.strategyAtrMultiplier ?? 1.5; 
+      if (this.settings.beastMode) atrMultiplier += 0.5;
       sl = cond.type === 'LONG' ? entryPrice - (cond.atr * atrMultiplier) : entryPrice + (cond.atr * atrMultiplier);
     } else {
-      // Fallback to Support/Resistance if ATR is missing
-      if (cond.type === 'LONG') {
-        sl = cond.support * 0.999;
-      } else {
-        sl = cond.resistance * 1.001;
-      }
+      sl = cond.type === 'LONG' ? cond.support * 0.999 : cond.resistance * 1.001;
     }
 
-    // Risk calculation (1R)
-    const risk = Math.abs(entryPrice - sl);
-    const riskPerc = risk / entryPrice;
-
-    // Max Risk filter
-    const maxRiskAllowed = this.settings.strictMode ? (this.settings.strictMaxRisk ? this.settings.strictMaxRisk / 100 : 0.02) : 0.03;
-    if (riskPerc > maxRiskAllowed) {
-       console.log(`[SNIPER] ⚠️ Trade Ignored. Stop Loss too wide (${(riskPerc*100).toFixed(2)}%). Max allowed is ${(maxRiskAllowed*100).toFixed(2)}%.`);
-       return; // Ignore trade
+    // 2. Risk Engine Validation
+    const riskVerdict = this.risk.canTrade(this.getActiveTrades() as any, this.tradeHistory);
+    if (!riskVerdict.allowed) {
+       console.log(`[RISK] 🛡️ Entry Blocked: ${riskVerdict.reason}`);
+       return;
     }
 
-  // 🌊 WHALE PROTECTION: Volatility/Liquidity correlation check
-    if (this.settings.beastMode && cond.rvol && cond.volatility) {
-        // If volatility is much higher than volume growth, it's a "Ghost Move" (fakeout)
-        const volEfficiency = cond.rvol / cond.volatility;
-        if (volEfficiency < 0.3 && cond.volatility > 4) {
-            console.log(`[BEAST 🐺] ⚠️ GHOST MOVE DETECTED: Volatility (${cond.volatility.toFixed(2)}%) outpaces Liquidity (${cond.rvol.toFixed(2)}). Efficiency: ${volEfficiency.toFixed(2)}. Likely exit liquidity trap. Skipping ${cond.symbol}.`);
-            return;
-        }
-    }
-
-    // Take Profits: Dynamic based on Beast Mode
-    const tp1Multiplier = this.settings.beastMode ? 0.6 : 0.8; // De-risk even faster in Beast Mode
-    const tp2Multiplier = this.settings.beastMode ? 4.0 : 2.5; // Let the core hunters run wild!
+    // 3. Position Sizing
+    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl);
     
-    const tp1 = cond.type === 'LONG' ? entryPrice + (risk * tp1Multiplier) : entryPrice - (risk * tp1Multiplier);
-    const tp2 = cond.type === 'LONG' ? entryPrice + (risk * tp2Multiplier) : entryPrice - (risk * tp2Multiplier);
-
-    // 💰 DYNAMIC RISK MULTIPLIER (Kelly Variant)
-    let dynamicRiskPerc = this.settings.riskPerTradePerc;
-    const stats = this.getStats();
-    if (this.settings.beastMode && stats.totalTrades > 5) {
-        if (stats.winRate > 65) dynamicRiskPerc *= 1.5; // Aggressive scaling on win streaks
-        else if (stats.winRate < 40) dynamicRiskPerc *= 0.5; // Conservative retreat on loss streaks
-    }
-
-    // 💀 NIGHTMARE SCALING: Kelly Criterion + Extreme Confidence
-    if (this.settings.isNightmareMode && stats.totalTrades > 3) {
-        if (stats.winRate > 70) dynamicRiskPerc *= 2.0; // Double down on monster streaks
-        else if (stats.winRate > 55) dynamicRiskPerc *= 1.3;
-        
-        // Institutional Magnet Boost (Whale matching)
-        if (cond.takerBuySellRatio && ((cond.type === 'LONG' && cond.takerBuySellRatio > 2.2) || (cond.type === 'SHORT' && cond.takerBuySellRatio < 0.45))) {
-            dynamicRiskPerc *= 1.4;
-            console.log(`[NIGHTMARE 💀] INSTITUTIONAL MAGNET: Extreme Taker Pressure (${cond.takerBuySellRatio.toFixed(2)}) detected. Scaling risk for maximum predation.`);
-        }
-    }
-
-    const riskAmountUsd = this.settings.portfolioSize * (dynamicRiskPerc / 100); 
-    const positionSizeUsd = (riskAmountUsd / riskPerc);
+    // 4. Take Profits
+    const risk = Math.abs(entryPrice - sl);
+    const tp1 = cond.type === 'LONG' ? entryPrice + (risk * 0.8) : entryPrice - (risk * 0.8);
+    const tp2 = cond.type === 'LONG' ? entryPrice + (risk * 2.5) : entryPrice - (risk * 2.5);
 
     const trade: Trade = {
       id: Date.now().toString(),
@@ -266,7 +245,8 @@ export class SniperEngine {
     };
 
     this.activeTrades.set(trade.symbol, trade);
-    console.log(`[SNIPER] 🟢 Entered ${trade.type} on ${trade.symbol} @ ${entryPrice.toFixed(4)}. SL: ${sl.toFixed(4)}, TP1(1R): ${tp1.toFixed(4)}`);
+    addLog(`ENTRY: ${trade.type} ${trade.symbol} @ ${entryPrice.toFixed(2)}`, 'info');
+    console.log(`[CORE] 🟢 ATTACK EXECUTED: ${trade.type} on ${trade.symbol} @ ${entryPrice.toFixed(4)}. SL: ${sl.toFixed(4)}`);
     saveTrade(trade);
   }
 
@@ -276,6 +256,16 @@ export class SniperEngine {
   public manageTrades(symbol: string, currentPrice: number, currentOI?: number, currentVol?: number, currentTakerRatio?: number) {
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
+
+    // 1. Layered Position Management Verdict
+    const verdict = this.manager.manage(trade as any, currentPrice);
+    if (verdict.action === 'CLOSE') {
+       this.closeTrade(trade, currentPrice, `CORE_MANAGER: ${verdict.reason}`);
+       return;
+    } else if (verdict.action === 'UPDATE' && verdict.updatedTrade) {
+       Object.assign(trade, verdict.updatedTrade);
+       saveTrade(trade);
+    }
 
     // Update floating PnL
     const floatingPnlPerc = trade.type === 'LONG' 
@@ -656,6 +646,8 @@ export class SniperEngine {
       
       trade.pnl = finalPnl;
       
+      const badge = trade.pnl > 0 ? '🟢' : '🔴';
+      addLog(`EXIT ${trade.symbol}: $${trade.pnl.toFixed(2)} (${reason})`, trade.pnl > 0 ? 'info' : 'warn');
       console.log(`[SNIPER] ${reason}: Trade Closed on ${trade.symbol}. Final PnL: $${trade.pnl.toFixed(2)}`);
       this.activeTrades.delete(trade.symbol);
       this.tradeHistory.unshift({ ...trade }); // Add to beginning of history

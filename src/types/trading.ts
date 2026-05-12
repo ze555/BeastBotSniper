@@ -2,6 +2,31 @@ export type TradeType = 'LONG' | 'SHORT';
 export type TradeMode = 'PAPER' | 'LIVE';
 export type TradeStatus = 'OPEN' | 'TP1_HIT' | 'CLOSED';
 
+export enum MarketRegime {
+  TREND_EXPANSION = 'TREND_EXPANSION',
+  MOMENTUM_MODE = 'MOMENTUM_MODE',
+  LIQUIDITY_SWEEP = 'LIQUIDITY_SWEEP',
+  TRAP_MODE = 'TRAP_MODE',
+  COMPRESSION = 'COMPRESSION',
+  DEAD_CHOP = 'DEAD_CHOP',
+  VIOLENT_VOLATILITY = 'VIOLENT_VOLATILITY'
+}
+
+export enum TrapType {
+  LONG_TRAP = 'LONG_TRAP',
+  SHORT_TRAP = 'SHORT_TRAP',
+  NONE = 'NONE'
+}
+
+export interface EngineDecision {
+  regime: MarketRegime;
+  bias: 'LONG' | 'SHORT' | 'NEUTRAL';
+  trap: TrapType;
+  confidence: number; // 0 to 1
+  action: 'WAIT' | 'ATTACK' | 'SLEEP';
+  reason: string;
+}
+
 export interface Trade {
   id: string;
   symbol: string;
@@ -64,6 +89,57 @@ export interface MarketCondition {
   spread?: number;           // Bid/Ask Spread
   fundingRate?: number;      // Current Funding Rate
   takerBuySellRatio?: number; // Active market pressure
+  decision?: EngineDecision;  // The 7-layer decision core result
+}
+
+export interface MarketMetrics {
+  symbol: string;
+  price: number;
+  adx: number;
+  atr: number;
+  atrPerc: number;
+  rsi: number;
+  volume: number;
+  rvol: number;
+  spread: number;
+  fundingRate?: number;
+  openInterest?: number;
+  oiChange?: number;
+  takerRatio?: number;
+  isChop: boolean;
+}
+
+export interface GlobalContext {
+  avgAdx: number;
+  avgAtrPerc: number;
+  bullishRatio: number; // Percentage of coins in HH
+  totalVolume24h: number;
+  marketSentiment: 'EXTREME_GREED' | 'GREED' | 'NEUTRAL' | 'FEAR' | 'EXTREME_FEAR';
+}
+
+export interface SystemStats {
+  apiLag: number;
+  uptime: number;
+  scannedCount: number;
+  lastDecisionAt: number;
+}
+
+export interface TradePosition {
+  id: string;
+  symbol: string;
+  type: 'LONG' | 'SHORT';
+  entryPrice: number;
+  amount: number;
+  leverage: number;
+  sl: number;
+  tp1: number;
+  tp2: number;
+  status: 'OPEN' | 'TP1_HIT' | 'CLOSED';
+  entryTime: number;
+  pnl: number;
+  pnlPerc: number;
+  isBreakeven: boolean;
+  highestPrice?: number;
 }
 
 export interface BotSettings {
@@ -113,4 +189,16 @@ export interface BotSettings {
   beastLearnRate?: number;              // سرعة التعلم من الخسائر وإعادة التعديل
   isNightmareMode?: boolean;            // 🔥 وضع الكابوس: استراتيجية هجومية شاملة ومنيعة
   marketPanicThreshold?: number;        // عتبة الذعر: إيقاف التداول عند هبوط عام (مثال 3% في 5 دقائق)
+
+  // Strategy Builder Thresholds (عتبات بناء الاستراتيجية)
+  strategyAdxThreshold?: number;        // Default: 25
+  strategyAtrMultiplier?: number;       // Default: 1.5
+  strategyMinConfidence?: number;       // Default: 0.6
+  strategyRvolThreshold?: number;       // Default: 1.5
+
+  // Strategy Builder Toggles (مفاتيح تفعيل الاستراتيجية)
+  useStrategyTrendFilter?: boolean;
+  useStrategyVolatilityRule?: boolean;
+  useStrategyConfidenceGate?: boolean;
+  useStrategyMomentumRule?: boolean;
 }

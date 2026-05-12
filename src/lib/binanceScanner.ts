@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { sniper } from './sniperEngine.js';
+import { EngineDecision } from '../types/trading.js';
 
 export interface ScannedCoin {
   symbol: string;
@@ -19,6 +20,7 @@ export interface ScannedCoin {
     spreadPass: boolean;
     trendPass: boolean;
   };
+  decision?: EngineDecision;
 }
 
 const BINANCE_FAPI = 'https://fapi.binance.com'; 
