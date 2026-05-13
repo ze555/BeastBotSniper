@@ -15,6 +15,113 @@ export default function App() {
   const [settings, setSettings] = useState({ portfolioSize: 1000, riskPerTradePerc: 1, maxConcurrentTrades: 3 });
   const [savingSettings, setSavingSettings] = useState(false);
 
+  const STRATEGY_TEMPLATES = [
+    {
+      id: 'conservative',
+      name: 'القناص الصارم (محافظ للغاية)',
+      desc: 'دقة عالية جداً، صفقات قليلة ومختارة بعناية فائقة.',
+      icon: <ShieldCheck className="w-4 h-4" />,
+      color: 'border-emerald-500/50 text-emerald-400 bg-emerald-500/5',
+      settings: {
+        strictMode: true,
+        strictMinScore: 6,
+        strategyAdxThreshold: 35,
+        strategyMinConfidence: 0.85,
+        strategyRvolThreshold: 2.5,
+        useStrategyTrendFilter: true,
+        useStrategyConfidenceGate: true,
+        useStrategyMomentumRule: true,
+        useStrategyVolatilityRule: true,
+        beastMode: false,
+        useKineticEngine: true
+      }
+    },
+    {
+      id: 'balanced',
+      name: 'التوازن الذهبي (متوازن)',
+      desc: 'الخيار الأمثل لمعظم المتداولين. يجمع بين الربحية والأمان.',
+      icon: <Activity className="w-4 h-4" />,
+      color: 'border-blue-500/50 text-blue-400 bg-blue-500/5',
+      settings: {
+        strictMode: true,
+        strictMinScore: 5,
+        strategyAdxThreshold: 25,
+        strategyMinConfidence: 0.6,
+        strategyRvolThreshold: 1.5,
+        useStrategyTrendFilter: true,
+        useStrategyConfidenceGate: true,
+        useStrategyMomentumRule: true,
+        useStrategyVolatilityRule: true,
+        beastMode: false,
+        useKineticEngine: true
+      }
+    },
+    {
+      id: 'aggressive',
+      name: 'المضارب الهجومي (عدواني)',
+      desc: 'تردد صفقات مرتفع، شروط أقل صرامة، مخاطرة أعلى.',
+      icon: <Zap className="w-4 h-4" />,
+      color: 'border-amber-500/50 text-amber-400 bg-amber-500/5',
+      settings: {
+        strictMode: false,
+        strictMinScore: 4,
+        strategyAdxThreshold: 15,
+        strategyMinConfidence: 0.4,
+        strategyRvolThreshold: 1.2,
+        useStrategyTrendFilter: true,
+        useStrategyConfidenceGate: false,
+        useStrategyMomentumRule: true,
+        useStrategyVolatilityRule: false,
+        beastMode: true,
+        useKineticEngine: true
+      }
+    },
+    {
+      id: 'beast_mode',
+      name: 'الوحش المدمّر (أقصى صيد)',
+      desc: 'نظام الوحش الكامل. لا يرحم السوق ويقتنص كل فرصة ممكنة.',
+      icon: <Activity className="w-4 h-4 animate-pulse" />,
+      color: 'border-rose-500/50 text-rose-400 bg-rose-500/5',
+      settings: {
+        strictMode: false,
+        strictMinScore: 3,
+        strategyAdxThreshold: 10,
+        strategyMinConfidence: 0.3,
+        strategyRvolThreshold: 1.0,
+        useStrategyTrendFilter: false,
+        useStrategyConfidenceGate: false,
+        useStrategyMomentumRule: false,
+        useStrategyVolatilityRule: false,
+        beastMode: true,
+        beastAutoAdapt: true,
+        beastSlippageExploit: true,
+        isNightmareMode: true,
+        useKineticEngine: true
+      }
+    }
+  ];
+
+  const applyTemplate = (tplSettings: any) => {
+    setSettings(prev => ({ ...prev, ...tplSettings }));
+  };
+
+  const calculateIntensity = () => {
+    let score = 0;
+    if (!(settings as any).strictMode) score += 30;
+    if (!(settings as any).useStrategyTrendFilter) score += 20;
+    if (!(settings as any).useStrategyConfidenceGate) score += 20;
+    if ((settings as any).strategyAdxThreshold < 20) score += 15;
+    if ((settings as any).strategyMinConfidence < 0.5) score += 15;
+    if ((settings as any).beastMode) score += 100;
+    
+    if (score > 150) return { label: 'عدواني جداً (Very High)', color: 'text-rose-500' };
+    if (score > 80) return { label: 'مرتفع (High)', color: 'text-amber-500' };
+    if (score > 40) return { label: 'متوسط (Moderate)', color: 'text-blue-500' };
+    return { label: 'منخفض/قناص (Low/Sniper)', color: 'text-emerald-500' };
+  };
+
+  const intensity = calculateIntensity();
+
   // Poll loop for live dashboard feel
   useEffect(() => {
     fetchData(); // initial
@@ -446,195 +553,285 @@ export default function App() {
           )}
 
           {activeTab === 'strategy' && (
-             <div className="rounded-xl bg-slate-800/50 border border-slate-700/50 p-6 md:p-8 max-w-2xl mx-auto shadow-2xl">
-                <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-700/50">
-                   <Sliders className="w-8 h-8 text-amber-500" />
-                   <div>
-                     <h3 className="text-xl font-bold">بناء وتخصيص الاستراتيجية (Strategy Builder)</h3>
-                     <p className="text-slate-400 text-sm mt-1">تحديد العتبات الرياضية لمحرك القرار Core Engine</p>
+             <div className="max-w-4xl mx-auto space-y-6">
+                {/* Strategy Templates Header */}
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-xl">
+                   <div className="flex items-center gap-3 mb-6">
+                      <Zap className="w-6 h-6 text-amber-500" />
+                      <h3 className="text-xl font-bold">قوالب الاستراتيجية الجاهزة (Ready-made Templates)</h3>
+                   </div>
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {STRATEGY_TEMPLATES.map(tpl => (
+                         <button 
+                            key={tpl.id}
+                            type="button"
+                            onClick={() => applyTemplate(tpl.settings)}
+                            className={`p-4 rounded-xl border transition-all text-right flex flex-col gap-2 hover:scale-[1.02] active:scale-[0.98] ${tpl.color}`}
+                         >
+                            <div className="flex items-center gap-2 font-bold text-sm">
+                               {tpl.icon}
+                               {tpl.name}
+                            </div>
+                            <p className="text-[10px] leading-relaxed opacity-80">{tpl.desc}</p>
+                         </button>
+                      ))}
                    </div>
                 </div>
 
-                <form onSubmit={saveSettings} className="space-y-8">
-                   <div className="grid grid-cols-1 gap-8">
-                      {/* Trend Filter Toggle */}
-                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
-                         <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyTrendFilter ? 'bg-amber-500/20 text-amber-500' : 'bg-slate-800 text-slate-500'}`}>
-                                  <TrendingUp className="w-5 h-5" />
-                               </div>
-                               <div>
-                                  <h4 className="font-bold text-slate-200">فلتر الاتجاه (Trend Filter)</h4>
-                                  <p className="text-[10px] text-slate-500 uppercase font-mono">ADX_VALIDATION_PROTOCOL</p>
-                               </div>
-                            </div>
-                            <button 
-                               type="button"
-                               onClick={() => setSettings({...settings, useStrategyTrendFilter: !(settings as any).useStrategyTrendFilter} as any)}
-                               className={`w-12 h-6 rounded-full transition-all relative ${
-                                  (settings as any).useStrategyTrendFilter ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.4)]' : 'bg-slate-700'
-                               }`}
-                            >
-                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
-                                  (settings as any).useStrategyTrendFilter ? 'left-7' : 'left-1'
-                               }`} />
-                            </button>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                   {/* Left Col: Main Form */}
+                   <div className="lg:col-span-2 rounded-xl bg-slate-800/50 border border-slate-700/50 p-6 md:p-8 shadow-2xl">
+                      <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-700/50">
+                         <Sliders className="w-8 h-8 text-amber-500" />
+                         <div>
+                           <h3 className="text-xl font-bold">تخصيص محرك الصيد (Custom Strategy)</h3>
+                           <p className="text-slate-400 text-sm mt-1">تحديد العتبات الرياضية لمحرك القرار Core Engine</p>
                          </div>
-
-                         {(settings as any).useStrategyTrendFilter && (
-                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-xs text-slate-400 font-bold">الحد الأدنى لقوة الترند (ADX)</label>
-                                  <span className="text-amber-400 font-mono text-sm font-bold">{(settings as any).strategyAdxThreshold ?? 25}</span>
-                               </div>
-                               <input type="range" min="10" max="60" step="1"
-                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                                  value={(settings as any).strategyAdxThreshold ?? 25}
-                                  onChange={e => setSettings({...settings, strategyAdxThreshold: parseInt(e.target.value)} as any)}
-                               />
-                               <p className="text-[10px] text-slate-500 italic">* يتجاهل البوت أي عملة لا تمتلك ترند واضح (ADX &gt; عتبة الاختيار).</p>
-                            </div>
-                         )}
                       </div>
 
-                      {/* Volatility Rule Toggle */}
-                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
-                         <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyVolatilityRule ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-800 text-slate-500'}`}>
-                                  <Activity className="w-5 h-5" />
+                      <form onSubmit={saveSettings} className="space-y-8">
+                         <div className="grid grid-cols-1 gap-6">
+                            {/* Trend Filter Toggle */}
+                            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                               <div className="flex justify-between items-center">
+                                  <div className="flex items-center gap-3">
+                                     <div className={`p-2 rounded-lg ${(settings as any).useStrategyTrendFilter ? 'bg-amber-500/20 text-amber-500' : 'bg-slate-800 text-slate-500'}`}>
+                                        <TrendingUp className="w-5 h-5" />
+                                     </div>
+                                     <div>
+                                        <h4 className="font-bold text-slate-200">فلتر الاتجاه (Trend Filter)</h4>
+                                        <p className="text-[10px] text-slate-500 uppercase font-mono">ADX_VALIDATION_PROTOCOL</p>
+                                     </div>
+                                  </div>
+                                  <button 
+                                     type="button"
+                                     onClick={() => setSettings({...settings, useStrategyTrendFilter: !(settings as any).useStrategyTrendFilter} as any)}
+                                     className={`w-12 h-6 rounded-full transition-all relative ${
+                                        (settings as any).useStrategyTrendFilter ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.4)]' : 'bg-slate-700'
+                                     }`}
+                                  >
+                                     <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                        (settings as any).useStrategyTrendFilter ? 'left-7' : 'left-1'
+                                     }`} />
+                                  </button>
                                </div>
-                               <div>
-                                  <h4 className="font-bold text-slate-200">قاعدة التقلب (Volatility Rule)</h4>
-                                  <p className="text-[10px] text-slate-500 uppercase font-mono">ATR_DYNAMIC_PROTECTION</p>
-                               </div>
+
+                               {(settings as any).useStrategyTrendFilter && (
+                                  <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                     <div className="flex justify-between items-center">
+                                        <label className="text-xs text-slate-400 font-bold">الحد الأدنى لقوة الترند (ADX)</label>
+                                        <span className="text-amber-400 font-mono text-sm font-bold">{(settings as any).strategyAdxThreshold ?? 25}</span>
+                                     </div>
+                                     <input type="range" min="10" max="60" step="1"
+                                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                        value={(settings as any).strategyAdxThreshold ?? 25}
+                                        onChange={e => setSettings({...settings, strategyAdxThreshold: parseInt(e.target.value)} as any)}
+                                     />
+                                     <p className="text-[10px] text-slate-500 italic">* يتجاهل البوت أي عملة لا تمتلك ترند واضح (ADX &gt; عتبة الاختيار).</p>
+                                  </div>
+                               )}
                             </div>
-                            <button 
-                               type="button"
-                               onClick={() => setSettings({...settings, useStrategyVolatilityRule: !(settings as any).useStrategyVolatilityRule} as any)}
-                               className={`w-12 h-6 rounded-full transition-all relative ${
-                                  (settings as any).useStrategyVolatilityRule ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-slate-700'
-                               }`}
-                            >
-                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
-                                  (settings as any).useStrategyVolatilityRule ? 'left-7' : 'left-1'
-                               }`} />
-                            </button>
+
+                            {/* Volatility Rule Toggle */}
+                            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                               <div className="flex justify-between items-center">
+                                  <div className="flex items-center gap-3">
+                                     <div className={`p-2 rounded-lg ${(settings as any).useStrategyVolatilityRule ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-800 text-slate-500'}`}>
+                                        <Activity className="w-5 h-5" />
+                                     </div>
+                                     <div>
+                                        <h4 className="font-bold text-slate-200">قاعدة التقلب (Volatility Rule)</h4>
+                                        <p className="text-[10px] text-slate-500 uppercase font-mono">ATR_DYNAMIC_PROTECTION</p>
+                                     </div>
+                                  </div>
+                                  <button 
+                                     type="button"
+                                     onClick={() => setSettings({...settings, useStrategyVolatilityRule: !(settings as any).useStrategyVolatilityRule} as any)}
+                                     className={`w-12 h-6 rounded-full transition-all relative ${
+                                        (settings as any).useStrategyVolatilityRule ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-slate-700'
+                                     }`}
+                                  >
+                                     <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                        (settings as any).useStrategyVolatilityRule ? 'left-7' : 'left-1'
+                                     }`} />
+                                  </button>
+                               </div>
+
+                               {(settings as any).useStrategyVolatilityRule && (
+                                  <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                     <div className="flex justify-between items-center">
+                                        <label className="text-xs text-slate-400 font-bold">معامل تمدد الوقف (ATR Multiplier)</label>
+                                        <span className="text-blue-400 font-mono text-sm font-bold">{(settings as any).strategyAtrMultiplier ?? 1.5}x</span>
+                                     </div>
+                                     <input type="range" min="1.0" max="5.0" step="0.1"
+                                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                        value={(settings as any).strategyAtrMultiplier ?? 1.5}
+                                        onChange={e => setSettings({...settings, strategyAtrMultiplier: parseFloat(e.target.value)} as any)}
+                                     />
+                                     <p className="text-[10px] text-slate-500 italic">* استخدام ATR لوضع وقف خسارة ديناميكي يتنفس مع حركة السوق.</p>
+                                  </div>
+                               )}
+                            </div>
+
+                            {/* Confidence Gate Toggle */}
+                            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                               <div className="flex justify-between items-center">
+                                  <div className="flex items-center gap-3">
+                                     <div className={`p-2 rounded-lg ${(settings as any).useStrategyConfidenceGate ? 'bg-emerald-500/20 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
+                                        <ShieldCheck className="w-5 h-5" />
+                                     </div>
+                                     <div>
+                                        <h4 className="font-bold text-slate-200">بوابة الثقة (Confidence Gate)</h4>
+                                        <p className="text-[10px] text-slate-500 uppercase font-mono">AI_PROBABILITY_FILTER</p>
+                                     </div>
+                                  </div>
+                                  <button 
+                                     type="button"
+                                     onClick={() => setSettings({...settings, useStrategyConfidenceGate: !(settings as any).useStrategyConfidenceGate} as any)}
+                                     className={`w-12 h-6 rounded-full transition-all relative ${
+                                        (settings as any).useStrategyConfidenceGate ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-700'
+                                     }`}
+                                  >
+                                     <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                        (settings as any).useStrategyConfidenceGate ? 'left-7' : 'left-1'
+                                     }`} />
+                                  </button>
+                               </div>
+
+                               {(settings as any).useStrategyConfidenceGate && (
+                                  <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                     <div className="flex justify-between items-center">
+                                        <label className="text-xs text-slate-400 font-bold">الحد الأدنى لليقين (Confidence)</label>
+                                        <span className="text-emerald-400 font-mono text-sm font-bold">{Math.round(((settings as any).strategyMinConfidence ?? 0.6) * 100)}%</span>
+                                     </div>
+                                     <input type="range" min="0.1" max="1.0" step="0.1"
+                                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                        value={(settings as any).strategyMinConfidence ?? 0.6}
+                                        onChange={e => setSettings({...settings, strategyMinConfidence: parseFloat(e.target.value)} as any)}
+                                     />
+                                     <p className="text-[10px] text-slate-500 italic">* تصفية الإشارات بناءً على نسبة نجاحها الإحصائية المتوقعة.</p>
+                                  </div>
+                               )}
+                            </div>
+
+                            {/* Momentum Rule Toggle */}
+                            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
+                               <div className="flex justify-between items-center">
+                                  <div className="flex items-center gap-3">
+                                     <div className={`p-2 rounded-lg ${(settings as any).useStrategyMomentumRule ? 'bg-purple-500/20 text-purple-500' : 'bg-slate-800 text-slate-500'}`}>
+                                        <Zap className="w-5 h-5" />
+                                     </div>
+                                     <div>
+                                        <h4 className="font-bold text-slate-200">قاعدة الزخم (Momentum Rule)</h4>
+                                        <p className="text-[10px] text-slate-500 uppercase font-mono">RVOL_VELOCITY_CHECK</p>
+                                     </div>
+                                  </div>
+                                  <button 
+                                     type="button"
+                                     onClick={() => setSettings({...settings, useStrategyMomentumRule: !(settings as any).useStrategyMomentumRule} as any)}
+                                     className={`w-12 h-6 rounded-full transition-all relative ${
+                                        (settings as any).useStrategyMomentumRule ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.4)]' : 'bg-slate-700'
+                                     }`}
+                                  >
+                                     <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                                        (settings as any).useStrategyMomentumRule ? 'left-7' : 'left-1'
+                                     }`} />
+                                  </button>
+                               </div>
+
+                               {(settings as any).useStrategyMomentumRule && (
+                                  <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                     <div className="flex justify-between items-center">
+                                        <label className="text-xs text-slate-400 font-bold">عتبة الزخم النسبي (RVOL)</label>
+                                        <span className="text-purple-400 font-mono text-sm font-bold">{(settings as any).strategyRvolThreshold ?? 1.5}x</span>
+                                     </div>
+                                     <input type="range" min="1.0" max="10.0" step="0.5"
+                                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                        value={(settings as any).strategyRvolThreshold ?? 1.5}
+                                        onChange={e => setSettings({...settings, strategyRvolThreshold: parseFloat(e.target.value)} as any)}
+                                     />
+                                     <p className="text-[10px] text-slate-500 italic">* لا يدخل البوت إلا إذا كان حجم التداول الحالي أقوى من المتوسط (سيولة انفجارية).</p>
+                                  </div>
+                               )}
+                            </div>
                          </div>
 
-                         {(settings as any).useStrategyVolatilityRule && (
-                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-xs text-slate-400 font-bold">معامل تمدد الوقف (ATR Multiplier)</label>
-                                  <span className="text-blue-400 font-mono text-sm font-bold">{(settings as any).strategyAtrMultiplier ?? 1.5}x</span>
-                               </div>
-                               <input type="range" min="1.0" max="5.0" step="0.1"
-                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                                  value={(settings as any).strategyAtrMultiplier ?? 1.5}
-                                  onChange={e => setSettings({...settings, strategyAtrMultiplier: parseFloat(e.target.value)} as any)}
-                               />
-                               <p className="text-[10px] text-slate-500 italic">* استخدام ATR لوضع وقف خسارة ديناميكي يتنفس مع حركة السوق.</p>
-                            </div>
-                         )}
-                      </div>
-
-                      {/* Confidence Gate Toggle */}
-                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
-                         <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyConfidenceGate ? 'bg-emerald-500/20 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
-                                  <ShieldCheck className="w-5 h-5" />
-                               </div>
-                               <div>
-                                  <h4 className="font-bold text-slate-200">بوابة الثقة (Confidence Gate)</h4>
-                                  <p className="text-[10px] text-slate-500 uppercase font-mono">AI_PROBABILITY_FILTER</p>
-                               </div>
-                            </div>
+                         <div className="pt-6 border-t border-slate-700/50">
                             <button 
-                               type="button"
-                               onClick={() => setSettings({...settings, useStrategyConfidenceGate: !(settings as any).useStrategyConfidenceGate} as any)}
-                               className={`w-12 h-6 rounded-full transition-all relative ${
-                                  (settings as any).useStrategyConfidenceGate ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-700'
-                               }`}
+                              type="submit" 
+                              className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-lg transition-all shadow-lg shadow-amber-500/20 active:scale-[0.98] flex items-center justify-center gap-2"
                             >
-                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
-                                  (settings as any).useStrategyConfidenceGate ? 'left-7' : 'left-1'
-                               }`} />
+                              {savingSettings ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
+                              حقن وتطبيق الاستراتيجية الجديدة
                             </button>
                          </div>
-
-                         {(settings as any).useStrategyConfidenceGate && (
-                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-xs text-slate-400 font-bold">الحد الأدنى لليقين (Confidence)</label>
-                                  <span className="text-emerald-400 font-mono text-sm font-bold">{Math.round(((settings as any).strategyMinConfidence ?? 0.6) * 100)}%</span>
-                               </div>
-                               <input type="range" min="0.1" max="1.0" step="0.1"
-                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                                  value={(settings as any).strategyMinConfidence ?? 0.6}
-                                  onChange={e => setSettings({...settings, strategyMinConfidence: parseFloat(e.target.value)} as any)}
-                               />
-                               <p className="text-[10px] text-slate-500 italic">* تصفية الإشارات بناءً على نسبة نجاحها الإحصائية المتوقعة.</p>
-                            </div>
-                         )}
-                      </div>
-
-                      {/* Momentum Rule Toggle */}
-                      <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-4">
-                         <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                               <div className={`p-2 rounded-lg ${(settings as any).useStrategyMomentumRule ? 'bg-purple-500/20 text-purple-500' : 'bg-slate-800 text-slate-500'}`}>
-                                  <Zap className="w-5 h-5" />
-                               </div>
-                               <div>
-                                  <h4 className="font-bold text-slate-200">قاعدة الزخم (Momentum Rule)</h4>
-                                  <p className="text-[10px] text-slate-500 uppercase font-mono">RVOL_VELOCITY_CHECK</p>
-                               </div>
-                            </div>
-                            <button 
-                               type="button"
-                               onClick={() => setSettings({...settings, useStrategyMomentumRule: !(settings as any).useStrategyMomentumRule} as any)}
-                               className={`w-12 h-6 rounded-full transition-all relative ${
-                                  (settings as any).useStrategyMomentumRule ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.4)]' : 'bg-slate-700'
-                               }`}
-                            >
-                               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
-                                  (settings as any).useStrategyMomentumRule ? 'left-7' : 'left-1'
-                               }`} />
-                            </button>
-                         </div>
-
-                         {(settings as any).useStrategyMomentumRule && (
-                            <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-xs text-slate-400 font-bold">عتبة الزخم النسبي (RVOL)</label>
-                                  <span className="text-purple-400 font-mono text-sm font-bold">{(settings as any).strategyRvolThreshold ?? 1.5}x</span>
-                               </div>
-                               <input type="range" min="1.0" max="10.0" step="0.5"
-                                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                  value={(settings as any).strategyRvolThreshold ?? 1.5}
-                                  onChange={e => setSettings({...settings, strategyRvolThreshold: parseFloat(e.target.value)} as any)}
-                               />
-                               <p className="text-[10px] text-slate-500 italic">* لا يدخل البوت إلا إذا كان حجم التداول الحالي أقوى من المتوسط (سيولة انفجارية).</p>
-                            </div>
-                         )}
-                      </div>
+                      </form>
                    </div>
 
-                   <div className="pt-6 border-t border-slate-700/50 flex flex-col gap-4">
-                      <button 
-                        type="submit" 
-                        className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-lg transition-all shadow-lg shadow-amber-500/20 active:scale-[0.98] flex items-center justify-center gap-2"
-                      >
-                        {savingSettings ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
-                        حقن وتطبيق الاستراتيجية الجديدة
-                      </button>
-                      <p className="text-[10px] text-center text-slate-500 uppercase tracking-widest font-mono">
-                         CORE_ENGINE: PROTOCOL_INJECTION_ACTIVE
-                      </p>
+                   {/* Right Col: Analysis & Info */}
+                   <div className="space-y-6">
+                      <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-6 shadow-xl relative overflow-hidden">
+                         <div className="absolute top-0 right-0 p-2 opacity-10">
+                            <BarChart2 className="w-16 h-16" />
+                         </div>
+                         <h4 className="text-sm font-bold text-slate-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                            تحليل الاستراتيجية المتوقع
+                         </h4>
+                         
+                         <div className="space-y-6">
+                            <div>
+                               <label className="text-[10px] text-slate-500 font-bold uppercase block mb-1">كثافة التداول المتوقعة</label>
+                               <div className={`text-lg font-black ${intensity.color}`}>{intensity.label}</div>
+                               <div className="mt-2 h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full transition-all duration-500 ${intensity.color.replace('text', 'bg')}`} 
+                                    style={{ width: intensity.label.includes('High') ? '85%' : intensity.label.includes('Very High') ? '100%' : intensity.label.includes('Moderate') ? '50%' : '20%' }}
+                                  />
+                               </div>
+                            </div>
+
+                            <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                               <div className="text-[10px] text-slate-500 font-bold mb-2 uppercase">ملاحظات المحلل الذكي:</div>
+                               <ul className="text-xs text-slate-300 space-y-2">
+                                  {(settings as any).strictMode ? (
+                                     <li className="flex gap-2">🛡️ <span className="text-emerald-400/80">الوضع الصارم مفعل:</span> سيقوم البوت برفض 90% من الفرص لضمان الجودة.</li>
+                                  ) : (
+                                     <li className="flex gap-2">🔥 <span className="text-rose-400/80">الوضع الحر مفعل:</span> سيقوم البوت بالهجوم على فرط أكثر جرأة.</li>
+                                  )}
+                                  {(settings as any).beastMode && (
+                                     <li className="flex gap-2">🐺 <span className="text-purple-400/80">وضع الوحش نشط:</span> النظام سيتكيف تلقائياً مع قيعان السيولة.</li>
+                                  )}
+                                  {!(settings as any).useStrategyTrendFilter && (
+                                     <li className="flex gap-2">⚠️ <span className="text-amber-400/80">فلتر الاتجاه معطل:</span> قد تدخل صفقات في أسواق عرضية (Chop).</li>
+                                  )}
+                               </ul>
+                            </div>
+
+                            <div className="text-[10px] text-slate-600 italic text-center">
+                               * هذا التحليل تقديري بناءً على البيانات التاريخية لآخر 30 يوم من التقلبات.
+                            </div>
+                         </div>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 rounded-xl p-5">
+                         <h4 className="text-xs font-bold text-indigo-400 mb-2 flex items-center gap-2">
+                            <Activity className="w-4 h-4" />
+                            نصائح لزيادة عدد الصفقات
+                         </h4>
+                         <p className="text-[11px] text-slate-400 leading-relaxed">
+                            إذا كنت تجد أن البوت لا يفتح صفقات، جرب الآتي:
+                            <br/><br/>
+                            1. قلل قيمة <strong className="text-slate-200">ADX Threshold</strong> إلى 15 أو 20.
+                            <br/>
+                            2. قلل <strong className="text-slate-200">Confidence Gate</strong> إلى 40% أو 50%.
+                            <br/>
+                            3. عطل <strong className="text-slate-200">Strict Mode</strong> إذا كنت تريد صيداً أوسع.
+                            <br/>
+                            4. تأكد من أن قيمة <strong className="text-slate-200">Portfolio Size</strong> كافية لفتح الصفقات.
+                         </p>
+                      </div>
                    </div>
-                </form>
+                </div>
              </div>
           )}
 
@@ -1125,6 +1322,26 @@ function StatCard({ title, value, trend, positive }: { title: string, value: str
                  {trend}
              </span>
         )}
+    </div>
+  );
+}
+
+function TroubleshootRow({ label, passed, failMsg }: { label: string, passed: boolean, failMsg: string }) {
+  return (
+    <div className="space-y-1">
+       <div className="flex items-center justify-between">
+          <span className="text-[10px] text-slate-300 font-bold">{label}</span>
+          {passed ? (
+             <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" /> جَيِّد
+             </span>
+          ) : (
+             <span className="text-[10px] text-rose-400 font-bold flex items-center gap-1">
+                <Activity className="w-3 h-3" /> بحاجة تدخل
+             </span>
+          )}
+       </div>
+       {!passed && <p className="text-[9px] text-rose-500/80 italic leading-tight">{failMsg}</p>}
     </div>
   );
 }
