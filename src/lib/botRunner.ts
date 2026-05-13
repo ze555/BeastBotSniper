@@ -45,6 +45,13 @@ export async function runTradeLoop() {
   setInterval(async () => {
     if (isRunning) return;
     isRunning = true;
+    
+    // Heartbeat log every 10 iterations (~30 seconds)
+    if ((globalContext as any).loopCount === undefined) (globalContext as any).loopCount = 0;
+    (globalContext as any).loopCount++;
+    if ((globalContext as any).loopCount % 10 === 0) {
+        addLog(`Bot Heartbeat: Scanning ${getWatchlist().length} symbols...`, 'info');
+    }
 
     try {
       const activeTrades = sniper.getActiveTrades();

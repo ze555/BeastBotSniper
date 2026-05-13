@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { sniper } from './sniperEngine.js';
 import { EngineDecision } from '../types/trading.js';
+import { addLog } from './botRunner.js';
 
 export interface ScannedCoin {
   symbol: string;
@@ -80,9 +81,11 @@ export async function runBinanceScanner() {
       !t.symbol.includes('BULLUSDT') && !t.symbol.includes('BEARUSDT')
     );
 
-    console.log(`[SCANNER] Found ${validTickers.length} coins with >$${minVolume / 1000000}M volume. (Beast/Scavenger: ${isScavenger})`);
+    console.log(`[SCANNER] Found ${validTickers.length} coins matching volume criteria. Analyzing...`);
+    addLog(`Scanning ${validTickers.length} potential coins...`, 'info');
 
     const candidates: ScannedCoin[] = [];
+    let processedCount = 0;
 
     // Analyze each valid coin
     for (const ticker of validTickers) {
@@ -239,8 +242,18 @@ export async function runBinanceScanner() {
         });
       }
 
-      // Add a 200ms delay between coins to avoid Rate Limits (418 / 429 errors)
-      await sleep(200);
+      // Sorting and updating incrementally
+      processedCount++;
+      if (processedCount % 10 === 0) {
+          console.log(`[SCANNER] Progress: ${processedCount}/${validTickers.length} analyzed...`);
+          // Update watchlist partially to show activity
+          if (candidates.length > 0) {
+              goldenWatchlist = [...candidates].sort((a, b) => b.score - a.score).slice(0, 20);
+          }
+      }
+
+      // Add a small delay between groups to avoid Rate Limits
+      if (processedCount % 5 === 0) await sleep(200);
     }
 
     // Sort by score descending, then by volume
