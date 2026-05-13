@@ -63,7 +63,7 @@ export async function runBinanceScanner() {
     const isScavenger = isBeastMode && sniper.getSettings().beastLowCapHunting !== false;
 
     // SCVANGER MODE: Bypass strict volume bounds and dive into low liquidity
-    const minVolume = isScavenger ? 500000 : (isStrict ? (sniper.getSettings().strictMinVolume ?? 5000000) : 50000000);
+    const minVolume = isBeastMode ? 100000 : (isStrict ? (sniper.getSettings().strictMinVolume ?? 5000000) : 1000000);
 
     const excludedAssets = [
       'BTCUSDT', 'ETHUSDT', // Majors
@@ -154,6 +154,10 @@ export async function runBinanceScanner() {
       const currentCandleVol = parseFloat(klines[klines.length - 1][5]);
       const rvol = currentCandleVol / avgVol;
 
+      // Relax RVOL/Volatility filters for Beast Mode
+      const minRvol = isBeastMode ? 0.8 : 1.5;
+      const minVolatility = isBeastMode ? 1.0 : 3.0;
+
       // --- Filter 6: Trend (EMA 50) ---
       // Simple EMA calculation for the last close
       const k = 2 / (50 + 1);
@@ -165,8 +169,13 @@ export async function runBinanceScanner() {
       const isAboveEma = price > ema50;
       const isBelowEma = price < ema50;
       let trend: 'LONG' | 'SHORT' | 'FLAT' = 'FLAT';
-      if (isAboveEma) trend = 'LONG';
-      if (isBelowEma) trend = 'SHORT';
+      
+      // --- ANTI-CHOP SHIELD: Detect if price is "Glued" to EMA (Range-bound) ---
+      const distanceFromEma = Math.abs((price - ema50) / ema50) * 100;
+      const isGlued = distanceFromEma < 0.2; // Price is within 0.2% of EMA50 (No clear breakout)
+      
+      if (isAboveEma && !isGlued) trend = 'LONG';
+      if (isBelowEma && !isGlued) trend = 'SHORT';
 
       // --- Filter 4: Open Interest (OI) ---
       // For performance in bulk scanning, we use the 24h ticker's price action vs volume 
@@ -208,7 +217,8 @@ export async function runBinanceScanner() {
       if (checks.trendPass) score++;
 
     // Minimum score threshold to consider valid
-    if (score >= 4) {
+    const scoreThreshold = isBeastMode ? 1 : 4;
+    if (score >= scoreThreshold) {
       // Calculate sector strength (Simple: how many USDT pairs are up > 2%)
       const marketHeat = validTickers.filter(t => parseFloat(t.priceChangePercent) > 2).length / validTickers.length;
       if (marketHeat > 0.4) {

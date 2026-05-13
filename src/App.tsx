@@ -12,7 +12,12 @@ export default function App() {
   const [panicActive, setPanicActive] = useState(false);
   const [botActive, setBotActive] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [settings, setSettings] = useState({ portfolioSize: 1000, riskPerTradePerc: 1, maxConcurrentTrades: 3 });
+  const [settings, setSettings] = useState({ 
+    portfolioSize: 1000, 
+    riskPerTradePerc: 1, 
+    maxConcurrentTrades: 3,
+    dynamicSafetyExit: true 
+  });
   const [savingSettings, setSavingSettings] = useState(false);
 
   const STRATEGY_TEMPLATES = [

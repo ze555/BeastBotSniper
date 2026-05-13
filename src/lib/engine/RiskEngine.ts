@@ -12,17 +12,17 @@ export class RiskEngine {
   /**
    * هل يُسمح بفتح صفقة جديدة؟
    */
-  public canTrade(activeTrades: TradePosition[], history: any[]): { allowed: boolean; reason?: string } {
+  public canTrade(activeTrades: any[], history: any[], isBeastMode?: boolean): { allowed: boolean; reason?: string } {
     // 1. Exposure Control
-    const totalExposure = activeTrades.reduce((sum, t) => sum + (t.amount / 10), 0); // تقريبي بناءً على الرافعة
-    if (activeTrades.length >= 10) {
+    if (activeTrades.length >= (isBeastMode ? 20 : 10)) {
       return { allowed: false, reason: 'MAX_CONCURRENT_TRADES_REACHED' };
     }
 
     // 2. Consecutive Loss Protection
-    if (history.length >= this.config.maxConsecutiveLosses) {
-      const recent = history.slice(0, this.config.maxConsecutiveLosses);
-      const allLoss = recent.every(t => t.pnl < 0);
+    const limit = isBeastMode ? 15 : this.config.maxConsecutiveLosses;
+    if (history.length >= limit) {
+      const recent = history.slice(0, limit);
+      const allLoss = recent.every(t => (t.pnl || 0) < 0);
       if (allLoss) {
         return { allowed: false, reason: 'CONSECUTIVE_LOSS_PROTECTION_ACTIVE' };
       }

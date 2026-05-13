@@ -201,4 +201,5 @@ export interface BotSettings {
   useStrategyVolatilityRule?: boolean;
   useStrategyConfidenceGate?: boolean;
   useStrategyMomentumRule?: boolean;
+  dynamicSafetyExit?: boolean;
 }

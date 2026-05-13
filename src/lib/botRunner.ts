@@ -126,12 +126,12 @@ export async function runTradeLoop() {
                       currentTakerRatio = parseFloat(takerVRes.data[0].buyVol) / parseFloat(takerVRes.data[0].sellVol);
                    }
                    
-                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, currentTakerRatio);
+                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, currentTakerRatio, { emaTrend: currentPx > parseFloat(tkrRes.data[0][4]) ? 'LONG' : 'SHORT' });
                  } catch (e) {
-                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol);
+                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
                  }
               } else {
-                 sniper.manageTrades(t.symbol, currentPx);
+                sniper.manageTrades(t.symbol, currentPx, undefined, undefined, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
               }
 
               // 🧠 SMART EXIT LOGIC: Check multiple indicators dynamically (Refined against false pullbacks)
@@ -237,6 +237,7 @@ export async function runTradeLoop() {
       const watchlist = getWatchlist();
       const maxTrades = sniper.getSettings().maxConcurrentTrades;
       const isStrict = sniper.getSettings().strictMode;
+      const isBeastMode = sniper.getSettings().beastMode;
 
       // Check BTC trend for strict mode (Filter 3: BTC Trend Filter)
       let btcTrend = 'FLAT';
@@ -371,14 +372,39 @@ export async function runTradeLoop() {
             const rvolLocal = lcVol / avgVol;
 
             // Institutional candle: High volume + Strong close direction
-            const isBullishDisplacement = lcClose > lcOpen && rvolLocal >= 1.5;
-            const isBearishDisplacement = lcClose < lcOpen && rvolLocal >= 1.5;
+            const isBullishDisplacement = lcClose > lcOpen && (isBeastMode ? rvolLocal >= 0.8 : rvolLocal >= 1.5);
+            const isBearishDisplacement = lcClose < lcOpen && (isBeastMode ? rvolLocal >= 0.8 : rvolLocal >= 1.5);
 
             let type: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
             let isValidEntry = false;
 
+            // 🧠 ADAPTIVE LOGIC: Decide whether to use TREND-FOLLOWING or RANGE-TRADING
+            const isRangeBound = coin.trend === 'FLAT' || (rsi > 40 && rsi < 60 && rvolLocal < 1.0);
+            
+            if (isRangeBound && isBeastMode) {
+               // 🏹 RANGE-TRADING (Chop Strategy): Buy low, Sell high
+               if (rsi < 28 && lcClose > lcOpen) {
+                   type = 'LONG';
+                   isValidEntry = true;
+                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Oversold (RSI:${rsi.toFixed(1)}) - Trading back to mean`, 'info');
+               } else if (rsi > 72 && lcClose < lcOpen) {
+                   type = 'SHORT';
+                   isValidEntry = true;
+                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Overbought (RSI:${rsi.toFixed(1)}) - Trading back to mean`, 'info');
+               }
+            }
+
             // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
-            if (ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG') {
+            if (!isValidEntry && isBeastMode) {
+              // BEAST MODE: Extreme fast response, less care about EMA cross alignment
+              if (lcClose > lcOpen) {
+                  type = 'LONG';
+                  isValidEntry = true;
+              } else if (lcClose < lcOpen) {
+                  type = 'SHORT';
+                  isValidEntry = true;
+              }
+            } else if (!isValidEntry && ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG') {
                 // Ensure we are not buying the absolute top by restricting distance from EMA9
                 const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
                 if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
@@ -391,13 +417,19 @@ export async function runTradeLoop() {
                    type = 'SHORT';
                    isValidEntry = true;
                 }
+            } else {
+               // Report why the entry wasn't initially valid
+               if (!isBeastMode) {
+                  const reason = !isBullishDisplacement && !isBearishDisplacement ? 'No Volume Displacement' : 'EMA Trend Conflict';
+                  // addLog(`LOOKING ${coin.symbol}: ${reason}`, 'debug');
+               }
             }
 
-            const RequiredRvol = sniper.getSettings().strictMinRvol ?? 3.0;
+            const RequiredRvol = isBeastMode ? 0.8 : (sniper.getSettings().strictMinRvol ?? 3.0);
             // 🚀 BEAST UPGRADE: Relax score if HTF Trend is aligned, but be stricter if against it.
-            let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : 5;
+            let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : (isBeastMode ? 2 : 4);
             if (htfTrend === type && type !== 'NEUTRAL') {
-                RequiredScore = Math.max(4, RequiredScore - 1); // Confluence bonus!
+                RequiredScore = Math.max(isBeastMode ? 1 : 4, RequiredScore - 1); // Confluence bonus!
             }
 
             const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;
@@ -406,7 +438,7 @@ export async function runTradeLoop() {
             let strictPass = true;
             
             // Block Liquidity Voids or High Spread (Ghost moves are dangerous)
-            if (isLiquidityVoid || !spreadPass) strictPass = false;
+            if (!isBeastMode && (isLiquidityVoid || !spreadPass)) strictPass = false;
 
             // NEW: Anti-Whale Funding Filter
             // If funding is extremely positive (> 0.05%), buying is expensive. If extremely negative (< -0.05%), selling is expensive.
@@ -480,6 +512,13 @@ export async function runTradeLoop() {
               // Allow the Sniper Engine to fire mathematically
               sniper.evaluateSignal(condition, klines, htfKlines, globalContext);
               coin.decision = condition.decision; // Link back to watchlist for UI insight
+            } else if (isValidEntry) {
+                // Just log the failure reason for debugging
+                if (coin.score < RequiredScore) {
+                   addLog(`DRAFT ${coin.symbol}: Score ${coin.score.toFixed(1)} < ${RequiredScore} (Rejected)`, 'warn');
+                } else if (!strictPass) {
+                   addLog(`DRAFT ${coin.symbol}: Filter Rejected (BTC/OI/PII)`, 'warn');
+                }
             }
 
           } catch (e: any) {

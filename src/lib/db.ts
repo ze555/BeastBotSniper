@@ -75,7 +75,8 @@ export const initDB = () => {
           useStrategyTrendFilter INTEGER DEFAULT 1,
           useStrategyVolatilityRule INTEGER DEFAULT 1,
           useStrategyConfidenceGate INTEGER DEFAULT 1,
-          useStrategyMomentumRule INTEGER DEFAULT 1
+          useStrategyMomentumRule INTEGER DEFAULT 1,
+          dynamicSafetyExit INTEGER DEFAULT 1
         )
       `);
       
@@ -114,7 +115,8 @@ export const initDB = () => {
         "useStrategyTrendFilter INTEGER DEFAULT 1",
         "useStrategyVolatilityRule INTEGER DEFAULT 1",
         "useStrategyConfidenceGate INTEGER DEFAULT 1",
-        "useStrategyMomentumRule INTEGER DEFAULT 1"
+        "useStrategyMomentumRule INTEGER DEFAULT 1",
+        "dynamicSafetyExit INTEGER DEFAULT 1"
       ];
       
       let pending = newCols.length;
@@ -205,9 +207,10 @@ export function saveSettingsToDB(settings: any) {
       useKineticEngine, kineticUseOpenInterest, kineticUseVolume, kineticSensitivty, 
       beastMode,
       strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
-      useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule
+      useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule,
+      dynamicSafetyExit
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -245,7 +248,8 @@ export function saveSettingsToDB(settings: any) {
       useStrategyTrendFilter=excluded.useStrategyTrendFilter,
       useStrategyVolatilityRule=excluded.useStrategyVolatilityRule,
       useStrategyConfidenceGate=excluded.useStrategyConfidenceGate,
-      useStrategyMomentumRule=excluded.useStrategyMomentumRule
+      useStrategyMomentumRule=excluded.useStrategyMomentumRule,
+      dynamicSafetyExit=excluded.dynamicSafetyExit
   `, [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
@@ -256,7 +260,8 @@ export function saveSettingsToDB(settings: any) {
     settings.useKineticEngine ? 1 : 0, settings.kineticUseOpenInterest ? 1 : 0, settings.kineticUseVolume ? 1 : 0, settings.kineticSensitivty ?? 1.0,
     settings.beastMode ? 1 : 0,
     settings.strategyAdxThreshold ?? 25, settings.strategyAtrMultiplier ?? 1.5, settings.strategyMinConfidence ?? 0.6, settings.strategyRvolThreshold ?? 1.5,
-    settings.useStrategyTrendFilter ? 1 : 0, settings.useStrategyVolatilityRule ? 1 : 0, settings.useStrategyConfidenceGate ? 1 : 0, settings.useStrategyMomentumRule ? 1 : 0
+    settings.useStrategyTrendFilter ? 1 : 0, settings.useStrategyVolatilityRule ? 1 : 0, settings.useStrategyConfidenceGate ? 1 : 0, settings.useStrategyMomentumRule ? 1 : 0,
+    settings.dynamicSafetyExit ? 1 : 0
   ], (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
   });
@@ -281,6 +286,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.useStrategyVolatilityRule = row.useStrategyVolatilityRule !== 0;
         row.useStrategyConfidenceGate = row.useStrategyConfidenceGate !== 0;
         row.useStrategyMomentumRule = row.useStrategyMomentumRule !== 0;
+        row.dynamicSafetyExit = row.dynamicSafetyExit !== 0;
         resolve(row);
       }
     });

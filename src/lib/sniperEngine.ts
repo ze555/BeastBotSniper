@@ -32,7 +32,8 @@ export class SniperEngine {
     useStrategyTrendFilter: true,
     useStrategyVolatilityRule: true,
     useStrategyConfidenceGate: true,
-    useStrategyMomentumRule: true
+    useStrategyMomentumRule: true,
+    dynamicSafetyExit: true
   };
 
   constructor() {
@@ -96,7 +97,8 @@ export class SniperEngine {
              useStrategyTrendFilter: dbSettings.useStrategyTrendFilter ?? true,
              useStrategyVolatilityRule: dbSettings.useStrategyVolatilityRule ?? true,
              useStrategyConfidenceGate: dbSettings.useStrategyConfidenceGate ?? true,
-             useStrategyMomentumRule: dbSettings.useStrategyMomentumRule ?? true
+             useStrategyMomentumRule: dbSettings.useStrategyMomentumRule ?? true,
+             dynamicSafetyExit: dbSettings.dynamicSafetyExit ?? true
            };
          }
          console.log('[SNIPER] Loaded settings from database', this.settings);
@@ -210,7 +212,7 @@ export class SniperEngine {
     }
 
     // 2. Risk Engine Validation
-    const riskVerdict = this.risk.canTrade(this.getActiveTrades() as any, this.tradeHistory);
+    const riskVerdict = this.risk.canTrade(this.getActiveTrades(), this.tradeHistory, this.settings.beastMode);
     if (!riskVerdict.allowed) {
        console.log(`[RISK] 🛡️ Entry Blocked: ${riskVerdict.reason}`);
        return;
@@ -251,11 +253,67 @@ export class SniperEngine {
   }
 
   /**
-   * Manage active trades (Trailing stops, Take Profits)
+   * Manage active trades (Trailing stops, Take Profits, and Dynamic Safety Exits)
    */
-  public manageTrades(symbol: string, currentPrice: number, currentOI?: number, currentVol?: number, currentTakerRatio?: number) {
+  public manageTrades(
+    symbol: string, 
+    currentPrice: number, 
+    currentOI?: number, 
+    currentVol?: number, 
+    currentTakerRatio?: number,
+    indicators?: { adx?: number, rsi?: number, emaTrend?: 'LONG' | 'SHORT', btcTrend?: 'LONG' | 'SHORT' }
+  ) {
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
+
+    // --- DYNAMIC SAFETY EXIT (مراقبة المؤشرات الصارمة بعد الدخول) ---
+    if (this.settings.dynamicSafetyExit && indicators && trade.status !== 'CLOSED') {
+        const isStrict = this.settings.strictMode;
+        let failCount = 0;
+        let reasons: string[] = [];
+
+        // 1. ADX Threshold Guard (If trend dies, evaluate context)
+        const adxThreshold = isStrict ? (this.settings.strategyAdxThreshold ?? 25) : 15;
+        if (indicators.adx && indicators.adx < adxThreshold * 0.6) { 
+            // Only count as fail if price is also trending against us
+            const priceAgainstUs = trade.type === 'LONG' ? (currentPrice < trade.entryPrice) : (currentPrice > trade.entryPrice);
+            if (priceAgainstUs) {
+                failCount++;
+                reasons.push(`ADX_DIED (${indicators.adx.toFixed(1)})`);
+            }
+        }
+
+        // 2. Trend Alignment Guard (EMA Cross Reversal) - Needs Confluence
+        if (indicators.emaTrend && indicators.emaTrend !== trade.type) {
+            // Check RSI before killing trade immediately on EMA flip
+            if (indicators.rsi) {
+                const isRsiNeutral = indicators.rsi > 45 && indicators.rsi < 55;
+                if (!isRsiNeutral) { // Only fail if RSI also confirms momentum reversal
+                   failCount++;
+                   reasons.push(`TREND_REVERSED (${indicators.emaTrend})`);
+                }
+            }
+        }
+
+        // 3. RSI Momentum Loss - With Buffer
+        if (indicators.rsi) {
+            if (trade.type === 'LONG' && indicators.rsi < 35) { // Lower floor to 35 to handle chop
+                failCount++;
+                reasons.push(`RSI_MOMENTUM_CRASH (${indicators.rsi.toFixed(1)})`);
+            }
+            if (trade.type === 'SHORT' && indicators.rsi > 65) {
+                failCount++;
+                reasons.push(`RSI_MOMENTUM_CRASH (${indicators.rsi.toFixed(1)})`);
+            }
+        }
+
+        // Decision Logic: Requires 2.0 Fail points (Higher wall to prevent noise exits)
+        if (failCount >= 2.0) {
+            console.log(`[DYNAMIC EXIT] 🛡️ Heavy weakness detected in ${trade.symbol}. Reasons: ${reasons.join(', ')}`);
+            this.closeTrade(trade, currentPrice, `🛡️ STRAT_WEAKNESS: ${reasons.shift()}`);
+            return;
+        }
+    }
 
     // 1. Layered Position Management Verdict
     const verdict = this.manager.manage(trade as any, currentPrice);
