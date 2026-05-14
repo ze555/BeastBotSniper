@@ -228,6 +228,7 @@ export default function App() {
           <nav className="flex flex-col gap-2 px-2 md:px-4">
             <NavItem icon={<Activity />} label="لوحة التحكم ومراقبة السوق" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
             <NavItem icon={<BarChart2 />} label="سجل الصفقات" active={activeTab === 'trades'} onClick={() => setActiveTab('trades')} />
+            <NavItem icon={<Activity />} label="سجل محرك الانتظار" active={activeTab === 'wait_engine'} onClick={() => setActiveTab('wait_engine')} />
             <NavItem icon={<Sliders />} label="بناء الاستراتيجية" active={activeTab === 'strategy'} onClick={() => setActiveTab('strategy')} />
             <NavItem icon={<Settings />} label="إعدادات المخاطرة" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
           </nav>
@@ -531,7 +532,7 @@ export default function App() {
                      <tbody className="divide-y divide-slate-700/50">
                         {historyTrades.length === 0 ? (
                            <tr>
-                             <td colSpan={7} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد.</td>
+                             <td colSpan={8} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد.</td>
                            </tr>
                         ) : historyTrades.map((t, i) => (
                            <tr key={i} className="hover:bg-slate-700/20">
@@ -550,6 +551,70 @@ export default function App() {
                                 <span className={`px-2 py-1 text-[10px] rounded ${t.pnl > 0 ? 'bg-emerald-500/20 text-emerald-400' : t.isBreakeven || t.pnl === 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
                                   {t.pnl > 0 ? 'ربح محقق 🎯' : t.isBreakeven || t.pnl === 0 ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
                                 </span>
+                              </td>
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+                </div>
+             </div>
+          )}
+
+          {activeTab === 'wait_engine' && (
+             <div className="rounded-xl bg-slate-800/50 border border-slate-700/50 overflow-hidden">
+                <div className="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/80">
+                  <div className="flex flex-col">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-amber-400" />
+                      سجل صفقات محرك الانتظار (Wait Engine - Closed Only)
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-1">حصرياً للصفقات التي تم الانتظار لها حتى اكتمال شروط القناص.</p>
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono italic bg-slate-900 px-3 py-1 rounded border border-slate-700/50">FILTER: SOURCE_WAIT_ENGINE</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-sm text-slate-300">
+                     <thead className="bg-slate-800/30 text-slate-400">
+                      <tr>
+                        <th className="px-5 py-3 font-medium">وقت الإغلاق</th>
+                        <th className="px-5 py-3 font-medium">العملة</th>
+                        <th className="px-5 py-3 font-medium">الكمية ($)</th>
+                        <th className="px-5 py-3 font-medium">سعر الدخول</th>
+                        <th className="px-5 py-3 font-medium">سعر الخروج</th>
+                        <th className="px-5 py-3 font-medium">نسبة الربح</th>
+                        <th className="px-5 py-3 font-medium">صافي الربح</th>
+                      </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-700/50">
+                        {historyTrades.filter(t => t.source === 'WAIT_ENGINE' && t.status === 'CLOSED').length === 0 ? (
+                           <tr>
+                             <td colSpan={7} className="py-20 text-center">
+                                <div className="flex flex-col items-center gap-4 opacity-20">
+                                   <Zap className="w-16 h-16 text-amber-500" />
+                                   <div className="space-y-1">
+                                      <p className="text-xl font-bold text-slate-400">لا توجد صفقات منفذة حتى الآن</p>
+                                      <p className="text-slate-500 text-xs italic">بانتظار محرك الانتظار لاقتناص الفرصة التالية...</p>
+                                   </div>
+                                </div>
+                             </td>
+                           </tr>
+                        ) : historyTrades.filter(t => t.source === 'WAIT_ENGINE' && t.status === 'CLOSED').map((t, i) => (
+                           <tr key={i} className="hover:bg-amber-500/5 border-r-2 border-transparent hover:border-amber-500/50 transition-all group">
+                              <td className="px-5 py-4 font-mono text-slate-400 text-xs">
+                                 {t.exitTime ? new Date(t.exitTime).toLocaleString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '...'}
+                              </td>
+                              <td className="px-5 py-4 font-bold font-mono text-emerald-400 text-base">{t.symbol}</td>
+                              <td className="px-5 py-4 font-mono text-slate-300">${parseFloat(t.amount || 0).toFixed(2)}</td>
+                              <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice || 0).toFixed(4)}</td>
+                              <td className="px-5 py-4 font-mono text-white font-medium">{parseFloat(t.exitPrice || 0).toFixed(4)}</td>
+                              <td className={`px-5 py-4 font-mono font-bold text-base ${t.pnlPerc > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {t.pnlPerc > 0 ? '+' : ''}{t.pnlPerc?.toFixed(2)}%
+                              </td>
+                              <td className={`px-5 py-4 font-mono font-black text-lg ${t.pnl > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                <div className="flex items-center gap-2 justify-end">
+                                   <span>{t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)}</span>
+                                   {t.pnl > 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                                </div>
                               </td>
                            </tr>
                         ))}

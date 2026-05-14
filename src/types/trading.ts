@@ -53,6 +53,7 @@ export interface Trade {
   realizedPnl?: number; // PnL generated from partial exits
   pnlPerc?: number;    // Profit/Loss percentage
   score: number;       // The 5/5 score that triggered it
+  source?: string;     // The engine that triggered the trade (e.g. 'WAIT_ENGINE')
   
   // Logic tracking
   isBreakeven: boolean; // Has SL been moved to entry?

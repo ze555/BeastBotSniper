@@ -32,7 +32,8 @@ export const initDB = () => {
           pnl REAL,
           pnlPerc REAL,
           score INTEGER NOT NULL,
-          isBreakeven INTEGER DEFAULT 0
+          isBreakeven INTEGER DEFAULT 0,
+          source TEXT DEFAULT 'CORE'
         )
       `);
       
@@ -129,14 +130,15 @@ export const initDB = () => {
          });
       });
       db.run(`ALTER TABLE trades ADD COLUMN leverage REAL DEFAULT 10`, () => {});
+      db.run(`ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'CORE'`, () => {});
     });
   });
 };
 
 export function saveTrade(t: Trade) {
   const query = `
-    INSERT INTO trades (id, symbol, type, mode, entryPrice, entryTime, amount, leverage, sl, initialSl, tp1, tp2, status, exitPrice, exitTime, pnl, pnlPerc, score, isBreakeven) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (id, symbol, type, mode, entryPrice, entryTime, amount, leverage, sl, initialSl, tp1, tp2, status, exitPrice, exitTime, pnl, pnlPerc, score, isBreakeven, source) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET 
       sl=excluded.sl, 
       status=excluded.status, 
@@ -144,13 +146,14 @@ export function saveTrade(t: Trade) {
       exitTime=excluded.exitTime, 
       pnl=excluded.pnl, 
       pnlPerc=excluded.pnlPerc, 
-      isBreakeven=excluded.isBreakeven
+      isBreakeven=excluded.isBreakeven,
+      source=excluded.source
   `;
   
   db.serialize(() => {
     db.run(query, [
       t.id, t.symbol, t.type, t.mode, t.entryPrice, t.entryTime, t.amount, t.leverage || 10, t.sl, t.initialSl, t.tp1, t.tp2, t.status, 
-      t.exitPrice || null, t.exitTime || null, t.pnl || 0, t.pnlPerc || 0, t.score, t.isBreakeven ? 1 : 0
+      t.exitPrice || null, t.exitTime || null, t.pnl || 0, t.pnlPerc || 0, t.score, t.isBreakeven ? 1 : 0, t.source || 'CORE'
     ], (err) => {
       if (err) console.error('[DB ERROR] Failed to save trade:', err.message);
     });

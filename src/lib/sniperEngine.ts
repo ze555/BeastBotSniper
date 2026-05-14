@@ -196,13 +196,15 @@ export class SniperEngine {
        condition.type = 'LONG';
     }
 
-    this.executeTrade(condition);
+    // Label as WAIT_ENGINE if it's a standard sniper entry (met 5/5 wait conditions)
+    const sourceLabel = (decision.trap === TrapType.NONE) ? 'WAIT_ENGINE' : (decision.regime || 'CORE');
+    this.executeTrade(condition, sourceLabel);
   }
 
   /**
    * Execute trade and calculate strict Risk/Reward
    */
-  private executeTrade(cond: MarketCondition) {
+  private executeTrade(cond: MarketCondition, source?: string) {
     const entryPrice = cond.price;
     let sl = 0;
 
@@ -252,6 +254,7 @@ export class SniperEngine {
       tp2,
       status: 'OPEN',
       score: cond.score,
+      source: source || 'CORE',
       isBreakeven: false,
       pnl: 0,
       pnlPerc: 0
