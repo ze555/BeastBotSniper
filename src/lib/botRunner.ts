@@ -252,7 +252,13 @@ export async function runTradeLoop() {
          try {
             const btcRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr?symbol=BTCUSDT`, { timeout: 3000 });
             btcTrend = parseFloat(btcRes.data.priceChangePercent) >= 0 ? 'LONG' : 'SHORT';
-         } catch(e) {}
+         } catch(e: any) {
+             if (e?.response?.status === 403 || e?.response?.status === 429) {
+                addLog(`BTC Trend API 403. Pausing 60s`, 'warn');
+                await sleep(60000);
+                return;
+             }
+         }
       }
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
@@ -269,6 +275,7 @@ export async function runTradeLoop() {
         let rejectionReasons: Record<string, number> = {};
 
         for (const coin of targetsToCheck) {
+          await sleep(500); // Sleep 500ms to avoid Binance API 403 blocks
           // Check if already in trade
           if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
 
@@ -342,7 +349,11 @@ export async function runTradeLoop() {
                const avgLoss = losses / 14;
                currentRsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
 
-            } catch (e) {}
+            } catch (e: any) {
+               if (e?.response?.status === 403 || e?.response?.status === 429 || e?.response?.status === 418) {
+                   throw e; // Bubble up to outer catch for pause
+               }
+            }
 
             // 4. V2V Analysis (Volume to Value)
             const lastK = klines[klines.length - 2];
@@ -529,9 +540,11 @@ export async function runTradeLoop() {
             }
 
           } catch (e: any) {
-             if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-               console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 15m. Pausing Loop...`);
-               await sleep(10000);
+             if (e.response && (e.response.status === 429 || e.response.status === 418 || e.response.status === 403)) {
+               console.log(`[BOT RUNNER] ⚠️ Rate limit / WAF hit. Pausing Loop...`);
+               addLog(`API ERROR ${e.response.status} (WAF Block). Sleeping for 60s...`, 'warn');
+               await sleep(60000);
+               break; // Exit the loop to avoid spamming
              }
           }
         }
