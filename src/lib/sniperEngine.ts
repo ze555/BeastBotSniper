@@ -220,7 +220,8 @@ export class SniperEngine {
 
     // 3. Position Sizing
     const leverage = this.settings.leverage || 10;
-    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage);
+    const maxTrades = this.settings.maxConcurrentTrades || 10;
+    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage, maxTrades);
     
     // 4. Take Profits
     const risk = Math.abs(entryPrice - sl);
