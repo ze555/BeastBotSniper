@@ -32,12 +32,22 @@ export class RiskEngine {
   }
 
   /**
-   * حساب حجم الصفقة بناءً على الـ Stop Loss
+   * حساب حجم الصفقة بناءً على الـ Stop Loss مع احترام الرافعة المالية
    */
-  public calculatePositionSize(portfolioSize: number, entry: number, sl: number): number {
+  public calculatePositionSize(portfolioSize: number, entry: number, sl: number, leverage: number = 10): number {
     const riskAmount = portfolioSize * (this.config.maxRiskPerTradePerc / 100);
     const riskDistance = Math.abs(entry - sl);
-    const positionSize = (riskAmount / riskDistance) * entry;
+    
+    // الحساب النظري للمخاطرة (Risk-based sizing)
+    let positionSize = (riskAmount / riskDistance) * entry;
+    
+    // سقف القوة الشرائية: لا نسمح أبداً بتجاوز (رأس المال × الرافعة)
+    const maxBuyingPower = portfolioSize * leverage;
+    
+    if (positionSize > maxBuyingPower) {
+      positionSize = maxBuyingPower;
+    }
+
     return positionSize;
   }
 }

@@ -219,7 +219,8 @@ export class SniperEngine {
     }
 
     // 3. Position Sizing
-    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl);
+    const leverage = this.settings.leverage || 10;
+    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage);
     
     // 4. Take Profits
     const risk = Math.abs(entryPrice - sl);
@@ -332,7 +333,8 @@ export class SniperEngine {
     
     trade.currentPrice = currentPrice;
     trade.pnlPerc = floatingPnlPerc;
-    trade.pnl = (trade.amount * floatingPnlPerc) / 100;
+    // Current floating PnL minus approx entry fee
+    trade.pnl = ((trade.amount * floatingPnlPerc) / 100) - (trade.amount * 0.0005); 
 
     let updated = false;
 
@@ -695,8 +697,10 @@ export class SniperEngine {
         : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
         
       trade.pnlPerc = pnlPerc;
-      // Calculate PnL on remaining amount
-      let finalPnl = (trade.amount * pnlPerc) / 100;
+      
+      // Calculate PnL and subtract estimated fees (0.05% for entry + 0.05% for exit = 0.1% of position size)
+      const estimatedFee = trade.amount * 0.001; 
+      let finalPnl = ((trade.amount * pnlPerc) / 100) - estimatedFee;
       
       if (trade.realizedPnl) {
           finalPnl += trade.realizedPnl;
