@@ -229,8 +229,7 @@ export default function App() {
           </div>
           <nav className="flex flex-col gap-2 px-2 md:px-4">
             <NavItem icon={<Activity />} label="لوحة التحكم ومراقبة السوق" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-            <NavItem icon={<BarChart2 />} label="سجل الصفقات" active={activeTab === 'trades'} onClick={() => setActiveTab('trades')} />
-            <NavItem icon={<Activity />} label="سجل محرك الانتظار" active={activeTab === 'wait_engine'} onClick={() => setActiveTab('wait_engine')} />
+            <NavItem icon={<BarChart2 />} label="سجل الصفقات الموحد" active={activeTab === 'trades'} onClick={() => setActiveTab('trades')} />
             <NavItem icon={<Settings />} label="لوحة التحكم والنظام الموحد" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
           </nav>
         </div>
@@ -316,28 +315,32 @@ export default function App() {
                     
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                        <IntelligenceLayer 
-                          label="حالة السوق العالمية" 
+                          label="طبقة السياق العالمي (Cloud)" 
                           value={marketContext?.marketSentiment?.replace('_', ' ') || 'NEUTRAL'} 
                           color={marketContext?.marketSentiment?.includes('GREED') ? 'text-emerald-400' : marketContext?.marketSentiment?.includes('FEAR') ? 'text-rose-400' : 'text-blue-400'} 
-                          sub={`Top 20 Sentiment`} 
+                          sub={`تأمين الفوضى: ${settings.layerGlobalContextEnabled ? 'نشط' : 'معطل'}`}
+                          enabled={settings.layerGlobalContextEnabled}
                        />
                        <IntelligenceLayer 
-                          label="ارتباط الثيران" 
-                          value={`${((marketContext?.bullishRatio || 0) * 100).toFixed(0)}% Bullish`} 
+                          label="طبقة نظام السوق (Regime)" 
+                          value={marketContext?.regime || 'Tracking...'} 
                           color="text-amber-400" 
-                          sub="Global Structure" 
+                          sub={`عتبة ADX: ${settings.strategyAdxThreshold}`} 
+                          enabled={settings.layerRegimeEnabled}
                        />
                        <IntelligenceLayer 
-                          label="إجمالي السيولة (24h)" 
-                          value={`$${((marketContext?.totalVolume24h || 0) / 1e9).toFixed(1)}B`} 
+                          label="طبقة السيولة (Liquidity)" 
+                          value={marketContext?.trapStatus || 'Scanning...'} 
                           color="text-blue-400" 
-                          sub="USDT Pairs Volume" 
+                          sub="رصد الأهداف القوية" 
+                          enabled={settings.layerLiquidityEnabled}
                        />
                        <IntelligenceLayer 
-                          label="نظام الهجوم" 
-                          value={botActive ? "Sniper Precision" : "Standby"} 
+                          label="طبقة الزخم (Beast)" 
+                          value={botActive ? "Sniper V4" : "Standby"} 
                           color="text-emerald-400" 
-                          sub={botActive ? "Execution 3/3" : "Awaiting Strategy"} 
+                          sub={`RVOL Min: ${settings.strategyRvolThreshold}`} 
+                          enabled={settings.layerMomentumEnabled}
                        />
                     </div>
                  </div>
@@ -690,12 +693,15 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function IntelligenceLayer({ label, value, sub, color }: { label: string, value: string, sub: string, color: string }) {
+function IntelligenceLayer({ label, value, sub, color, enabled = true }: { label: string, value: string, sub: string, color: string, enabled?: boolean }) {
   return (
-    <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3 hover:border-slate-700 transition-colors">
-       <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{label}</span>
+    <div className={`border rounded-lg p-3 transition-all ${enabled ? 'bg-slate-950/50 border-slate-800 hover:border-slate-700' : 'bg-slate-900/20 border-slate-900 opacity-30 shadow-none'}`}>
+       <div className="flex items-center justify-between">
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{label}</span>
+          {!enabled && <div className="text-[8px] bg-slate-800 px-1 rounded text-slate-600 font-mono">DISABLED</div>}
+       </div>
        <div className={`text-sm font-bold mt-1 ${color}`}>{value}</div>
-       <div className="text-[9px] text-slate-600 mt-0.5">{sub}</div>
+       <div className="text-[9px] text-slate-600 mt-0.5 font-medium">{sub}</div>
     </div>
   );
 }

@@ -207,4 +207,27 @@ export interface BotSettings {
   fastExitEnabled?: boolean;            // تفعيل الخروج السريع الشامل
   fastExitPerc?: number;                // نسبة الخروج السريع (افتراضي 0.5%)
   dynamicSafetyExit?: boolean;
+
+  // --- 7 LAYERS UNIFIED SYSTEM SETTINGS ---
+  
+  // Layer 1: Global Cloud Context
+  layerGlobalContextEnabled: boolean;   // تأمين السياق العالمي (بيانات الكلاود)
+  
+  // Layer 2: Market Regime
+  layerRegimeEnabled: boolean;          // تفعيل فلتر نظام السوق (الاتجاه والعرضية)
+  
+  // Layer 3: Bias Alignment
+  layerBiasEnabled: boolean;            // تفعيل فلتر التوافق مع الفريمات الكبيرة
+  
+  // Layer 4: Liquidity Traps
+  layerLiquidityEnabled: boolean;       // تفعيل طبقة صيد الفخاخ واختراق السيولة
+  
+  // Layer 5: Momentum Velocity
+  layerMomentumEnabled: boolean;        // تفعيل طبقة الزخم والانفجار السعري
+  
+  // Layer 6: Neural Confidence
+  layerConfidenceEnabled: boolean;      // تفعيل بوابة اليقين الاصطناعي
+  
+  // Layer 7: Risk Execution
+  layerRiskEnabled: boolean;            // تفعيل طبقة التحقق النهائي للمخاطرة 
 }

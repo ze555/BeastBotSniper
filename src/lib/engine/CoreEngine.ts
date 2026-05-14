@@ -30,90 +30,97 @@ export class CoreEngine {
       return { regime: MarketRegime.VIOLENT_VOLATILITY, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'SLEEP', reason: `SAFETY_TRIGGERED: ${safety.reason}` };
     }
 
-    // 2. Global Market Check (The Cloud Layer)
-    if (global && global.marketSentiment === 'EXTREME_FEAR' && metrics.rvol < 3) {
-       // Risk avoidance during massive market panic unless liquidity is very high
-       return { regime: MarketRegime.VIOLENT_VOLATILITY, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'SLEEP', reason: 'MARKET_WIDE_PANIC_PROTECTION' };
-    }
+    // --- DECISION LAYERS ---
 
-    // 2. Market Regime Analysis
-    const regimeStatus = this.regime.analyze(metrics);
-    
-    // Custom ADX Override from Strategy Builder
-    if (settings?.useStrategyTrendFilter) {
-      const adxThreshold = settings?.strategyAdxThreshold ?? 25;
-      if (metrics.adx < adxThreshold && regimeStatus.regime !== MarketRegime.TRAP_MODE) {
-         return { regime: MarketRegime.COMPRESSION, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'WAIT', reason: `ADX_BELOW_THRESHOLD: ${metrics.adx.toFixed(1)} < ${adxThreshold}` };
-      }
-    }
-
-    // RVOL (Momentum) Rule from Strategy Builder
-    if (settings?.useStrategyMomentumRule) {
-       const rvolThreshold = settings?.strategyRvolThreshold ?? 1.5;
-       if (metrics.rvol < rvolThreshold) {
-          return { regime: regimeStatus.regime, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'WAIT', reason: `MOMENTUM_LOW: RVOL ${metrics.rvol.toFixed(1)} < ${rvolThreshold}` };
+    // LAYER 1: Global Market Check (The Cloud Layer)
+    let layer1Passed = true;
+    if (settings?.layerGlobalContextEnabled && global) {
+       if (global.marketSentiment === 'EXTREME_FEAR' && metrics.rvol < 3) {
+          layer1Passed = false;
        }
     }
 
-    if (regimeStatus.decision === 'SLEEP') {
-      return { regime: regimeStatus.regime, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'SLEEP', reason: 'MARKET_DEAD_OR_CHOP' };
+    // LAYER 2: Market Regime Analysis
+    let layer2Passed = true;
+    const regimeStatus = this.regime.analyze(metrics);
+    if (settings?.layerRegimeEnabled) {
+       const adxThreshold = settings?.strategyAdxThreshold ?? 25;
+       if (metrics.adx < adxThreshold && regimeStatus.regime !== MarketRegime.TRAP_MODE) {
+          layer2Passed = false;
+       }
+       if (regimeStatus.decision === 'SLEEP') {
+          layer2Passed = false;
+       }
     }
 
-    // 3. Directional Bias Analysis
+    // LAYER 3: Directional Bias Analysis
+    let layer3Passed = true;
     const directionalBias = this.bias.getBias(htfKlines);
+    if (settings?.layerBiasEnabled) {
+       // Layer 3 doesn't block by default but informs the action
+    }
 
-    // 4. Liquidity & Trap Detection
+    // LAYER 4: Liquidity & Trap Detection
+    let layer4Passed = true;
     const trap = this.liquidity.detectTrap(metrics, klinesRow);
+    if (settings?.layerLiquidityEnabled) {
+       // Layer 4 is an opportunistic layer
+    }
+
+    // LAYER 5: Momentum / RVOL 
+    let layer5Passed = true;
+    if (settings?.layerMomentumEnabled) {
+       const rvolThreshold = settings?.strategyRvolThreshold ?? 1.5;
+       if (metrics.rvol < rvolThreshold) {
+          layer5Passed = false;
+       }
+    }
+
+    // LAYER 6: AI Confidence Gate
+    let layer6Passed = true;
+    // (Confidence check is applied at the end)
+
+    // --- AGGREGATION & ATTACK LOGIC ---
+
+    if (!layer1Passed) return { regime: MarketRegime.VIOLENT_VOLATILITY, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'SLEEP', reason: 'LAYER_1_CLOUD_REJECTION' };
+    if (!layer2Passed) return { regime: MarketRegime.COMPRESSION, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'WAIT', reason: 'LAYER_2_REGIME_REJECTION' };
+    if (!layer5Passed) return { regime: regimeStatus.regime, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'WAIT', reason: 'LAYER_5_MOMENTUM_REJECTION' };
 
     // 5. Logical Decision (The Attack Logic)
     let action: 'WAIT' | 'ATTACK' | 'SLEEP' = 'WAIT';
     let reason = 'WAITING_FOR_EDGE';
     let confidence = 0;
 
-    // --- DECISION LAYERS ---
-
-    // LAYER 1: Trap Detection (High Confidence Counter-Strike)
-    if (trap === TrapType.LONG_TRAP && directionalBias === 'SHORT') {
+    // ATTACK SCANNING
+    // Opportunity 1: Trap Detection
+    const isTrapOpp = (trap === TrapType.LONG_TRAP && directionalBias === 'SHORT') || 
+                      (trap === TrapType.SHORT_TRAP && directionalBias === 'LONG');
+    
+    if (isTrapOpp && (settings?.layerLiquidityEnabled || settings?.beastMode)) {
        action = 'ATTACK';
-       reason = 'BULL_TRAP_DETECTED_IN_BEAR_TREND';
-       confidence = 0.95;
-    } else if (trap === TrapType.SHORT_TRAP && directionalBias === 'LONG') {
-       action = 'ATTACK';
-       reason = 'BEAR_TRAP_DETECTED_IN_BULL_TREND';
+       reason = trap === TrapType.LONG_TRAP ? 'BULL_TRAP_COUNTER' : 'BEAR_TRAP_COUNTER';
        confidence = 0.95;
     } 
-    // LAYER 2: Trend Continuation (Standard Sniper Move)
+    // Opportunity 2: Trend Continuation
     else if (metrics.rvol > 2.0 && regimeStatus.regime === MarketRegime.TRENDING) {
        const isPriceAlign = (metrics.rsi > 55 && directionalBias === 'LONG') || (metrics.rsi < 45 && directionalBias === 'SHORT');
-       if (isPriceAlign) {
+       if (isPriceAlign && (settings?.layerBiasEnabled || !settings?.layerBiasEnabled)) {
            action = 'ATTACK';
            reason = `TREND_CONTINUATION: RVOL ${metrics.rvol.toFixed(1)} + Bias ${directionalBias}`;
            confidence = 0.75;
        }
     }
-    // LAYER 3: Range Reversion (The "Chop" Slayer)
-    else if (regimeStatus.regime === MarketRegime.COMPRESSION || metrics.isChop) {
-        if (metrics.rsi > 70) {
-            action = 'ATTACK';
-            reason = 'RANGE_OVERBOUGHT_REVERSION';
-            confidence = 0.65;
-        } else if (metrics.rsi < 30) {
-            action = 'ATTACK';
-            reason = 'RANGE_OVERSOLD_REVERSION';
-            confidence = 0.65;
-        }
-    }
-    // LAYER 4: Beast Mode Pure Momentum
+    // Opportunity 3: Beast Strike
     else if (settings?.beastMode && metrics.rvol > 1.2) {
         action = 'ATTACK';
         reason = 'BEAST_MOMENTUM_STRIKE';
         confidence = 0.5;
     }
 
-    // Apply minimum confidence threshold from Strategy Builder
-    if (settings?.useStrategyConfidenceGate) {
+    // LAYER 6 Override: Apply minimum confidence threshold
+    if (settings?.layerConfidenceEnabled && action === 'ATTACK') {
        const minConfidence = settings?.strategyMinConfidence ?? 0.6;
-       if (action === 'ATTACK' && confidence < minConfidence) {
+       if (confidence < minConfidence) {
           action = 'WAIT';
           reason = `CONFIDENCE_TOO_LOW: ${confidence} < ${minConfidence}`;
        }

@@ -35,7 +35,14 @@ export class SniperEngine {
     useStrategyVolatilityRule: true,
     useStrategyConfidenceGate: true,
     useStrategyMomentumRule: true,
-    dynamicSafetyExit: true
+    dynamicSafetyExit: true,
+    layerGlobalContextEnabled: true,
+    layerRegimeEnabled: true,
+    layerBiasEnabled: true,
+    layerLiquidityEnabled: true,
+    layerMomentumEnabled: true,
+    layerConfidenceEnabled: true,
+    layerRiskEnabled: true
   };
 
   constructor() {
@@ -102,7 +109,14 @@ export class SniperEngine {
              useStrategyVolatilityRule: dbSettings.useStrategyVolatilityRule ?? true,
              useStrategyConfidenceGate: dbSettings.useStrategyConfidenceGate ?? true,
              useStrategyMomentumRule: dbSettings.useStrategyMomentumRule ?? true,
-             dynamicSafetyExit: dbSettings.dynamicSafetyExit ?? true
+             dynamicSafetyExit: dbSettings.dynamicSafetyExit ?? true,
+             layerGlobalContextEnabled: dbSettings.layerGlobalContextEnabled ?? true,
+             layerRegimeEnabled: dbSettings.layerRegimeEnabled ?? true,
+             layerBiasEnabled: dbSettings.layerBiasEnabled ?? true,
+             layerLiquidityEnabled: dbSettings.layerLiquidityEnabled ?? true,
+             layerMomentumEnabled: dbSettings.layerMomentumEnabled ?? true,
+             layerConfidenceEnabled: dbSettings.layerConfidenceEnabled ?? true,
+             layerRiskEnabled: dbSettings.layerRiskEnabled ?? true
            };
          }
          console.log('[SNIPER] Loaded settings from database', this.settings);

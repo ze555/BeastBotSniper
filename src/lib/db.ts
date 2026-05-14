@@ -117,7 +117,14 @@ export const initDB = () => {
         "useStrategyVolatilityRule INTEGER DEFAULT 1",
         "useStrategyConfidenceGate INTEGER DEFAULT 1",
         "useStrategyMomentumRule INTEGER DEFAULT 1",
-        "dynamicSafetyExit INTEGER DEFAULT 1"
+        "dynamicSafetyExit INTEGER DEFAULT 1",
+        "layerGlobalContextEnabled INTEGER DEFAULT 1",
+        "layerRegimeEnabled INTEGER DEFAULT 1",
+        "layerBiasEnabled INTEGER DEFAULT 1",
+        "layerLiquidityEnabled INTEGER DEFAULT 1",
+        "layerMomentumEnabled INTEGER DEFAULT 1",
+        "layerConfidenceEnabled INTEGER DEFAULT 1",
+        "layerRiskEnabled INTEGER DEFAULT 1"
       ];
       
       let pending = newCols.length;
@@ -211,9 +218,10 @@ export function saveSettingsToDB(settings: any) {
       beastMode,
       strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
       useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule,
-      dynamicSafetyExit
+      dynamicSafetyExit,
+      layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -252,7 +260,14 @@ export function saveSettingsToDB(settings: any) {
       useStrategyVolatilityRule=excluded.useStrategyVolatilityRule,
       useStrategyConfidenceGate=excluded.useStrategyConfidenceGate,
       useStrategyMomentumRule=excluded.useStrategyMomentumRule,
-      dynamicSafetyExit=excluded.dynamicSafetyExit
+      dynamicSafetyExit=excluded.dynamicSafetyExit,
+      layerGlobalContextEnabled=excluded.layerGlobalContextEnabled,
+      layerRegimeEnabled=excluded.layerRegimeEnabled,
+      layerBiasEnabled=excluded.layerBiasEnabled,
+      layerLiquidityEnabled=excluded.layerLiquidityEnabled,
+      layerMomentumEnabled=excluded.layerMomentumEnabled,
+      layerConfidenceEnabled=excluded.layerConfidenceEnabled,
+      layerRiskEnabled=excluded.layerRiskEnabled
   `, [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
@@ -264,7 +279,9 @@ export function saveSettingsToDB(settings: any) {
     settings.beastMode ? 1 : 0,
     settings.strategyAdxThreshold ?? 25, settings.strategyAtrMultiplier ?? 1.5, settings.strategyMinConfidence ?? 0.6, settings.strategyRvolThreshold ?? 1.5,
     settings.useStrategyTrendFilter ? 1 : 0, settings.useStrategyVolatilityRule ? 1 : 0, settings.useStrategyConfidenceGate ? 1 : 0, settings.useStrategyMomentumRule ? 1 : 0,
-    settings.dynamicSafetyExit ? 1 : 0
+    settings.dynamicSafetyExit ? 1 : 0,
+    settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0,
+    settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0
   ], (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
   });
@@ -290,6 +307,13 @@ export function loadSettingsFromDB(): Promise<any> {
         row.useStrategyConfidenceGate = row.useStrategyConfidenceGate !== 0;
         row.useStrategyMomentumRule = row.useStrategyMomentumRule !== 0;
         row.dynamicSafetyExit = row.dynamicSafetyExit !== 0;
+        row.layerGlobalContextEnabled = row.layerGlobalContextEnabled !== 0;
+        row.layerRegimeEnabled = row.layerRegimeEnabled !== 0;
+        row.layerBiasEnabled = row.layerBiasEnabled !== 0;
+        row.layerLiquidityEnabled = row.layerLiquidityEnabled !== 0;
+        row.layerMomentumEnabled = row.layerMomentumEnabled !== 0;
+        row.layerConfidenceEnabled = row.layerConfidenceEnabled !== 0;
+        row.layerRiskEnabled = row.layerRiskEnabled !== 0;
         resolve(row);
       }
     });
