@@ -142,6 +142,14 @@ export class SniperEngine {
     return this.tradeHistory;
   }
 
+  public async clearAllTrades() {
+    this.activeTrades.clear();
+    this.tradeHistory = [];
+    const { clearAllTradesDB } = await import('./db');
+    await clearAllTradesDB();
+    console.log('[SNIPER] 🧹 All trades and counters have been reset.');
+  }
+
   public triggerPanic(active: boolean) {
     this.core.killSwitch.setManualPanic(active);
     if (active) {

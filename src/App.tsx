@@ -200,6 +200,18 @@ export default function App() {
     } catch(e) {}
   };
 
+  const handleClearTrades = async () => {
+    if (!window.confirm("هل أنت متأكد من رغبتك في مسح كافة الصفقات وتصفير العدادات؟ هذه العملية لا يمكن التراجع عنها.")) return;
+    setLoading(true);
+    try {
+      await fetch('/api/trades/clear', { method: 'POST' });
+      await fetchData();
+    } catch(e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
   const manualRefreshScanner = async () => {
     setLoading(true);
     await fetchData();
@@ -523,6 +535,10 @@ export default function App() {
                     <BarChart2 className="w-5 h-5 text-emerald-400" />
                     سجل الصفقات المغلقة (القناص)
                   </h3>
+                  <button onClick={handleClearTrades} disabled={loading} className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition-colors flex items-center gap-2 text-sm font-medium border border-rose-500/20">
+                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                     تصفير الصفقات والعدادات
+                  </button>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-right text-sm text-slate-300">

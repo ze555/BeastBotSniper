@@ -167,6 +167,21 @@ export function saveTrade(t: Trade) {
   });
 }
 
+export function clearAllTradesDB(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run(`DELETE FROM trades`, (err) => {
+        if (err) {
+          console.error('[DB ERROR] Failed to clear trades:', err.message);
+          resolve();
+        } else {
+          resolve();
+        }
+      });
+    });
+  });
+}
+
 export function loadClosedTrades(): Promise<Trade[]> {
   return new Promise((resolve, reject) => {
     db.serialize(() => {
