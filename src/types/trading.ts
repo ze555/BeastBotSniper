@@ -206,4 +206,5 @@ export interface BotSettings {
   // ⚡ خيار الخروج السريع (Fast Exit)
   fastExitEnabled?: boolean;            // تفعيل الخروج السريع الشامل
   fastExitPerc?: number;                // نسبة الخروج السريع (افتراضي 0.5%)
+  dynamicSafetyExit?: boolean;
 }
