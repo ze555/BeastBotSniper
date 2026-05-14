@@ -15,8 +15,12 @@ export class PositionManager {
         : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
     
     newTrade.pnlPerc = pnlPerc;
-    // PnL = (Size * Change%) - Estimated Opening Fee
-    newTrade.pnl = ((trade.amount * pnlPerc) / 100) - (trade.amount * 0.0005);
+    // PnL = (Size * Change%) - Estimated Opening Fee + Realized
+    let currentPnl = ((trade.amount * pnlPerc) / 100) - (trade.amount * 0.0005);
+    if (trade.realizedPnl) {
+        currentPnl += trade.realizedPnl;
+    }
+    newTrade.pnl = currentPnl;
 
     // 1. Breakeven Logic (Pseudo: IF trade_profit > 1R: MOVE_SL_TO_ENTRY)
     const risk = Math.abs(trade.entryPrice - (trade.highestPrice || trade.sl)); // تقريبي

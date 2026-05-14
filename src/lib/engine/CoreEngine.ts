@@ -22,8 +22,9 @@ export class CoreEngine {
     // 1. Kill Switch Check
     const safety = this.killSwitch.shouldPanic({ spread: metrics.spread, volatility: metrics.atrPerc }, { apiLag: 0 });
     
-    // Update metrics with real calculations
+    // Update metrics with real calculations from fresh klines
     metrics.adx = RegimeEngine.calculateADX(klinesRow);
+    metrics.rsi = RegimeEngine.calculateRSI(klinesRow);
     
     if (safety.panic) {
       return { regime: MarketRegime.VIOLENT_VOLATILITY, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'SLEEP', reason: `SAFETY_TRIGGERED: ${safety.reason}` };

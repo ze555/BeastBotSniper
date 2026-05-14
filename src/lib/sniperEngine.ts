@@ -223,6 +223,11 @@ export class SniperEngine {
     const maxTrades = this.settings.maxConcurrentTrades || 10;
     const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage, maxTrades);
     
+    if (positionSizeUsd <= 0) {
+       console.warn(`[SNIPER] ⚠️ Aborting trade on ${cond.symbol}: Calculated size is zero. Check portfolio settings.`);
+       return;
+    }
+    
     // 4. Take Profits
     const risk = Math.abs(entryPrice - sl);
     const tp1 = cond.type === 'LONG' ? entryPrice + (risk * 0.8) : entryPrice - (risk * 0.8);
@@ -334,8 +339,13 @@ export class SniperEngine {
     
     trade.currentPrice = currentPrice;
     trade.pnlPerc = floatingPnlPerc;
-    // Current floating PnL minus approx entry fee
-    trade.pnl = ((trade.amount * floatingPnlPerc) / 100) - (trade.amount * 0.0005); 
+
+    // PnL = (Remaining Size * Change%) - Estimated Opening Fee + Any already banked profit
+    let currentPnl = ((trade.amount * floatingPnlPerc) / 100) - (trade.amount * 0.0005); 
+    if (trade.realizedPnl) {
+        currentPnl += trade.realizedPnl;
+    }
+    trade.pnl = currentPnl;
 
     let updated = false;
 

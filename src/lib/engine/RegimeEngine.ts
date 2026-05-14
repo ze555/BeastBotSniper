@@ -80,4 +80,30 @@ export class RegimeEngine {
     
     return dx || 25;
   }
+
+  /**
+   * وظيفة مساعدة لحساب RSI (مؤشر القوة النسبية)
+   */
+  public static calculateRSI(klines: any[]): number {
+    if (klines.length < 15) return 50;
+
+    let gains = 0;
+    let losses = 0;
+
+    // استخدام آخر 14 شمعة مغلقة
+    const period = 14;
+    const startIdx = klines.length - 1 - period;
+    
+    for (let i = startIdx + 1; i < klines.length; i++) {
+        const change = parseFloat(klines[i][4]) - parseFloat(klines[i - 1][4]);
+        if (change >= 0) gains += change;
+        else losses -= change;
+    }
+
+    if (losses === 0) return 100;
+    const rs = (gains / period) / (losses / period);
+    const rsi = 100 - (100 / (1 + rs));
+    
+    return rsi;
+  }
 }
