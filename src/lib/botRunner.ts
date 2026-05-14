@@ -256,10 +256,14 @@ export async function runTradeLoop() {
       }
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
-      if (activeTrades.length < maxTrades && watchlist.length > 0) {
-        // Increase search intensity in Beast Mode
-        const scanCount = sniper.getSettings().beastMode ? 15 : 8;
-        const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
+      if (botActive && activeTrades.length < maxTrades && watchlist.length > 0) {
+         // Throttle scanning to every 15 seconds (5 * 3000ms) to prevent Binance WAF 403 bans
+         if ((globalContext as any).loopCount % 5 !== 0) {
+             // Skip scanning on this loop iteration
+         } else {
+             // Increase search intensity in Beast Mode
+             const scanCount = sniper.getSettings().beastMode ? 15 : 8;
+             const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
         let rejectedCount = 0;
         let rejectionReasons: Record<string, number> = {};
@@ -537,6 +541,8 @@ export async function runTradeLoop() {
             const top = Object.entries(rejectionReasons).sort((a,b) => b[1]-a[1])[0];
             addLog(`DIAGNOSTIC: Scanned ${targetsToCheck.length} coins. Top Reject: ${top?.[0]}`, 'info');
         }
+        
+         } // End of throttled else block
       } else if (botActive && watchlist.length === 0) {
          if ((globalContext as any).loopCount % 5 === 0) {
              addLog(`DIAGNOSTIC: Golden Watchlist is currently EMPTY. Market is too quiet.`, 'info');
