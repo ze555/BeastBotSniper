@@ -261,6 +261,9 @@ export async function runTradeLoop() {
         const scanCount = sniper.getSettings().beastMode ? 15 : 8;
         const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
+        let rejectedCount = 0;
+        let rejectionReasons: Record<string, number> = {};
+
         for (const coin of targetsToCheck) {
           // Check if already in trade
           if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
@@ -301,6 +304,7 @@ export async function runTradeLoop() {
             let spreadPerc = 0;
             let fundingRate = 0;
             let takerRatio = 1.0;
+            let currentRsi = 50;
 
             try {
                const [oiRes, bookRes, fundingRes, takerRes] = await Promise.all([
@@ -321,6 +325,19 @@ export async function runTradeLoop() {
                  const sellVol = parseFloat(takerRes.data[0].sellVol);
                  takerRatio = buyVol / sellVol;
                }
+
+               // Quick RSI Calculation for filtering
+               let gains = 0, losses = 0;
+               for (let i = klines.length - 15; i < klines.length - 1; i++) {
+                  if (i <= 0) continue;
+                  const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
+                  if (change > 0) gains += change;
+                  else losses -= change;
+               }
+               const avgGain = gains / 14;
+               const avgLoss = losses / 14;
+               currentRsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+
             } catch (e) {}
 
             // 4. V2V Analysis (Volume to Value)
@@ -386,18 +403,18 @@ export async function runTradeLoop() {
             let isValidEntry = false;
 
             // 🧠 ADAPTIVE LOGIC: Decide whether to use TREND-FOLLOWING or RANGE-TRADING
-            const isRangeBound = coin.trend === 'FLAT' || (rsi > 40 && rsi < 60 && rvolLocal < 1.0);
+            const isRangeBound = coin.trend === 'FLAT' || (currentRsi > 40 && currentRsi < 60 && rvolLocal < 1.0);
             
             if (isRangeBound && isBeastMode) {
                // 🏹 RANGE-TRADING (Chop Strategy): Buy low, Sell high
-               if (rsi < 28 && lcClose > lcOpen) {
+               if (currentRsi < 28 && lcClose > lcOpen) {
                    type = 'LONG';
                    isValidEntry = true;
-                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Oversold (RSI:${rsi.toFixed(1)}) - Trading back to mean`, 'info');
-               } else if (rsi > 72 && lcClose < lcOpen) {
+                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Oversold (RSI:${currentRsi.toFixed(1)}) - Trading back to mean`, 'info');
+               } else if (currentRsi > 72 && lcClose < lcOpen) {
                    type = 'SHORT';
                    isValidEntry = true;
-                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Overbought (RSI:${rsi.toFixed(1)}) - Trading back to mean`, 'info');
+                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Overbought (RSI:${currentRsi.toFixed(1)}) - Trading back to mean`, 'info');
                }
             }
 
@@ -424,15 +441,9 @@ export async function runTradeLoop() {
                    type = 'SHORT';
                    isValidEntry = true;
                 }
-            } else {
-               // Report why the entry wasn't initially valid
-               if (!isBeastMode) {
-                  const reason = !isBullishDisplacement && !isBearishDisplacement ? 'No Volume Displacement' : 'EMA Trend Conflict';
-                  // addLog(`LOOKING ${coin.symbol}: ${reason}`, 'debug');
-               }
             }
 
-            const RequiredRvol = isBeastMode ? 0.8 : (sniper.getSettings().strictMinRvol ?? 3.0);
+            const RequiredRvol = isBeastMode ? 0.8 : (sniper.getSettings().strictMinRvol ?? 1.5);
             // 🚀 BEAST UPGRADE: Relax score if HTF Trend is aligned, but be stricter if against it.
             let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : (isBeastMode ? 2 : 4);
             if (htfTrend === type && type !== 'NEUTRAL') {
@@ -448,40 +459,22 @@ export async function runTradeLoop() {
             if (!isBeastMode && (isLiquidityVoid || !spreadPass)) strictPass = false;
 
             // NEW: Anti-Whale Funding Filter
-            // If funding is extremely positive (> 0.05%), buying is expensive. If extremely negative (< -0.05%), selling is expensive.
             if (isStrict) {
                 if (type === 'LONG' && fundingRate > 0.05) strictPass = false;
                 if (type === 'SHORT' && fundingRate < -0.05) strictPass = false;
             }
 
             if (isStrict && isValidEntry) {
-                // Filter 1: Strict Volume (RVOL >= dynamic)
                 if (coin.rvol < RequiredRvol) strictPass = false;
-
-                // Filter 3: BTC Align (if enabled)
                 if (UseBTC) {
                     if (type === 'LONG' && btcTrend !== 'LONG') strictPass = false;
                     if (type === 'SHORT' && btcTrend !== 'SHORT') strictPass = false;
                 }
-
-                // Filter 5: Overbought/Oversold Rejection (RSI Filter - if enabled)
                 if (UseRsi) {
-                    let gains = 0, losses = 0;
-                    for (let i = klines.length - 15; i < klines.length - 1; i++) {
-                       if (i <= 0) continue;
-                       const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
-                       if (change > 0) gains += change;
-                       else losses -= change;
-                    }
-                    const avgGain = gains / 14;
-                    const avgLoss = losses / 14;
-                    const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
-
                     const rsiHi = sniper.getSettings().strictRsiHigh ?? 75;
                     const rsiLo = sniper.getSettings().strictRsiLow ?? 25;
-
-                    if (type === 'LONG' && rsi > rsiHi) strictPass = false; // Overbought Reject
-                    if (type === 'SHORT' && rsi < rsiLo) strictPass = false; // Oversold Reject
+                    if (type === 'LONG' && currentRsi > rsiHi) strictPass = false;
+                    if (type === 'SHORT' && currentRsi < rsiLo) strictPass = false;
                 }
             }
 
@@ -489,12 +482,10 @@ export async function runTradeLoop() {
               const finalType = isTrapTrade ? trapType : type;
               if (finalType === 'NEUTRAL') continue;
 
-              // Factor in Taker Ratio into the score
               let finalScore = isTrapTrade ? 6 : coin.score;
               if (finalType === 'LONG' && takerRatio > 1.5) finalScore += 0.5;
               if (finalType === 'SHORT' && takerRatio < 0.6) finalScore += 0.5;
 
-              // Construct strictly passing MarketCondition
               const condition: MarketCondition = {
                 symbol: coin.symbol,
                 price: currentPx,
@@ -516,16 +507,21 @@ export async function runTradeLoop() {
                 takerBuySellRatio: takerRatio
               };
               
-              // Allow the Sniper Engine to fire mathematically
+              addLog(`🎯 SIGNAL ${coin.symbol}: Score ${finalScore.toFixed(1)} - Evaluating...`, 'success');
               sniper.evaluateSignal(condition, klines, htfKlines, globalContext);
-              coin.decision = condition.decision; // Link back to watchlist for UI insight
-            } else if (isValidEntry) {
-                // Just log the failure reason for debugging
-                if (coin.score < RequiredScore) {
-                   addLog(`DRAFT ${coin.symbol}: Score ${coin.score.toFixed(1)} < ${RequiredScore} (Rejected)`, 'warn');
-                } else if (!strictPass) {
-                   addLog(`DRAFT ${coin.symbol}: Filter Rejected (BTC/OI/PII)`, 'warn');
-                }
+              coin.decision = condition.decision;
+              
+              if (condition.decision && condition.decision.action !== 'ATTACK') {
+                  rejectedCount++;
+                  rejectionReasons[condition.decision.reason || 'UNKNOWN'] = (rejectionReasons[condition.decision.reason || 'UNKNOWN'] || 0) + 1;
+              }
+            } else {
+                rejectedCount++;
+                let r = 'Criteria Not Met';
+                if (!isValidEntry) r = 'Invalid Entry Pattern';
+                else if (coin.score < RequiredScore) r = 'Low Initial Score';
+                else if (!strictPass) r = 'Strict Filter Block';
+                rejectionReasons[r] = (rejectionReasons[r] || 0) + 1;
             }
 
           } catch (e: any) {
@@ -533,9 +529,18 @@ export async function runTradeLoop() {
                console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 15m. Pausing Loop...`);
                await sleep(10000);
              }
-            // Ignore API limit errors silently otherwise
           }
         }
+
+        // Summary log every 10 loops
+        if ((globalContext as any).loopCount % 10 === 0 && rejectedCount > 0) {
+            const top = Object.entries(rejectionReasons).sort((a,b) => b[1]-a[1])[0];
+            addLog(`DIAGNOSTIC: Scanned ${targetsToCheck.length} coins. Top Reject: ${top?.[0]}`, 'info');
+        }
+      } else if (botActive && watchlist.length === 0) {
+         if ((globalContext as any).loopCount % 5 === 0) {
+             addLog(`DIAGNOSTIC: Golden Watchlist is currently EMPTY. Market is too quiet.`, 'info');
+         }
       }
     } catch (e) {
       console.error('[BOT RUNNER] Loop Error:', e);

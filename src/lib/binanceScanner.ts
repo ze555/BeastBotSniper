@@ -64,7 +64,7 @@ export async function runBinanceScanner() {
     const isScavenger = isBeastMode && sniper.getSettings().beastLowCapHunting !== false;
 
     // SCVANGER MODE: Bypass strict volume bounds and dive into low liquidity
-    const minVolume = isBeastMode ? 100000 : (isStrict ? (sniper.getSettings().strictMinVolume ?? 5000000) : 1000000);
+    const minVolume = isBeastMode ? 50000 : (isStrict ? (sniper.getSettings().strictMinVolume ?? 1000000) : 500000);
 
     const excludedAssets = [
       'BTCUSDT', 'ETHUSDT', // Majors
@@ -82,7 +82,11 @@ export async function runBinanceScanner() {
     );
 
     console.log(`[SCANNER] Found ${validTickers.length} coins matching volume criteria. Analyzing...`);
-    addLog(`Scanning ${validTickers.length} potential coins...`, 'info');
+    
+    // Log only every few scans to avoid spam
+    if (Math.random() > 0.8) {
+      addLog(`Scanner Found ${validTickers.length} potential coins...`, 'info');
+    }
 
     const candidates: ScannedCoin[] = [];
     let processedCount = 0;
@@ -95,10 +99,10 @@ export async function runBinanceScanner() {
       const low = parseFloat(ticker.lowPrice);
       const volume = parseFloat(ticker.quoteVolume);
 
-      // --- Filter 3: Volatility (>= 3%) ---
+      // --- Filter 3: Volatility (>= 1.5%) ---
       const volatility = ((high - low) / low) * 100;
 
-      // --- Filter 5: Spread (<= 0.1%) ---
+      // --- Filter 5: Spread (<= 0.15%) ---
       const book = bookMap.get(symbol);
       let spread = 0;
       if (book) {
@@ -108,61 +112,32 @@ export async function runBinanceScanner() {
       }
 
       // Fetch Klines (15m) to calculate RVOL, EMA50, and Pump Exclusion
-      // Limit 50 to get exactly EMA50 and RVOL for current candle
       let klines;
       try {
-        const klineRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=51`);
+        const klineRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=51`, { timeout: 5000 });
         klines = klineRes.data;
       } catch (e: any) {
-         if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-            console.log(`[SCANNER] ⚠️ Rate limit hit. Sleeping for 10 seconds...`);
-            await sleep(10000);
-         } else {
-            await sleep(200);
-         }
          continue; // skip on error
       }
 
-      if (klines.length < 50) continue; // Not enough data
+      if (klines.length < 50) continue; 
 
-      let hasSuddenPump = false;
       let sumVol = 0;
       let closePrices: number[] = [];
 
-      for (let i = 0; i < klines.length - 1; i++) { // Exclude current forming candle for averages
-        const kHigh = parseFloat(klines[i][2]);
-        const kLow = parseFloat(klines[i][3]);
+      for (let i = 0; i < klines.length - 1; i++) { 
         const kClose = parseFloat(klines[i][4]);
-        const kVol = parseFloat(klines[i][5]); // Base asset volume 
+        const kVol = parseFloat(klines[i][5]); 
         
-        // Pump Exclusion: Any candle > 10% movement in recent history
-        const candleMove = ((kHigh - kLow) / kLow) * 100;
-        if (candleMove >= 10) {
-          hasSuddenPump = true;
-        }
-
         sumVol += kVol;
         closePrices.push(kClose);
       }
 
-      // Exclusion check
-      if (hasSuddenPump && !isBeastMode) {
-        // console.log(`[SCANNER] ❌ ${symbol} ignored due to sudden +10% pump candle.`);
-        await sleep(100); // Add a small delay to avoid rate limit before moving to next
-        continue; // Skip immediately
-      }
-
-      // --- Filter 2: RVOL (>= 1.5) ---
       const avgVol = sumVol / (klines.length - 1);
       const currentCandleVol = parseFloat(klines[klines.length - 1][5]);
       const rvol = currentCandleVol / avgVol;
 
-      // Relax RVOL/Volatility filters for Beast Mode
-      const minRvol = isBeastMode ? 0.8 : 1.5;
-      const minVolatility = isBeastMode ? 1.0 : 3.0;
-
       // --- Filter 6: Trend (EMA 50) ---
-      // Simple EMA calculation for the last close
       const k = 2 / (50 + 1);
       let ema50 = closePrices[0];
       for (let i = 1; i < closePrices.length; i++) {
@@ -173,87 +148,49 @@ export async function runBinanceScanner() {
       const isBelowEma = price < ema50;
       let trend: 'LONG' | 'SHORT' | 'FLAT' = 'FLAT';
       
-      // --- ANTI-CHOP SHIELD: Detect if price is "Glued" to EMA (Range-bound) ---
       const distanceFromEma = Math.abs((price - ema50) / ema50) * 100;
-      const isGlued = distanceFromEma < 0.2; // Price is within 0.2% of EMA50 (No clear breakout)
+      const isGlued = distanceFromEma < 0.15; 
       
       if (isAboveEma && !isGlued) trend = 'LONG';
       if (isBelowEma && !isGlued) trend = 'SHORT';
 
-      // --- Filter 4: Open Interest (OI) ---
-      // For performance in bulk scanning, we use the 24h ticker's price action vs volume 
-      // To get real 4h OI we'd need another 40 API calls. Real OI trend check: limit calls!
-      let oiTrend: 'UP' | 'DOWN' | 'FLAT' = 'UP'; // Default to test
-      let oiPass = true; // Assuming OI logic is mapped locally in a real setup.
-      try {
-        const oiHist = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${symbol}&period=4h&limit=5`);
-        const oiData = oiHist.data;
-        if (oiData && oiData.length >= 5) {
-          const oiOld = parseFloat(oiData[0].sumOpenInterest);
-          const oiNew = parseFloat(oiData[oiData.length - 1].sumOpenInterest);
-          oiTrend = oiNew > oiOld ? 'UP' : 'DOWN';
-          oiPass = (trend === 'LONG' && oiNew > oiOld) || (trend === 'SHORT' && oiNew > oiOld);
-        }
-      } catch(e: any) {
-         if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-            console.log(`[SCANNER] ⚠️ Rate limit hit on OI. Sleeping for 5 seconds...`);
-            await sleep(5000);
-         }
-      } // Silently fail and default to pass to avoid rate limit death for now.
-      
-      // --- SCORING SYSTEM (Max 6) ---
+      // --- SCORING SYSTEM (Max 7) ---
       let score = 0;
       const checks = {
-        volumePass: volume >= minVolume, // already true due to pre-filter
-        rvolPass: rvol >= 1.5,
-        volatilityPass: volatility >= 3,
-        oiPass: oiPass,
-        spreadPass: spread <= 0.1,
+        volumePass: volume >= minVolume, 
+        rvolPass: rvol >= 1.0, 
+        volatilityPass: volatility >= 1.5,
+        oiPass: true,
+        spreadPass: spread <= 0.2,
         trendPass: trend !== 'FLAT'
       };
 
-      if (checks.volumePass) score++;
-      if (checks.rvolPass) score++;
-      if (checks.volatilityPass) score++;
-      if (checks.oiPass) score++;
-      if (checks.spreadPass) score++;
-      if (checks.trendPass) score++;
+      if (checks.volumePass) score += 1;
+      if (checks.rvolPass) score += (rvol > 2.0 ? 2 : 1);
+      if (checks.volatilityPass) score += 1;
+      if (checks.spreadPass) score += 1;
+      if (checks.trendPass) score += 2; // High reward for trend
+      if (trend === 'FLAT' && rvol > 1.5) score += 1.5; // Bonus for high volume chop
 
-    // Minimum score threshold to consider valid
-    const scoreThreshold = isBeastMode ? 1 : 4;
-    if (score >= scoreThreshold) {
-      // Calculate sector strength (Simple: how many USDT pairs are up > 2%)
-      const marketHeat = validTickers.filter(t => parseFloat(t.priceChangePercent) > 2).length / validTickers.length;
-      if (marketHeat > 0.4) {
-          score += 0.5; // Boost score if whole market is pumping (Safety in numbers)
+      // Minimum score threshold to consider valid
+      const scoreThreshold = isBeastMode ? 1 : 2.5; 
+      if (score >= scoreThreshold) {
+        candidates.push({
+            symbol,
+            price,
+            volume,
+            volatility,
+            rvol,
+            spread,
+            trend,
+            oiTrend: 'FLAT',
+            score,
+            checks
+          });
       }
 
-      candidates.push({
-          symbol,
-          price,
-          volume,
-          volatility,
-          rvol,
-          spread,
-          trend,
-          oiTrend,
-          score,
-          checks
-        });
-      }
-
-      // Sorting and updating incrementally
       processedCount++;
-      if (processedCount % 10 === 0) {
-          console.log(`[SCANNER] Progress: ${processedCount}/${validTickers.length} analyzed...`);
-          // Update watchlist partially to show activity
-          if (candidates.length > 0) {
-              goldenWatchlist = [...candidates].sort((a, b) => b.score - a.score).slice(0, 20);
-          }
-      }
-
-      // Add a small delay between groups to avoid Rate Limits
-      if (processedCount % 5 === 0) await sleep(200);
+      if (processedCount % 20 === 0) await sleep(100);
     }
 
     // Sort by score descending, then by volume

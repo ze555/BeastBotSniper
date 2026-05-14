@@ -6,29 +6,34 @@ export class RegimeEngine {
    * تحليل حالة السوق بناءً على المقاييس التقنية والسيولة
    */
   public analyze(metrics: MarketMetrics): { regime: MarketRegime; decision: 'TRADE' | 'WAIT' | 'SLEEP' } {
-    // 1. Dead Chop Detection (Pseudo: IF chop_detected: SLEEP)
-    if (metrics.isChop || metrics.adx < 20) {
+    // 1. Extreme Dead Zone (Only sleep if both ADX and RVOL are dead)
+    if (metrics.adx < 12 && metrics.rvol < 1.1) {
       return { regime: MarketRegime.DEAD_CHOP, decision: 'SLEEP' };
     }
 
-    // 2. Volatility Insanity (Pseudo: IF volatility_insanity: REDUCE_RISK/WAIT)
+    // 2. Volatility Insanity
     if (metrics.atrPerc > 5) {
       return { regime: MarketRegime.VIOLENT_VOLATILITY, decision: 'WAIT' };
     }
 
-    // 3. Compression Detection (Wait for breakout)
+    // 3. Compression Detection (Potential Breakout)
     if (metrics.adx < 25 && metrics.atrPerc < 1) {
-      return { regime: MarketRegime.COMPRESSION, decision: 'WAIT' };
+      return { regime: MarketRegime.COMPRESSION, decision: 'TRADE' }; // Switch to TRADE to allow range scalping
     }
 
-    // 4. Trend Expansion (Pseudo: IF trend_expanding: ENABLE_HUNT_MODE)
-    if (metrics.adx > 30 && metrics.rvol > 1.5) {
+    // 4. Trend Expansion
+    if (metrics.adx > 25 && metrics.rvol > 1.3) {
       return { regime: MarketRegime.TREND_EXPANSION, decision: 'TRADE' };
     }
 
     // 5. Momentum Mode
-    if (metrics.adx > 25 && metrics.takerRatio && metrics.takerRatio > 1.5) {
+    if (metrics.takerRatio && (metrics.takerRatio > 1.8 || metrics.takerRatio < 0.5)) {
       return { regime: MarketRegime.MOMENTUM_MODE, decision: 'TRADE' };
+    }
+
+    // 6. Range Trading / Scalping Mode
+    if (metrics.adx >= 12 && metrics.adx <= 25) {
+       return { regime: MarketRegime.TRENDING, decision: 'TRADE' }; // Treat as trending for signal evaluation
     }
 
     return { regime: MarketRegime.DEAD_CHOP, decision: 'WAIT' };

@@ -69,19 +69,44 @@ export class CoreEngine {
     let reason = 'WAITING_FOR_EDGE';
     let confidence = 0;
 
-    // RULE: لا تدخل مع الاختراق بل ادخل مع فشل الاختراق (Trap)
+    // --- DECISION LAYERS ---
+
+    // LAYER 1: Trap Detection (High Confidence Counter-Strike)
     if (trap === TrapType.LONG_TRAP && directionalBias === 'SHORT') {
        action = 'ATTACK';
        reason = 'BULL_TRAP_DETECTED_IN_BEAR_TREND';
-       confidence = 0.9;
+       confidence = 0.95;
     } else if (trap === TrapType.SHORT_TRAP && directionalBias === 'LONG') {
        action = 'ATTACK';
        reason = 'BEAR_TRAP_DETECTED_IN_BULL_TREND';
-       confidence = 0.9;
-    } else if (trap !== TrapType.NONE) {
-       action = 'ATTACK';
-       reason = 'COUNTER_TREND_TRAP_DETECTED';
-       confidence = 0.6;
+       confidence = 0.95;
+    } 
+    // LAYER 2: Trend Continuation (Standard Sniper Move)
+    else if (metrics.rvol > 2.0 && regimeStatus.regime === MarketRegime.TRENDING) {
+       const isPriceAlign = (metrics.rsi > 55 && directionalBias === 'LONG') || (metrics.rsi < 45 && directionalBias === 'SHORT');
+       if (isPriceAlign) {
+           action = 'ATTACK';
+           reason = `TREND_CONTINUATION: RVOL ${metrics.rvol.toFixed(1)} + Bias ${directionalBias}`;
+           confidence = 0.75;
+       }
+    }
+    // LAYER 3: Range Reversion (The "Chop" Slayer)
+    else if (regimeStatus.regime === MarketRegime.COMPRESSION || metrics.isChop) {
+        if (metrics.rsi > 70) {
+            action = 'ATTACK';
+            reason = 'RANGE_OVERBOUGHT_REVERSION';
+            confidence = 0.65;
+        } else if (metrics.rsi < 30) {
+            action = 'ATTACK';
+            reason = 'RANGE_OVERSOLD_REVERSION';
+            confidence = 0.65;
+        }
+    }
+    // LAYER 4: Beast Mode Pure Momentum
+    else if (settings?.beastMode && metrics.rvol > 1.2) {
+        action = 'ATTACK';
+        reason = 'BEAST_MOMENTUM_STRIKE';
+        confidence = 0.5;
     }
 
     // Apply minimum confidence threshold from Strategy Builder
