@@ -25,6 +25,8 @@ export class SniperEngine {
     useSmartExit: true,
     useKineticEngine: true,
     beastMode: false,
+    fastExitEnabled: true,
+    fastExitPerc: 0.5,
     strategyAdxThreshold: 25,
     strategyAtrMultiplier: 1.5,
     strategyMinConfidence: 0.6,
@@ -90,6 +92,8 @@ export class SniperEngine {
              useKineticEngine: dbSettings.useKineticEngine ?? false,
              useSmartControl: dbSettings.useSmartControl ?? false,
              beastMode: dbSettings.beastMode ?? false,
+             fastExitEnabled: dbSettings.fastExitEnabled ?? false,
+             fastExitPerc: dbSettings.fastExitPerc ?? 0.5,
              strategyAdxThreshold: dbSettings.strategyAdxThreshold ?? 25,
              strategyAtrMultiplier: dbSettings.strategyAtrMultiplier ?? 1.5,
              strategyMinConfidence: dbSettings.strategyMinConfidence ?? 0.6,
@@ -272,6 +276,37 @@ export class SniperEngine {
   ) {
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
+
+    // --- ⚡ FAST EXIT (الخروج السريع - Global Override) ---
+    if (this.settings.fastExitEnabled) {
+        const exitPerc = this.settings.fastExitPerc || 0.5;
+        
+        // 1. حساب التغير المباشر من نقطة الدخول (Stop Loss)
+        const priceChangePerc = trade.type === 'LONG' 
+            ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100 
+            : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
+
+        // خيار الخروج الفوري عند هبوط النسبة (أقوى من الـ SL العادي)
+        if (priceChangePerc <= -exitPerc) {
+            console.log(`[FAST EXIT] ⚡ Emergency Exit: Price dropped ${priceChangePerc.toFixed(2)}% below entry (Threshold: ${exitPerc}%).`);
+            this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_STOP_LOSS`);
+            return;
+        }
+
+        // 2. حساب التراجع من القمة (Trailing Guard)
+        if (trade.highestPrice) {
+            const dropFromHighPerc = trade.type === 'LONG' 
+                ? ((trade.highestPrice - currentPrice) / trade.highestPrice) * 100
+                : ((currentPrice - trade.highestPrice) / trade.highestPrice) * 100;
+
+            // إذا كنا في ربح، ثم نزلنا من القمة بالنسبة المحددة -> اخرج فوراً لتأمين الربح
+            if (priceChangePerc > 0 && dropFromHighPerc >= exitPerc) {
+                console.log(`[FAST EXIT] ⚡ Profit Guard: Price dropped ${dropFromHighPerc.toFixed(2)}% from peak (${trade.highestPrice.toFixed(4)}).`);
+                this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_PROFIT_GUARD`);
+                return;
+            }
+        }
+    }
 
     // --- DYNAMIC SAFETY EXIT (مراقبة المؤشرات الصارمة بعد الدخول) ---
     if (this.settings.dynamicSafetyExit && indicators && trade.status !== 'CLOSED') {

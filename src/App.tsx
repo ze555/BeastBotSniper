@@ -13,10 +13,12 @@ export default function App() {
   const [botActive, setBotActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState({ 
-    portfolioSize: 1000, 
+    portfolioSize: 2000, 
     riskPerTradePerc: 1, 
-    maxConcurrentTrades: 3,
-    dynamicSafetyExit: true 
+    maxConcurrentTrades: 10,
+    dynamicSafetyExit: true,
+    fastExitEnabled: true,
+    fastExitPerc: 0.5
   });
   const [savingSettings, setSavingSettings] = useState(false);
 

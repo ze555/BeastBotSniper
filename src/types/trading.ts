@@ -9,7 +9,8 @@ export enum MarketRegime {
   TRAP_MODE = 'TRAP_MODE',
   COMPRESSION = 'COMPRESSION',
   DEAD_CHOP = 'DEAD_CHOP',
-  VIOLENT_VOLATILITY = 'VIOLENT_VOLATILITY'
+  VIOLENT_VOLATILITY = 'VIOLENT_VOLATILITY',
+  TRENDING = 'TRENDING'
 }
 
 export enum TrapType {
@@ -201,5 +202,7 @@ export interface BotSettings {
   useStrategyVolatilityRule?: boolean;
   useStrategyConfidenceGate?: boolean;
   useStrategyMomentumRule?: boolean;
-  dynamicSafetyExit?: boolean;
+  // ⚡ خيار الخروج السريع (Fast Exit)
+  fastExitEnabled?: boolean;            // تفعيل الخروج السريع الشامل
+  fastExitPerc?: number;                // نسبة الخروج السريع (افتراضي 0.5%)
 }
