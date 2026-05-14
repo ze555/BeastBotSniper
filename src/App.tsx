@@ -853,6 +853,41 @@ export default function App() {
                 </div>
                 
                 <form onSubmit={saveSettings} className="space-y-6">
+                   <div className="p-5 bg-emerald-950/20 border-2 border-emerald-500/30 rounded-xl shadow-lg mb-8">
+                      <div className="flex items-center justify-between mb-4">
+                         <div className="flex items-center gap-3 text-emerald-400 font-black italic text-lg text-right">
+                            <Zap className="w-6 h-6 fill-current animate-pulse text-emerald-400" />
+                            <span>⚡ الخروج السريع الشامل (FAST EXIT)</span>
+                         </div>
+                         <button 
+                            type="button"
+                            onClick={() => setSettings({...settings, fastExitEnabled: !settings.fastExitEnabled})}
+                            className={`w-14 h-7 rounded-full transition-all relative ${
+                               settings.fastExitEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+                            }`}
+                          >
+                            <div className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${
+                               settings.fastExitEnabled ? 'left-8' : 'left-1'
+                            }`} />
+                         </button>
+                      </div>
+                      
+                      <div className="space-y-4">
+                         <div className="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-emerald-500/10">
+                            <label className="text-sm text-slate-300 font-bold italic">PRO-ACTIVE EXIT %</label>
+                            <div className="flex items-center gap-2">
+                               <input 
+                                  type="number" 
+                                  step="0.1"
+                                  className="w-20 bg-slate-950 border border-emerald-500/30 rounded px-2 py-1 text-center font-mono text-emerald-400 text-lg"
+                                  value={settings.fastExitPerc}
+                                  onChange={e => setSettings({...settings, fastExitPerc: parseFloat(e.target.value)})}
+                               />
+                               <span className="text-emerald-500 font-bold text-lg">%</span>
+                            </div>
+                         </div>
+                      </div>
+                   </div>
                    <div>
                      <label className="block text-slate-300 mb-2 font-medium">رأس المال الافتراضي (Portfolio Size $)</label>
                      <input 

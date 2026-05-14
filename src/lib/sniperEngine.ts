@@ -281,28 +281,32 @@ export class SniperEngine {
     if (this.settings.fastExitEnabled) {
         const exitPerc = this.settings.fastExitPerc || 0.5;
         
-        // 1. حساب التغير المباشر من نقطة الدخول (Stop Loss)
+        // حساب التغير المباشر من نقطة الدخول (Price Change %)
         const priceChangePerc = trade.type === 'LONG' 
             ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100 
             : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
 
-        // خيار الخروج الفوري عند هبوط النسبة (أقوى من الـ SL العادي)
+        // 1. حماية رأس المال (Stop Loss الفوري)
+        // إذا نزل السعر عن النسبة المحددة من سعر الدخول، اخرج فوراً
         if (priceChangePerc <= -exitPerc) {
-            console.log(`[FAST EXIT] ⚡ Emergency Exit: Price dropped ${priceChangePerc.toFixed(2)}% below entry (Threshold: ${exitPerc}%).`);
+            console.log(`[FAST EXIT] ⚡ Emergency Stop: Price dropped ${priceChangePerc.toFixed(2)}% below entry. (Threshold: ${exitPerc}%).`);
             this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_STOP_LOSS`);
             return;
         }
 
-        // 2. حساب التراجع من القمة (Trailing Guard)
+        // 2. ملاحقة الأرباح وحجزها (Trailing Guard)
         if (trade.highestPrice) {
             const dropFromHighPerc = trade.type === 'LONG' 
                 ? ((trade.highestPrice - currentPrice) / trade.highestPrice) * 100
                 : ((currentPrice - trade.highestPrice) / trade.highestPrice) * 100;
 
-            // إذا كنا في ربح، ثم نزلنا من القمة بالنسبة المحددة -> اخرج فوراً لتأمين الربح
-            if (priceChangePerc > 0 && dropFromHighPerc >= exitPerc) {
-                console.log(`[FAST EXIT] ⚡ Profit Guard: Price dropped ${dropFromHighPerc.toFixed(2)}% from peak (${trade.highestPrice.toFixed(4)}).`);
-                this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_PROFIT_GUARD`);
+            // إذا تجاوز الربح ضعف النسبة المحددة (مثلاً 1%)، ننتظر الصعود لأقصى نقطة
+            // ولكن إذا بدأ السعر ينزل من القمة بمقدار النسبة المحددة (0.5%)، يتم جني الربح فوراً
+            const doubleThreshold = exitPerc * 2;
+            
+            if (priceChangePerc >= doubleThreshold && dropFromHighPerc >= exitPerc) {
+                console.log(`[FAST EXIT] ⚡ Profit Locked: Price dropped ${dropFromHighPerc.toFixed(2)}% from peak (${trade.highestPrice.toFixed(4)}) after reaching double target.`);
+                this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_PROFIT_TAKEN`);
                 return;
             }
         }
