@@ -197,9 +197,17 @@ export class SniperEngine {
     }
 
     // Labeling logic: 
-    // If Beast Mode is ON, it's considered a Direct/Aggressive entry.
-    // If Beast Mode is OFF and it reached here, it's a "Wait Engine" (7 layers met).
-    const sourceLabel = this.settings.beastMode ? 'DIRECT_ENTRY' : 'WAIT_PROTECTED';
+    // If confidence is low (0.5), it's a Beast/Aggressive entry (Incomplete Evaluation).
+    // If confidence is high (>= 0.6), it's a standard Sniper/Wait Engine entry.
+    let sourceLabel = 'CORE';
+    if (decision.reason === 'BEAST_MOMENTUM_STRIKE') {
+       sourceLabel = 'AGGRESSIVE_INCOMPLETE';
+    } else if (decision.confidence >= 0.6) {
+       sourceLabel = 'WAIT_ENGINE_PROTECTED';
+    } else {
+       sourceLabel = this.settings.beastMode ? 'DIRECT_ENTRY' : 'WAIT_PROTECTED';
+    }
+    
     this.executeTrade(condition, sourceLabel);
   }
 

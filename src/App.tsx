@@ -453,10 +453,15 @@ export default function App() {
                                            coin.decision.action === 'ATTACK' ? 'bg-rose-500 text-white animate-pulse' : 
                                            coin.decision.action === 'SLEEP' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'
                                          }`}>
-                                           {coin.decision.action === 'ATTACK' ? '🔥 الهجوم' : coin.decision.action === 'SLEEP' ? '😴 خمول' : '⏳ انتظار'}
+                                           {coin.decision.action === 'ATTACK' ? (coin.decision.confidence < 0.6 ? '🔥 الهجوم' : '🎯 قناص') : coin.decision.action === 'SLEEP' ? '😴 خمول' : '⏳ انتظار'}
                                          </span>
                                          <span className="text-[10px] text-slate-400 font-mono">{(coin.decision.confidence * 100).toFixed(0)}%</span>
                                       </div>
+                                      {coin.decision.confidence < 0.6 && coin.decision.action === 'ATTACK' && (
+                                         <div className="text-[9px] text-rose-400 font-bold italic">
+                                            ⚠️ تقييم غير مكتمل
+                                         </div>
+                                      )}
                                       <div className="text-[10px] text-emerald-400/80 font-medium">
                                          {coin.decision.regime}
                                       </div>
@@ -539,11 +544,14 @@ export default function App() {
                            <tr key={i} className="hover:bg-slate-700/20">
                               <td className="px-5 py-4 font-bold font-mono text-slate-100">{t.symbol}</td>
                               <td className="px-5 py-4">
-                                 {t.source === 'DIRECT_ENTRY' ? (
-                                    <span className="flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 px-2 py-1 rounded border border-rose-500/20 whitespace-nowrap font-bold">
-                                       <Zap className="w-3 h-3 fill-current" />
-                                       هجومي 🔥
-                                    </span>
+                                 {t.source === 'AGGRESSIVE_INCOMPLETE' || t.source === 'DIRECT_ENTRY' ? (
+                                    <div className="flex flex-col gap-1">
+                                       <span className="flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 px-2 py-1 rounded border border-rose-500/20 whitespace-nowrap font-bold">
+                                          <Zap className="w-3 h-3 fill-current" />
+                                          هجومي 🔥
+                                       </span>
+                                       <span className="text-[9px] text-rose-400/60 italic font-medium">تقييم غير مكتمل</span>
+                                    </div>
                                  ) : (
                                     <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap font-bold">
                                        <ShieldCheck className="w-3 h-3" />
@@ -600,28 +608,31 @@ export default function App() {
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
-                        {historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_PROTECTED') && t.status === 'CLOSED').length === 0 ? (
+                        {historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_ENGINE_PROTECTED' || t.source === 'AGGRESSIVE_INCOMPLETE') && t.status === 'CLOSED').length === 0 ? (
                            <tr>
                              <td colSpan={7} className="py-20 text-center">
                                 <div className="flex flex-col items-center gap-4 opacity-20">
                                    <Zap className="w-16 h-16 text-amber-500" />
                                    <div className="space-y-1">
-                                      <p className="text-xl font-bold text-slate-400">لا توجد صفقات "قنص" منفذة</p>
+                                      <p className="text-xl font-bold text-slate-400">لا توجد صفقات منفذة حتى الآن</p>
                                       <p className="text-slate-500 text-xs italic">بانتظار محرك الانتظار لاقتناص الفرصة التالية...</p>
                                    </div>
                                 </div>
                              </td>
                            </tr>
-                        ) : historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_PROTECTED') && t.status === 'CLOSED').map((t, i) => (
-                           <tr key={i} className="hover:bg-amber-500/5 border-r-2 border-transparent hover:border-amber-500/50 transition-all group">
-                              <td className="px-5 py-4 font-mono text-slate-400 text-xs">
+                        ) : historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_ENGINE_PROTECTED' || t.source === 'AGGRESSIVE_INCOMPLETE') && t.status === 'CLOSED').map((t, i) => (
+                           <tr key={i} className={`hover:bg-slate-700/20 border-r-2 transition-all group ${t.source === 'AGGRESSIVE_INCOMPLETE' ? 'border-amber-500/30 bg-amber-500/5' : 'border-emerald-500/30'}`}>
+                              <td className="px-5 py-4 font-mono text-slate-400 text-xs text-right">
                                  {t.exitTime ? new Date(t.exitTime).toLocaleString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '...'}
                               </td>
-                              <td className="px-5 py-4 font-bold font-mono text-emerald-400 text-base">
-                                 <div className="flex items-center gap-2">
-                                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                                    {t.symbol}
+                              <td className="px-5 py-4 font-bold font-mono text-base text-right">
+                                 <div className="flex items-center gap-2 justify-end">
+                                    <span className={t.source === 'AGGRESSIVE_INCOMPLETE' ? 'text-amber-400' : 'text-emerald-400'}>{t.symbol}</span>
+                                    {t.source === 'AGGRESSIVE_INCOMPLETE' ? <Zap className="w-4 h-4 text-amber-500" /> : <ShieldCheck className="w-4 h-4 text-emerald-500" />}
                                  </div>
+                                 {t.source === 'AGGRESSIVE_INCOMPLETE' && (
+                                    <div className="text-[9px] text-amber-500/70 italic mt-0.5">تقييم غير مكتمل ⚠️</div>
+                                 )}
                               </td>
                               <td className="px-5 py-4 font-mono text-slate-300">${parseFloat(t.amount || 0).toFixed(2)}</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice || 0).toFixed(4)}</td>
