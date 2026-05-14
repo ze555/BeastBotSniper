@@ -520,6 +520,7 @@ export default function App() {
                      <thead className="bg-slate-800/30 text-slate-400">
                       <tr>
                         <th className="px-5 py-3 font-medium">العملة</th>
+                        <th className="px-5 py-3 font-medium">الآلية</th>
                         <th className="px-5 py-3 font-medium">النوع</th>
                         <th className="px-5 py-3 font-medium">الرافعة</th>
                         <th className="px-5 py-3 font-medium">الدخول</th>
@@ -537,6 +538,19 @@ export default function App() {
                         ) : historyTrades.map((t, i) => (
                            <tr key={i} className="hover:bg-slate-700/20">
                               <td className="px-5 py-4 font-bold font-mono text-slate-100">{t.symbol}</td>
+                              <td className="px-5 py-4">
+                                 {t.source === 'DIRECT_ENTRY' ? (
+                                    <span className="flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 px-2 py-1 rounded border border-rose-500/20 whitespace-nowrap font-bold">
+                                       <Zap className="w-3 h-3 fill-current" />
+                                       هجومي 🔥
+                                    </span>
+                                 ) : (
+                                    <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap font-bold">
+                                       <ShieldCheck className="w-3 h-3" />
+                                       قناص 🎯
+                                    </span>
+                                 )}
+                              </td>
                               <td className={`px-5 py-4 font-bold text-xs ${t.type === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.type}</td>
                               <td className="px-5 py-4 font-mono text-slate-400 text-sm">{(t as any).leverage || 10}x</td>
                               <td className="px-5 py-4 font-mono">{parseFloat(t.entryPrice).toFixed(4)}</td>
@@ -586,24 +600,29 @@ export default function App() {
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
-                        {historyTrades.filter(t => t.source === 'WAIT_ENGINE' && t.status === 'CLOSED').length === 0 ? (
+                        {historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_PROTECTED') && t.status === 'CLOSED').length === 0 ? (
                            <tr>
                              <td colSpan={7} className="py-20 text-center">
                                 <div className="flex flex-col items-center gap-4 opacity-20">
                                    <Zap className="w-16 h-16 text-amber-500" />
                                    <div className="space-y-1">
-                                      <p className="text-xl font-bold text-slate-400">لا توجد صفقات منفذة حتى الآن</p>
+                                      <p className="text-xl font-bold text-slate-400">لا توجد صفقات "قنص" منفذة</p>
                                       <p className="text-slate-500 text-xs italic">بانتظار محرك الانتظار لاقتناص الفرصة التالية...</p>
                                    </div>
                                 </div>
                              </td>
                            </tr>
-                        ) : historyTrades.filter(t => t.source === 'WAIT_ENGINE' && t.status === 'CLOSED').map((t, i) => (
+                        ) : historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_PROTECTED') && t.status === 'CLOSED').map((t, i) => (
                            <tr key={i} className="hover:bg-amber-500/5 border-r-2 border-transparent hover:border-amber-500/50 transition-all group">
                               <td className="px-5 py-4 font-mono text-slate-400 text-xs">
                                  {t.exitTime ? new Date(t.exitTime).toLocaleString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '...'}
                               </td>
-                              <td className="px-5 py-4 font-bold font-mono text-emerald-400 text-base">{t.symbol}</td>
+                              <td className="px-5 py-4 font-bold font-mono text-emerald-400 text-base">
+                                 <div className="flex items-center gap-2">
+                                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                                    {t.symbol}
+                                 </div>
+                              </td>
                               <td className="px-5 py-4 font-mono text-slate-300">${parseFloat(t.amount || 0).toFixed(2)}</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice || 0).toFixed(4)}</td>
                               <td className="px-5 py-4 font-mono text-white font-medium">{parseFloat(t.exitPrice || 0).toFixed(4)}</td>

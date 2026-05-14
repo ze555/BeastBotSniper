@@ -196,8 +196,10 @@ export class SniperEngine {
        condition.type = 'LONG';
     }
 
-    // Label as WAIT_ENGINE if it's a standard sniper entry (met 5/5 wait conditions)
-    const sourceLabel = (decision.trap === TrapType.NONE) ? 'WAIT_ENGINE' : (decision.regime || 'CORE');
+    // Labeling logic: 
+    // If Beast Mode is ON, it's considered a Direct/Aggressive entry.
+    // If Beast Mode is OFF and it reached here, it's a "Wait Engine" (7 layers met).
+    const sourceLabel = this.settings.beastMode ? 'DIRECT_ENTRY' : 'WAIT_PROTECTED';
     this.executeTrade(condition, sourceLabel);
   }
 
