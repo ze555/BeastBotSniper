@@ -322,6 +322,29 @@ export class SniperEngine {
         }
     }
 
+    // Update floating PnL (Price Change %)
+    const priceChangePerc = trade.type === 'LONG' 
+        ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100 
+        : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
+    
+    trade.currentPrice = currentPrice;
+    
+    // Total Fees = 0.1% of position size (Notional)
+    const totalFeeRate = 0.001; 
+    const leverage = trade.leverage || 10;
+    
+    // ROE % = (PriceChange% - Fee%) * Leverage
+    // This gives a real "Return on Equity" including fees.
+    const roePerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
+    trade.pnlPerc = roePerc;
+
+    // PnL $ = (Amount * PriceChange / 100) - Fees + Realized
+    let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate); 
+    if (trade.realizedPnl) {
+        currentPnl += trade.realizedPnl;
+    }
+    trade.pnl = currentPnl;
+
     // 1. Layered Position Management Verdict
     const verdict = this.manager.manage(trade as any, currentPrice);
     if (verdict.action === 'CLOSE') {
@@ -331,21 +354,6 @@ export class SniperEngine {
        Object.assign(trade, verdict.updatedTrade);
        saveTrade(trade);
     }
-
-    // Update floating PnL
-    const floatingPnlPerc = trade.type === 'LONG' 
-        ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100 
-        : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
-    
-    trade.currentPrice = currentPrice;
-    trade.pnlPerc = floatingPnlPerc;
-
-    // PnL = (Remaining Size * Change%) - Estimated Opening Fee + Any already banked profit
-    let currentPnl = ((trade.amount * floatingPnlPerc) / 100) - (trade.amount * 0.0005); 
-    if (trade.realizedPnl) {
-        currentPnl += trade.realizedPnl;
-    }
-    trade.pnl = currentPnl;
 
     let updated = false;
 
@@ -703,15 +711,18 @@ export class SniperEngine {
       trade.status = 'CLOSED';
       trade.exitTime = Date.now();
       
-      const pnlPerc = trade.type === 'LONG' 
+      const priceChangePerc = trade.type === 'LONG' 
         ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 
         : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
         
-      trade.pnlPerc = pnlPerc;
+      // Real ROE = (PriceChange% - Fees%) * Leverage
+      const totalFeeRate = 0.001;
+      const leverage = trade.leverage || 10;
       
-      // Calculate PnL and subtract estimated fees (0.05% for entry + 0.05% for exit = 0.1% of position size)
-      const estimatedFee = trade.amount * 0.001; 
-      let finalPnl = ((trade.amount * pnlPerc) / 100) - estimatedFee;
+      trade.pnlPerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
+      
+      // Calculate PnL and subtract estimated fees (0.1% total)
+      let finalPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
       
       if (trade.realizedPnl) {
           finalPnl += trade.realizedPnl;
