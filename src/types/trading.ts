@@ -168,6 +168,7 @@ export interface BotSettings {
   strictBreakoutDistancePerc?: number; // Default 0.5 (meaning 0.5% from high)
   useSmartExit?: boolean;           // Default true
   useWiseExit?: boolean;            // 🔥 Wise Exit: Institutional & Structural Exit
+  useWiseEntry?: boolean;           // 🛡️ Wise Entry: Institutional Breakout & SMC Reversals
   
   // Smart Control (التحكم الذكي الفائق)
   useSmartControl?: boolean;        // تفعيل التحكم الذكي

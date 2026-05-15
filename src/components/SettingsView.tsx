@@ -335,8 +335,12 @@ export function SettingsView({
                              <input type="checkbox" checked={settings.useSmartExit} onChange={e => setSettings({...settings, useSmartExit: e.target.checked})} className="w-5 h-5 accent-blue-500" />
                          </div>
                          <div className="flex items-center gap-2">
-                             <span className="text-[9px] text-emerald-500">Wise</span>
+                             <span className="text-[9px] text-emerald-500">Wise Exit</span>
                              <input type="checkbox" checked={settings.useWiseExit} onChange={e => setSettings({...settings, useWiseExit: e.target.checked})} className="w-5 h-5 accent-emerald-500" />
+                         </div>
+                         <div className="flex items-center gap-2">
+                             <span className="text-[9px] text-purple-500">Wise Entry</span>
+                             <input type="checkbox" checked={settings.useWiseEntry} onChange={e => setSettings({...settings, useWiseEntry: e.target.checked})} className="w-5 h-5 accent-purple-500" />
                          </div>
                       </div>
                   </div>

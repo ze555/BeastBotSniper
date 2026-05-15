@@ -5,6 +5,7 @@ import { BiasEngine } from './BiasEngine.js';
 import { RiskEngine } from './RiskEngine.js';
 import { PositionManager } from './PositionManager.js';
 import { KillSwitch } from './KillSwitch.js';
+import { WiseEntryEngine } from './WiseEntryEngine.js';
 import { MarketMetrics, MarketRegime, TrapType, EngineDecision, GlobalContext, BotSettings } from '../../types/trading.js';
 
 export class CoreEngine {
@@ -13,6 +14,7 @@ export class CoreEngine {
   private bias = new BiasEngine();
   private risk = new RiskEngine();
   private manager = new PositionManager();
+  private wiseEntry = new WiseEntryEngine();
   public killSwitch = new KillSwitch();
 
   /**
@@ -115,6 +117,15 @@ export class CoreEngine {
         action = 'ATTACK';
         reason = 'BEAST_MOMENTUM_STRIKE';
         confidence = 0.5;
+    }
+    // Opportunity 4: Wise Institutional Strike (SMC/Structure)
+    else if (settings?.useWiseEntry) {
+        const wiseResult = this.wiseEntry.analyze(klinesRow, metrics, directionalBias);
+        if (wiseResult.shouldEnter) {
+            action = 'ATTACK';
+            reason = wiseResult.reason;
+            confidence = wiseResult.confidence;
+        }
     }
 
     // LAYER 6 Override: Apply minimum confidence threshold

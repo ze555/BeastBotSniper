@@ -26,6 +26,7 @@ export class SniperEngine {
     strictFastBreakevenPerc: 0.3,
     useSmartExit: true,
     useWiseExit: true,
+    useWiseEntry: true,
     useKineticEngine: true,
     beastMode: false,
     fastExitEnabled: true,
@@ -76,6 +77,8 @@ export class SniperEngine {
              this.settings.strictMinRvol = 1.5;
              this.settings.strictFastBreakevenPerc = 0.3;
              this.settings.useSmartExit = true;
+             this.settings.useWiseExit = true;
+             this.settings.useWiseEntry = true;
              this.settings.useKineticEngine = true;
              this.settings.beastMode = false;
              saveSettingsToDB(this.settings);
@@ -100,6 +103,7 @@ export class SniperEngine {
              strictBreakoutDistancePerc: dbSettings.strictBreakoutDistancePerc,
              useSmartExit: dbSettings.useSmartExit ?? false,
              useWiseExit: dbSettings.useWiseExit ?? false,
+             useWiseEntry: dbSettings.useWiseEntry ?? false,
              useKineticEngine: dbSettings.useKineticEngine ?? false,
              useSmartControl: dbSettings.useSmartControl ?? false,
              beastMode: dbSettings.beastMode ?? false,
