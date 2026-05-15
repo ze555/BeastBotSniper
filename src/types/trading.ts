@@ -239,6 +239,9 @@ export interface BotSettings {
   // Layer 6: Neural Confidence
   layerConfidenceEnabled: boolean;      // تفعيل بوابة اليقين الاصطناعي
   
-  // Layer 7: Risk Execution
-  layerRiskEnabled: boolean;            // تفعيل طبقة التحقق النهائي للمخاطرة 
+  // Quantum Scalp Engine Settings
+  quantumBbPeriod?: number;
+  quantumBbMultiplier?: number;
+  quantumVolThreshold?: number;
+  quantumMomentumVol?: number;
 }

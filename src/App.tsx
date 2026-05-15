@@ -20,7 +20,11 @@ export default function App() {
     maxConcurrentTrades: 10,
     dynamicSafetyExit: true,
     fastExitEnabled: true,
-    fastExitPerc: 0.5
+    fastExitPerc: 0.5,
+    quantumBbPeriod: 20,
+    quantumBbMultiplier: 1.8,
+    quantumVolThreshold: 1.02,
+    quantumMomentumVol: 1.5
   });
   const [savingSettings, setSavingSettings] = useState(false);
 

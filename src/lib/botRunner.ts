@@ -254,11 +254,12 @@ export async function runTradeLoop() {
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
       if (activeTrades.length < maxTrades && watchlist.length > 0) {
-        // Increase search intensity in Beast Mode
-        const scanCount = sniper.getSettings().beastMode ? 15 : 8;
+        // High Intensity Scanning for Quick Scalping
+        const scanCount = 40; 
         const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
         let rejectedCount = 0;
+        let signalFoundInThisLoop = false;
         let rejectionReasons: Record<string, number> = {};
 
         // Only use Quantum Scalper now
@@ -270,29 +271,32 @@ export async function runTradeLoop() {
                 if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
 
                 try {
-                     const [klinesRes, takerRes] = await Promise.all([
-                         axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1m&limit=40`, { timeout: 4000 }),
-                         axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=5m&limit=1`, { timeout: 4000 })
-                     ]);
-
+                     // Try to get klines first
+                     const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1m&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
+
+                     // Taker ratio fallback: Try to get it but don't fail if endpoint is dead
                      let takerRatio = 1.0;
-                     if (takerRes.data && takerRes.data.length > 0) {
-                         const bv = parseFloat(takerRes.data[0].buyVol);
-                         const sv = parseFloat(takerRes.data[0].sellVol);
-                         if (sv > 0) takerRatio = bv / sv;
+                     try {
+                        const takerRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=5m&limit=1`, { timeout: 3000 });
+                        if (takerRes.data && takerRes.data.length > 0) {
+                            const bv = parseFloat(takerRes.data[0].buyVol);
+                            const sv = parseFloat(takerRes.data[0].sellVol);
+                            if (sv > 0) takerRatio = bv / sv;
+                        }
+                     } catch (e) {
+                         // Default to 1.0 if Binance Taker endpoint fails
                      }
 
-                     const decision = quantum.analyze(klines, takerRatio);
+                     const decision = quantum.analyze(klines, takerRatio, sniper.getSettings());
 
                      if (decision.shouldEnter) {
+                          signalFoundInThisLoop = true;
                           const currentPx = parseFloat(klines[klines.length - 1][4]);
                           
-                          // Raw calculation for SL based on dynamic percent
                           const slDistance = (decision.stopLossPerc / 100) * currentPx;
                           const tpDistance = (decision.takeProfitPerc / 100) * currentPx;
                           
-                          // Setting support/resistance carefully to act as valid initialSl calculation inside SniperEngine
                           const support = currentPx - slDistance;
                           const resistance = currentPx + slDistance;
 
@@ -305,21 +309,19 @@ export async function runTradeLoop() {
                               support: decision.type === 'LONG' ? support : 0,
                               resistance: decision.type === 'SHORT' ? resistance : 0,
                               takerBuySellRatio: takerRatio,
-                              atr: 0 // Explicitly 0 so executeTrade uses our support/resistance
+                              atr: 0 
                           };
                           
-                          addLog(`⚡ QUANTUM ${decision.type}: ${coin.symbol} (${decision.reason})`, 'success');
-                          
-                          // Force execution
+                          addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
                           sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
                           
                      } else {
                          rejectedCount++;
-                         rejectionReasons['Quantum Scalp No Signal'] = (rejectionReasons['Quantum Scalp No Signal'] || 0) + 1;
+                         rejectionReasons['Quantum No Signal'] = (rejectionReasons['Quantum No Signal'] || 0) + 1;
                      }
                 } catch(e: any) {
                      if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-                       console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 1m. Pausing Loop...`);
+                       console.log(`[BOT RUNNER] ⚠️ Rate limit hit. Pausing Loop...`);
                        await sleep(10000);
                      }
                 }
@@ -328,10 +330,9 @@ export async function runTradeLoop() {
             console.error("Error loading Quantum Engine", e);
         }
 
-        // Summary log every 10 loops
-        if ((globalContext as any).loopCount % 10 === 0 && rejectedCount > 0) {
-            const top = Object.entries(rejectionReasons).sort((a,b) => b[1]-a[1])[0];
-            addLog(`DIAGNOSTIC: Scanned ${targetsToCheck.length} coins. Top Reject: ${top?.[0]}`, 'info');
+        // Summary log if no signals found
+        if (!signalFoundInThisLoop && (globalContext as any).loopCount % 5 === 0) {
+            addLog(`Scanning... ${targetsToCheck.length} coins evaluated. No valid scalp patterns yet.`, 'info');
         }
       } else if (botActive && watchlist.length === 0) {
          if ((globalContext as any).loopCount % 5 === 0) {

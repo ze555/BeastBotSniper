@@ -124,7 +124,11 @@ export const initDB = () => {
         "layerLiquidityEnabled INTEGER DEFAULT 1",
         "layerMomentumEnabled INTEGER DEFAULT 1",
         "layerConfidenceEnabled INTEGER DEFAULT 1",
-        "layerRiskEnabled INTEGER DEFAULT 1"
+        "layerRiskEnabled INTEGER DEFAULT 1",
+        "quantumBbPeriod REAL DEFAULT 20",
+        "quantumBbMultiplier REAL DEFAULT 1.8",
+        "quantumVolThreshold REAL DEFAULT 1.02",
+        "quantumMomentumVol REAL DEFAULT 1.5"
       ];
       
       let pending = newCols.length;
@@ -267,7 +271,11 @@ export function saveSettingsToDB(settings: any) {
       layerLiquidityEnabled=excluded.layerLiquidityEnabled,
       layerMomentumEnabled=excluded.layerMomentumEnabled,
       layerConfidenceEnabled=excluded.layerConfidenceEnabled,
-      layerRiskEnabled=excluded.layerRiskEnabled
+      layerRiskEnabled=excluded.layerRiskEnabled,
+      quantumBbPeriod=excluded.quantumBbPeriod,
+      quantumBbMultiplier=excluded.quantumBbMultiplier,
+      quantumVolThreshold=excluded.quantumVolThreshold,
+      quantumMomentumVol=excluded.quantumMomentumVol
   `, [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
@@ -281,7 +289,8 @@ export function saveSettingsToDB(settings: any) {
     settings.useStrategyTrendFilter ? 1 : 0, settings.useStrategyVolatilityRule ? 1 : 0, settings.useStrategyConfidenceGate ? 1 : 0, settings.useStrategyMomentumRule ? 1 : 0,
     settings.dynamicSafetyExit ? 1 : 0,
     settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0,
-    settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0
+    settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0,
+    settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 1.8, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5
   ], (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
   });

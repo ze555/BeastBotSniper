@@ -105,6 +105,41 @@ export function SettingsView({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+               {/* Quantum Engine Integrated */}
+               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6 md:col-span-2">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                     <div className="flex items-center gap-3">
+                        <BrainCircuit className="w-6 h-6 text-purple-500" />
+                        <div>
+                           <h4 className="font-black text-purple-400">إعدادات المحرك الكمي (Quantum Engine)</h4>
+                           <p className="text-[10px] text-slate-500">حساسية المؤشرات وعتبات السيولة لدخول الصفقات السريعة.</p>
+                        </div>
+                     </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                     <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400">مدة البولنجر (Period)</label>
+                        <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-purple-400 font-mono" value={settings.quantumBbPeriod ?? 20} onChange={e => setSettings({...settings, quantumBbPeriod: parseInt(e.target.value)})} />
+                        <p className="text-[9px] text-slate-500 mt-1">الافتراضي 20. تقليل الرقم يجعله أسرع في التقاط الإشارات.</p>
+                     </div>
+                     <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400">مضاعف البولنجر (Multiplier)</label>
+                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-purple-400 font-mono" value={settings.quantumBbMultiplier ?? 1.8} onChange={e => setSettings({...settings, quantumBbMultiplier: parseFloat(e.target.value)})} />
+                        <p className="text-[9px] text-slate-500 mt-1">الافتراضي 1.8. رقم أصغر يعني دخول أسهل ومخاطرة أعلى.</p>
+                     </div>
+                     <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400">عتبة الفوليوم الارتدادي (Reversion Vol)</label>
+                        <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-emerald-400 font-mono" value={settings.quantumVolThreshold ?? 1.02} onChange={e => setSettings({...settings, quantumVolThreshold: parseFloat(e.target.value)})} />
+                        <p className="text-[9px] text-slate-500 mt-1">الافتراضي 1.02 (أي %102 أعلى من المتوسط). لصفقات ارتداد الضغط.</p>
+                     </div>
+                     <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400">عتبة فوليوم الزخم السريع (Momentum Vol)</label>
+                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono" value={settings.quantumMomentumVol ?? 1.5} onChange={e => setSettings({...settings, quantumMomentumVol: parseFloat(e.target.value)})} />
+                        <p className="text-[9px] text-slate-500 mt-1">الافتراضي 1.5. الصعود المفاجئ للسيولة.</p>
+                     </div>
+                  </div>
+               </div>
+
                {/* Kinetic Engine Integrated */}
                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-4">

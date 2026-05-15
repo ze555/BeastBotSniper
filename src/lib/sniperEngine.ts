@@ -324,12 +324,10 @@ export class SniperEngine {
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
-    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage, maxTrades);
+    let positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage, maxTrades);
     
-    if (positionSizeUsd <= 0) {
-       console.warn(`[SNIPER] ⚠️ Aborting trade on ${cond.symbol}: Calculated size is zero.`);
-       return;
-    }
+    // Ensure minimum position for exchange rules (Binance usually requires 5-10 USD)
+    if (positionSizeUsd < 11) positionSizeUsd = 11;
 
     const trade: Trade = {
       id: Date.now().toString(),
