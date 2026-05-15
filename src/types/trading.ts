@@ -244,5 +244,4 @@ export interface BotSettings {
   quantumBbMultiplier?: number;
   quantumVolThreshold?: number;
   quantumMomentumVol?: number;
-  reverseMode?: boolean; // 🔄 Reverse Mode: LONG becomes SHORT and vice versa
 }

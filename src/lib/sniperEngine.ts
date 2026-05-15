@@ -313,16 +313,14 @@ export class SniperEngine {
     saveTrade(trade);
   }
 
-  public executeQuantumTrade(cond: MarketCondition, source: string, tpPerc: number, slPerc: number, originalType?: 'LONG' | 'SHORT') {
+  public executeQuantumTrade(cond: MarketCondition, source: string, tpPerc: number, slPerc: number) {
     const entryPrice = cond.price;
-    const calculationType = originalType || cond.type;
-    
     const slDistance = (slPerc / 100) * entryPrice;
-    const sl = calculationType === 'LONG' ? entryPrice - slDistance : entryPrice + slDistance;
+    const sl = cond.type === 'LONG' ? entryPrice - slDistance : entryPrice + slDistance;
 
     const tp1Distance = (tpPerc / 100) * entryPrice;
-    const tp1 = calculationType === 'LONG' ? entryPrice + tp1Distance : entryPrice - tp1Distance;
-    const tp2 = calculationType === 'LONG' ? entryPrice + (tp1Distance * 2.5) : entryPrice - (tp1Distance * 2.5);
+    const tp1 = cond.type === 'LONG' ? entryPrice + tp1Distance : entryPrice - tp1Distance;
+    const tp2 = cond.type === 'LONG' ? entryPrice + (tp1Distance * 2.5) : entryPrice - (tp1Distance * 2.5);
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
@@ -371,11 +369,6 @@ export class SniperEngine {
   ) {
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
-
-    // Detect if this is an inverted trade (Quantum Reverse Mode)
-    // A trade is inverted if TP1 is on the "wrong" side of entry for its type
-    const isInverted = (trade.type === 'LONG' && trade.tp1 < trade.entryPrice) || 
-                      (trade.type === 'SHORT' && trade.tp1 > trade.entryPrice);
 
     // --- ⚡ FAST EXIT (الخروج السريع - Global Override) ---
     if (this.settings.fastExitEnabled) {
@@ -784,55 +777,47 @@ export class SniperEngine {
     }
 
     if (trade.type === 'LONG') {
-      if (!isInverted) {
-          // Standard LONG Monitoring
-          if (trade.status === 'OPEN' && currentPrice >= trade.tp1) {
-            trade.status = 'TP1_HIT';
-            trade.sl = trade.entryPrice;
-            trade.isBreakeven = true;
-            updated = true;
-            console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven.`);
-          }
-          if (currentPrice >= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 TP2_HIT'); return; }
-          if (currentPrice <= trade.sl) { this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS'); return; }
-      } else {
-          // 🔄 INVERTED LONG Monitoring (Acts like Original SHORT)
-          // Original TP was BELOW entry. Original SL was ABOVE entry.
-          if (trade.status === 'OPEN' && currentPrice <= trade.tp1) {
-             trade.status = 'TP1_HIT';
-             trade.sl = trade.entryPrice;
-             trade.isBreakeven = true;
-             updated = true;
-             console.log(`[SNIPER] 🔄 INVERTED: Original TP hit on ${trade.symbol}! (Profit for short, Loss for long).`);
-          }
-          if (currentPrice <= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 INVERTED_TP_HIT'); return; }
-          if (currentPrice >= trade.sl) { this.closeTrade(trade, currentPrice, '🛡️ INVERTED_SL_HIT'); return; }
+      // Hit TP1 (+1R)
+      if (trade.status === 'OPEN' && currentPrice >= trade.tp1) {
+        trade.status = 'TP1_HIT';
+        trade.sl = trade.entryPrice; // Move SL to breakeven
+        trade.isBreakeven = true;
+        updated = true;
+        console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven (${trade.sl}).`);
+      }
+
+      // Hit TP2 (+2R)
+      if (currentPrice >= trade.tp2) {
+         this.closeTrade(trade, currentPrice, '🎯 TP2_HIT');
+         return;
+      }
+
+      // Hit SL
+      if (currentPrice <= trade.sl) {
+         this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS');
+         return;
       }
 
     } else { // SHORT
-      if (!isInverted) {
-          // Standard SHORT Monitoring
-          if (trade.status === 'OPEN' && currentPrice <= trade.tp1) {
-            trade.status = 'TP1_HIT';
-            trade.sl = trade.entryPrice;
-            trade.isBreakeven = true;
-            updated = true;
-            console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven.`);
-          }
-          if (currentPrice <= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 TP2_HIT'); return; }
-          if (currentPrice >= trade.sl) { this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS'); return; }
-      } else {
-          // 🔄 INVERTED SHORT Monitoring (Acts like Original LONG)
-          // Original TP was ABOVE entry. Original SL was BELOW entry.
-          if (trade.status === 'OPEN' && currentPrice >= trade.tp1) {
-             trade.status = 'TP1_HIT';
-             trade.sl = trade.entryPrice;
-             trade.isBreakeven = true;
-             updated = true;
-             console.log(`[SNIPER] 🔄 INVERTED: Original TP hit on ${trade.symbol}!`);
-          }
-          if (currentPrice >= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 INVERTED_TP_HIT'); return; }
-          if (currentPrice <= trade.sl) { this.closeTrade(trade, currentPrice, '🛡️ INVERTED_SL_HIT'); return; }
+      // Hit TP1 (+1R)
+      if (trade.status === 'OPEN' && currentPrice <= trade.tp1) {
+        trade.status = 'TP1_HIT';
+        trade.sl = trade.entryPrice; // Move SL to breakeven
+        trade.isBreakeven = true;
+        updated = true;
+        console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven (${trade.sl}).`);
+      }
+
+      // Hit TP2 (+2R)
+      if (currentPrice <= trade.tp2) {
+         this.closeTrade(trade, currentPrice, '🎯 TP2_HIT');
+         return;
+      }
+
+      // Hit SL
+      if (currentPrice >= trade.sl) {
+         this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS');
+         return;
       }
     }
 

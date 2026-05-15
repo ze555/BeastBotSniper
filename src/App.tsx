@@ -24,8 +24,7 @@ export default function App() {
     quantumBbPeriod: 20,
     quantumBbMultiplier: 1.8,
     quantumVolThreshold: 1.02,
-    quantumMomentumVol: 1.5,
-    reverseMode: false
+    quantumMomentumVol: 1.5
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
