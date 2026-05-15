@@ -94,4 +94,62 @@ export class WiseEntryEngine {
 
     return { shouldEnter: false, type: 'LONG', reason: '', confidence: 0 };
   }
+
+  /**
+   * Returns institutional pressure score (SMC)
+   * Values near 1.0 mean strong structural breakout or liquidity grab
+   */
+  public getSMCPressure(klines: any[]): { longPressure: number; shortPressure: number; type: 'BOS' | 'SWEEP' | 'NONE' } {
+    if (klines.length < 15) return { longPressure: 0, shortPressure: 0, type: 'NONE' };
+    
+    const last = klines[klines.length - 1];
+    const c0 = parseFloat(last[4]);
+    const o0 = parseFloat(last[1]);
+    const v0 = parseFloat(last[5]);
+    
+    const recentHighs = klines.slice(-15, -1).map(k => parseFloat(k[2]));
+    const recentLows = klines.slice(-15, -1).map(k => parseFloat(k[3]));
+    const rangeHigh = Math.max(...recentHighs);
+    const rangeLow = Math.min(...recentLows);
+    
+    let longPressure = 0;
+    let shortPressure = 0;
+    let type: 'BOS' | 'SWEEP' | 'NONE' = 'NONE';
+
+    // 1. Structural Breakout Pressure
+    if (c0 > rangeHigh) {
+        longPressure += 0.6;
+        type = 'BOS';
+    }
+    if (c0 < rangeLow) {
+        shortPressure += 0.6;
+        type = 'BOS';
+    }
+
+    // 2. Body Strength Pressure
+    const bodySize = Math.abs(c0 - o0);
+    const range = parseFloat(last[2]) - parseFloat(last[3]);
+    if (bodySize > range * 0.7) {
+        if (c0 > o0) longPressure += 0.3;
+        else shortPressure += 0.3;
+    }
+
+    // 3. Liquidity Sweep Detection (Quick Check)
+    const lowSweep = parseFloat(last[3]) < rangeLow && c0 > rangeLow;
+    if (lowSweep) {
+        longPressure += 0.8;
+        type = 'SWEEP';
+    }
+    const highSweep = parseFloat(last[2]) > rangeHigh && c0 < rangeHigh;
+    if (highSweep) {
+        shortPressure += 0.8;
+        type = 'SWEEP';
+    }
+
+    return { 
+        longPressure: Math.min(1.0, longPressure), 
+        shortPressure: Math.min(1.0, shortPressure),
+        type
+    };
+  }
 }

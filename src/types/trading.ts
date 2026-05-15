@@ -192,6 +192,13 @@ export interface BotSettings {
   beastAutoAdapt?: boolean;             // التعديل التلقائي الذاتي للاعدادات
   beastLearnRate?: number;              // سرعة التعلم من الخسائر وإعادة التعديل
   isNightmareMode?: boolean;            // 🔥 وضع الكابوس: استراتيجية هجومية شاملة ومنيعة
+  
+  // Beast Intensity & Confirmation
+  beastConfirmWithSMC?: boolean;        // تأكيد الوحش عبر التحليل المؤسساتي (SMC)
+  beastConfirmWithVolume?: boolean;     // تأكيد الدخول بفلتر السيولة (RVOL)
+  beastMinRvol?: number;                // الحد الأدنى للسيولة في وضع الوحش
+  beastInstitutionalStrength?: number;  // قوة الضغط المؤسساتي المطلوبة (0.1 - 1.0)
+
   marketPanicThreshold?: number;        // عتبة الذعر: إيقاف التداول عند هبوط عام (مثال 3% في 5 دقائق)
 
   // Strategy Builder Thresholds (عتبات بناء الاستراتيجية)

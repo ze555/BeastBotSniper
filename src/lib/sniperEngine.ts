@@ -29,6 +29,10 @@ export class SniperEngine {
     useWiseEntry: true,
     useKineticEngine: true,
     beastMode: false,
+    beastConfirmWithSMC: false,
+    beastConfirmWithVolume: false,
+    beastMinRvol: 1.2,
+    beastInstitutionalStrength: 0.4,
     fastExitEnabled: true,
     fastExitPerc: 0.5,
     strategyAdxThreshold: 25,
@@ -81,6 +85,10 @@ export class SniperEngine {
              this.settings.useWiseEntry = true;
              this.settings.useKineticEngine = true;
              this.settings.beastMode = false;
+             this.settings.beastConfirmWithSMC = false;
+             this.settings.beastConfirmWithVolume = false;
+             this.settings.beastMinRvol = 1.2;
+             this.settings.beastInstitutionalStrength = 0.4;
              saveSettingsToDB(this.settings);
          } else {
            this.settings = {
@@ -107,6 +115,10 @@ export class SniperEngine {
              useKineticEngine: dbSettings.useKineticEngine ?? false,
              useSmartControl: dbSettings.useSmartControl ?? false,
              beastMode: dbSettings.beastMode ?? false,
+             beastConfirmWithSMC: dbSettings.beastConfirmWithSMC ?? false,
+             beastConfirmWithVolume: dbSettings.beastConfirmWithVolume ?? false,
+             beastMinRvol: dbSettings.beastMinRvol ?? 1.2,
+             beastInstitutionalStrength: dbSettings.beastInstitutionalStrength ?? 0.4,
              fastExitEnabled: dbSettings.fastExitEnabled ?? false,
              fastExitPerc: dbSettings.fastExitPerc ?? 0.5,
              strategyAdxThreshold: dbSettings.strategyAdxThreshold ?? 25,

@@ -288,9 +288,31 @@ export function SettingsView({
                         <label className="text-[10px] font-bold text-slate-400">معدل التعلم %</label>
                         <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono" value={settings.beastLearnRate ?? 50} onChange={e => setSettings({...settings, beastLearnRate: parseInt(e.target.value)})} />
                      </div>
-                     <div className="flex items-center gap-2 pt-5">
+                     <div className="flex items-center gap-2 pt-5 text-right">
                        <input type="checkbox" checked={settings.beastSlippageExploit} onChange={e => setSettings({...settings, beastSlippageExploit: e.target.checked})} className="w-4 h-4 accent-rose-500" />
-                       <span className="text-[10px] font-bold text-rose-300">عكس الانزلاق</span>
+                       <span className="text-[10px] font-bold text-rose-300 mr-2">عكس الانزلاق</span>
+                     </div>
+                     
+                     {/* Beast Confirmations */}
+                     <div className="col-span-2 space-y-3 border-t border-slate-900 pt-4">
+                        <div className="flex items-center justify-between">
+                           <span className="text-[9px] font-black text-slate-500 uppercase flex items-center gap-2">
+                              <TrendingUp className="w-3 h-3" /> تأكيد السيولة (RVOL)
+                           </span>
+                           <div className="flex items-center gap-2">
+                              <input type="number" step="0.1" className="w-14 bg-slate-900 border border-slate-800 rounded-lg px-1 py-1 text-[10px] text-rose-400 text-center" value={settings.beastMinRvol ?? 1.2} onChange={e => setSettings({...settings, beastMinRvol: parseFloat(e.target.value)})} />
+                              <input type="checkbox" checked={settings.beastConfirmWithVolume} onChange={e => setSettings({...settings, beastConfirmWithVolume: e.target.checked})} className="w-4 h-4 accent-rose-500" />
+                           </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                           <span className="text-[9px] font-black text-slate-500 uppercase flex items-center gap-2">
+                              <ShieldCheck className="w-3 h-3 text-emerald-500" /> فلتر مؤسساتي (SMC)
+                           </span>
+                           <div className="flex items-center gap-2">
+                              <input type="number" step="0.1" max="1" className="w-14 bg-slate-900 border border-slate-800 rounded-lg px-1 py-1 text-[10px] text-rose-400 text-center" value={settings.beastInstitutionalStrength ?? 0.4} onChange={e => setSettings({...settings, beastInstitutionalStrength: parseFloat(e.target.value)})} title="Institutional Pressure Threshold" />
+                              <input type="checkbox" checked={settings.beastConfirmWithSMC} onChange={e => setSettings({...settings, beastConfirmWithSMC: e.target.checked})} className="w-4 h-4 accent-rose-500" />
+                           </div>
+                        </div>
                      </div>
                   </div>
                </div>

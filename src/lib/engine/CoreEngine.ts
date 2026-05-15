@@ -112,11 +112,35 @@ export class CoreEngine {
            confidence = 0.75;
        }
     }
-    // Opportunity 3: Beast Strike
-    else if (settings?.beastMode && metrics.rvol > 1.2) {
-        action = 'ATTACK';
-        reason = 'BEAST_MOMENTUM_STRIKE';
-        confidence = 0.5;
+    // Opportunity 3: Beast Strike (Aggressive Momentum)
+    else if (settings?.beastMode) {
+        const minRvol = settings.beastMinRvol ?? 1.2;
+        const rvolPass = settings.beastConfirmWithVolume ? metrics.rvol >= minRvol : metrics.rvol >= 1.2;
+        
+        let smcPass = true;
+        let beastIntention: 'LONG' | 'SHORT' = metrics.rsi > 50 ? 'LONG' : 'SHORT'; // Fast fallback
+
+        if (settings.beastConfirmWithSMC) {
+            const smc = this.wiseEntry.getSMCPressure(klinesRow);
+            const threshold = settings.beastInstitutionalStrength ?? 0.4;
+            
+            if (smc.longPressure >= threshold) {
+                beastIntention = 'LONG';
+                smcPass = true;
+            } else if (smc.shortPressure >= threshold) {
+                beastIntention = 'SHORT';
+                smcPass = true;
+            } else {
+                smcPass = false;
+            }
+        }
+
+        if (rvolPass && smcPass) {
+            action = 'ATTACK';
+            reason = `BEAST_STRIKE: Institutional ${beastIntention} Momentum (RVOL:${metrics.rvol.toFixed(1)})`;
+            confidence = 0.6; 
+            return { regime: MarketRegime.MOMENTUM_MODE, bias: beastIntention, trap, confidence, action, reason };
+        }
     }
     // Opportunity 4: Wise Institutional Strike (SMC/Structure)
     else if (settings?.useWiseEntry) {
