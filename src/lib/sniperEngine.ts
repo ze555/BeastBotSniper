@@ -315,14 +315,22 @@ export class SniperEngine {
 
   public executeQuantumTrade(cond: MarketCondition, source: string, tpPerc: number, slPerc: number, originalType?: 'LONG' | 'SHORT') {
     const entryPrice = cond.price;
-    const calculationType = originalType || cond.type;
-    
-    const slDistance = (slPerc / 100) * entryPrice;
-    const sl = calculationType === 'LONG' ? entryPrice - slDistance : entryPrice + slDistance;
+    const executionType = cond.type;
+    const isActuallyReversed = originalType && originalType !== executionType;
 
-    const tp1Distance = (tpPerc / 100) * entryPrice;
-    const tp1 = calculationType === 'LONG' ? entryPrice + tp1Distance : entryPrice - tp1Distance;
-    const tp2 = calculationType === 'LONG' ? entryPrice + (tp1Distance * 2.5) : entryPrice - (tp1Distance * 2.5);
+    // 🔄 REVERSE LOGIC LEVEL MAPPING:
+    // If we are reversing a "guaranteed loser":
+    // The original SL becomes our TP (Success through failure)
+    // The original TP becomes our SL (Failure through original success)
+    const effectiveTpPerc = isActuallyReversed ? slPerc : tpPerc;
+    const effectiveSlPerc = isActuallyReversed ? tpPerc : slPerc;
+
+    const slDistance = (effectiveSlPerc / 100) * entryPrice;
+    const sl = executionType === 'LONG' ? entryPrice - slDistance : entryPrice + slDistance;
+
+    const tp1Distance = (effectiveTpPerc / 100) * entryPrice;
+    const tp1 = executionType === 'LONG' ? entryPrice + tp1Distance : entryPrice - tp1Distance;
+    const tp2 = executionType === 'LONG' ? entryPrice + (tp1Distance * 2.5) : entryPrice - (tp1Distance * 2.5);
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
@@ -334,7 +342,7 @@ export class SniperEngine {
     const trade: Trade = {
       id: Date.now().toString(),
       symbol: cond.symbol,
-      type: cond.type,
+      type: executionType,
       mode: this.mode,
       entryPrice,
       entryTime: Date.now(),
@@ -346,14 +354,14 @@ export class SniperEngine {
       tp2,
       status: 'OPEN',
       score: 5,
-      source: source || 'QUANTUM',
+      source: isActuallyReversed ? `${source}_REVERSED` : source,
       isBreakeven: false,
       pnl: 0,
       pnlPerc: 0
     };
 
     this.activeTrades.set(trade.symbol, trade);
-    addLog(`QUANTUM ENTRY: ${trade.type} ${trade.symbol} @ ${entryPrice.toFixed(2)}`, 'info');
+    addLog(`${isActuallyReversed ? '🔄 REVERSED' : 'QUANTUM'} ENTRY: ${trade.type} ${trade.symbol} @ ${entryPrice.toFixed(2)}`, 'info');
     console.log(`[QUANTUM] 🟢 EXECUTED: ${trade.type} on ${trade.symbol}. SL: ${sl.toFixed(4)}, TP: ${tp1.toFixed(4)}`);
     saveTrade(trade);
   }
@@ -372,11 +380,6 @@ export class SniperEngine {
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
 
-    // Detect if this is an inverted trade (Quantum Reverse Mode)
-    // A trade is inverted if TP1 is on the "wrong" side of entry for its type
-    const isInverted = (trade.type === 'LONG' && trade.tp1 < trade.entryPrice) || 
-                      (trade.type === 'SHORT' && trade.tp1 > trade.entryPrice);
-
     // --- ⚡ FAST EXIT (الخروج السريع - Global Override) ---
     if (this.settings.fastExitEnabled) {
         const exitPerc = this.settings.fastExitPerc || 0.5;
@@ -387,9 +390,8 @@ export class SniperEngine {
             : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
 
         // 1. حماية رأس المال (Stop Loss الفوري)
-        // إذا نزل السعر عن النسبة المحددة من سعر الدخول، اخرج فوراً
         if (priceChangePerc <= -exitPerc) {
-            console.log(`[FAST EXIT] ⚡ Emergency Stop: Price dropped ${priceChangePerc.toFixed(2)}% below entry. (Threshold: ${exitPerc}%).`);
+            console.log(`[FAST EXIT] ⚡ Emergency Stop: Price dropped ${priceChangePerc.toFixed(2)}% below entry.`);
             this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_STOP_LOSS`);
             return;
         }
@@ -400,443 +402,66 @@ export class SniperEngine {
                 ? ((trade.highestPrice - currentPrice) / trade.highestPrice) * 100
                 : ((currentPrice - trade.highestPrice) / trade.highestPrice) * 100;
 
-            // إذا تجاوز الربح ضعف النسبة المحددة (مثلاً 1%)، ننتظر الصعود لأقصى نقطة
-            // ولكن إذا بدأ السعر ينزل من القمة بمقدار النسبة المحددة (0.5%)، يتم جني الربح فوراً
             const doubleThreshold = exitPerc * 2;
             
             if (priceChangePerc >= doubleThreshold && dropFromHighPerc >= exitPerc) {
-                console.log(`[FAST EXIT] ⚡ Profit Locked: Price dropped ${dropFromHighPerc.toFixed(2)}% from peak (${trade.highestPrice.toFixed(4)}) after reaching double target.`);
+                console.log(`[FAST EXIT] ⚡ Profit Locked: Price dropped ${dropFromHighPerc.toFixed(2)}% from peak.`);
                 this.closeTrade(trade, currentPrice, `⚡ FAST_EXIT_PROFIT_TAKEN`);
                 return;
             }
         }
     }
 
-    // --- DYNAMIC SAFETY EXIT (مراقبة المؤشرات الصارمة بعد الدخول) ---
-    if (this.settings.dynamicSafetyExit && indicators && trade.status !== 'CLOSED') {
-        const isStrict = this.settings.strictMode;
-        let failCount = 0;
-        let reasons: string[] = [];
-
-        // 1. ADX Threshold Guard (If trend dies, evaluate context)
-        const adxThreshold = isStrict ? (this.settings.strategyAdxThreshold ?? 25) : 15;
-        if (indicators.adx && indicators.adx < adxThreshold * 0.6) { 
-            // Only count as fail if price is also trending against us
-            const priceAgainstUs = trade.type === 'LONG' ? (currentPrice < trade.entryPrice) : (currentPrice > trade.entryPrice);
-            if (priceAgainstUs) {
-                failCount++;
-                reasons.push(`ADX_DIED (${indicators.adx.toFixed(1)})`);
-            }
-        }
-
-        // 2. Trend Alignment Guard (EMA Cross Reversal) - Needs Confluence
-        if (indicators.emaTrend && indicators.emaTrend !== trade.type) {
-            // Check RSI before killing trade immediately on EMA flip
-            if (indicators.rsi) {
-                const isRsiNeutral = indicators.rsi > 45 && indicators.rsi < 55;
-                if (!isRsiNeutral) { // Only fail if RSI also confirms momentum reversal
-                   failCount++;
-                   reasons.push(`TREND_REVERSED (${indicators.emaTrend})`);
-                }
-            }
-        }
-
-        // 3. RSI Momentum Loss - With Buffer
-        if (indicators.rsi) {
-            if (trade.type === 'LONG' && indicators.rsi < 35) { // Lower floor to 35 to handle chop
-                failCount++;
-                reasons.push(`RSI_MOMENTUM_CRASH (${indicators.rsi.toFixed(1)})`);
-            }
-            if (trade.type === 'SHORT' && indicators.rsi > 65) {
-                failCount++;
-                reasons.push(`RSI_MOMENTUM_CRASH (${indicators.rsi.toFixed(1)})`);
-            }
-        }
-
-        // Decision Logic: Requires 2.0 Fail points (Higher wall to prevent noise exits)
-        if (failCount >= 2.0) {
-            console.log(`[DYNAMIC EXIT] 🛡️ Heavy weakness detected in ${trade.symbol}. Reasons: ${reasons.join(', ')}`);
-            this.closeTrade(trade, currentPrice, `🛡️ STRAT_WEAKNESS: ${reasons.shift()}`);
-            return;
-        }
-    }
-
-    // Update floating PnL (Price Change %)
+    // Update Floating PNL
     const priceChangePerc = trade.type === 'LONG' 
         ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100 
         : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
     
     trade.currentPrice = currentPrice;
-    
-    // Total Fees = 0.1% of position size (Notional)
     const totalFeeRate = 0.001; 
     const leverage = trade.leverage || 10;
     
-    // ROE % = (PriceChange% - Fee%) * Leverage
-    // This gives a real "Return on Equity" including fees.
-    const roePerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
-    trade.pnlPerc = roePerc;
+    trade.pnlPerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
+    trade.pnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate); 
+    if (trade.realizedPnl) trade.pnl += trade.realizedPnl;
 
-    // PnL $ = (Amount * PriceChange / 100) - Fees + Realized
-    let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate); 
-    if (trade.realizedPnl) {
-        currentPnl += trade.realizedPnl;
-    }
-    trade.pnl = currentPnl;
-
-    // 1. Layered Position Management Verdict
-    const verdict = this.manager.manage(trade as any, currentPrice);
-    if (verdict.action === 'CLOSE') {
-       this.closeTrade(trade, currentPrice, `CORE_MANAGER: ${verdict.reason}`);
-       return;
-    } else if (verdict.action === 'UPDATE' && verdict.updatedTrade) {
-       Object.assign(trade, verdict.updatedTrade);
-       saveTrade(trade);
-    }
-
+    // --- STANDARD MONITORING (LONG/SHORT) ---
     let updated = false;
 
-    // --- HARD TIME LIMIT EXIT (Max 3 hours to avoid dead money) ---
-    const minutesOpenTrade = (Date.now() - trade.entryTime) / 60000;
-    if (minutesOpenTrade >= 180) { // 3 Hours maximum
-        console.log(`[SNIPER] ⏱️ TRADE EXPIRED: ${trade.symbol} holding for over 3 hours without hitting TP/SL. Exiting now to free up capital.`);
-        this.closeTrade(trade, currentPrice, '⏱️ TIME_LIMIT_EXIT');
-        return;
-    }
-
-    // Track live tick history (Micro-Structure)
-    if (!trade.tickHistory) trade.tickHistory = [];
-    trade.tickHistory.push(currentPrice);
-    if (trade.tickHistory.length > 40) trade.tickHistory.shift(); // Keep last 40 live updates
-    
-    if (currentOI !== undefined) {
-       if (!trade.oiHistory) trade.oiHistory = [];
-       trade.oiHistory.push(currentOI);
-       if (trade.oiHistory.length > 40) trade.oiHistory.shift();
-    }
-    
-    if (currentVol !== undefined) {
-       if (!trade.volHistory) trade.volHistory = [];
-       trade.volHistory.push(currentVol);
-       if (trade.volHistory.length > 40) trade.volHistory.shift();
-    }
-
-    // update highest price tracker
-    if (!trade.highestPrice || (trade.type === 'LONG' ? currentPrice > trade.highestPrice : currentPrice < trade.highestPrice)) {
-       trade.highestPrice = currentPrice;
-       trade.highestPriceTime = Date.now();
-       updated = true;
-    }
-
-    // 🌟 KINETIC ENGINE (نظام الزخم الحركي الشامل)
-    if (this.settings.useKineticEngine) {
-       // --- BASE SETTINGS (المتغيرات الأساسية للمستخدم) ---
-       const rawTpInput = this.settings.smartTpUsd ?? 1.5;
-       const isTpDisabled = rawTpInput <= 0;
-       // benchmarkTp: يُستخدم كمرجع داخلي لنظام الوحش (Kinetic) لتنسيق سرعة الملاحقة، حتى لو كان الإغلاق التلقائي معطلاً
-       const benchmarkTp = isTpDisabled ? 1.5 : rawTpInput; 
-       const baseTrailStart = this.settings.smartTrailingStartUsd ?? 0.4;
-       let smartTimeDelayLimit = this.settings.smartTimeDecayMinutes ?? 5;
-       let dynamicTrailThreshold = this.settings.smartTrailingThresholdPerc ?? 0.3;
-       let momentumStallLimit = this.settings.smartMomentumStallMinutes ?? 2.5;
-
-       // 💀 NIGHTMARE UPGRADE: Aggressive Tightening
-       if (this.settings.isNightmareMode) {
-           dynamicTrailThreshold *= 0.8; // Be 20% more sensitive by default
-           momentumStallLimit *= 0.7;    // Don't wait for stalls
-       }
-
-       const minutesOpen = (Date.now() - trade.entryTime) / 60000;
-       let liveVolatilityPerc = 0;
-
-       // Calculate live volatility from tick history (Micro-structure reading)
-       if (trade.tickHistory && trade.tickHistory.length >= 15) {
-           const tickMax = Math.max(...trade.tickHistory);
-           const tickMin = Math.min(...trade.tickHistory);
-           liveVolatilityPerc = ((tickMax - tickMin) / tickMin) * 100;
-       }
-
-       const kineticSensitivity = this.settings.kineticSensitivty ?? 1.5;
-
-       // 🧠 True Flow: Calculate Open Interest and Price Trends (المحركات الحية وتطابق السيولة)
-       let oiTrend = 0;
-       let priceTrend = 0;
-       let isMomentumActive = false;
-
-       if (this.settings.kineticUseOpenInterest && trade.oiHistory && trade.oiHistory.length >= 10 && trade.tickHistory && trade.tickHistory.length >= 10) {
-           const lookback = Math.min(20, trade.oiHistory.length - 1);
-           const currentOI = trade.oiHistory[trade.oiHistory.length - 1];
-           const prevOI = trade.oiHistory[trade.oiHistory.length - 1 - lookback]; // Trend over last ~30-60s
-           oiTrend = ((currentOI - prevOI) / prevOI) * 100;
-
-           const currentPx = trade.tickHistory[trade.tickHistory.length - 1];
-           const prevPx = trade.tickHistory[trade.tickHistory.length - 1 - lookback];
-           priceTrend = ((currentPx - prevPx) / prevPx) * 100;
-       }
-
-       // 🧠 True Flow: Calculate live volume flow (from 1m candle)
-       let volTrend = 0;
-       if (this.settings.kineticUseVolume && trade.volHistory && trade.volHistory.length >= 10) {
-           const lookback = Math.min(20, trade.volHistory.length - 1);
-           const currentV = trade.volHistory[trade.volHistory.length - 1];
-           const prevV = trade.volHistory[trade.volHistory.length - 1 - lookback];
-           // Since Volume is a 1m candle volume, it resets every minute.
-           // If currentV < prevV, a new candle started. We just check the raw growth rate if within the same candle.
-           if (currentV >= prevV && prevV > 0) {
-               volTrend = ((currentV - prevV) / prevV) * 100;
-           } else if (currentV < prevV && currentV > 0) {
-               // Candle rolled over, just gauge based on the current volume burst relative to a nominal baseline (preventing false negatives)
-               volTrend = 0; // Pause volume momentum for this tick
-           }
-       }
-
-       if (oiTrend > (0.02 * kineticSensitivity) || volTrend > (0.05 * kineticSensitivity)) {
-           isMomentumActive = true;
-       }
-
-       // --- KINETIC ENGINE: DYNAMIC MODIFIERS (التكيف المطاطي) ---
-       
-       // 1. Elastic Shadow (الملاحقة المطاطية): Expand buffer if new/volatile, tighten if old
-       if (minutesOpen < 3 || liveVolatilityPerc > 0.5) dynamicTrailThreshold *= 1.5; 
-       else if (minutesOpen > 10) dynamicTrailThreshold *= 0.6; 
-
-       // 2. Open Interest & Volume Modifiers (المحركات الحية)
-       if (this.settings.kineticUseOpenInterest) {
-           if (oiTrend > (0.04 * kineticSensitivity)) {
-               // 🟢 تصرف صحي: سيولة داخلة بقوة! (Accumulation or healthy trend)
-               // Expand limits heavily so we don't get shaken out
-               dynamicTrailThreshold *= 1.8;
-               momentumStallLimit *= 1.8;
-               smartTimeDelayLimit *= 1.8;
-           } else if (oiTrend < -(0.04 * kineticSensitivity)) {
-               // 🔴 تصريف مخفي: الناس تخرج (Distribution / OI dropping)
-               // Shrink all boundaries, fast exit!
-               dynamicTrailThreshold *= 0.5;
-               momentumStallLimit *= 0.5;
-               smartTimeDelayLimit *= 0.4;
-           }
-       }
-
-       // 3. Momentum Stall scaling (مقياس تجمد الزخم): Give deep profits more room to breathe
-       if (trade.pnl > benchmarkTp * 1.5) momentumStallLimit *= 1.6;
-       else if (trade.pnl < benchmarkTp * 0.5) momentumStallLimit *= 0.7;
-
-       // 4. Time Decay scaling (مقياس القتل الزمني عبر قراءة السيولة)
-       if (liveVolatilityPerc > 0 && liveVolatilityPerc < 0.03 && minutesOpen > 2) {
-           // Micro-structure is dead flat. Kill it much faster.
-           smartTimeDelayLimit = Math.min(smartTimeDelayLimit, 2); 
-       } else if (liveVolatilityPerc > 0.4) {
-           // Market is wild, give it extra time to bounce
-           smartTimeDelayLimit *= 1.5; 
-       }
-
-       // --- 0. KINETIC EXITS: High-Level Distribution & Reversal Guards ---
-       if (this.settings.kineticUseOpenInterest && oiTrend !== 0 && priceTrend !== 0 && minutesOpen > 0.5) {
-           if (trade.type === 'LONG') {
-               // 🔴 1. تصريف أو Divergence (Distribution)
-               // السعر يرتفع أو ثابت، لكن OI ينخفض = الكبار يخرجون خفية
-               if (oiTrend < -(0.05 * kineticSensitivity) && priceTrend >= -0.05 && trade.pnl > 0) {
-                   console.log(`[SNIPER] 🔴 KINETIC DIVERGENCE: Price holding but OI dropping actively! HIDDEN DISTRIBUTION in ${trade.symbol}. Securing PnL: +$${trade.pnl.toFixed(2)}`);
-                   this.closeTrade(trade, currentPrice, '🔴 KINETIC_DISTRIBUTION_EXIT');
-                   return;
-               }
-
-               // ⚠️ 2. سيناريو الانعكاس وضرب الماركت (Shorts Splashing)
-               // السعر يسقط بحدة والـ OI يرتفع بحدة = ناس تدخل شورت وتضغط بقوة
-               if (priceTrend < -0.08 && oiTrend > (0.05 * kineticSensitivity)) {
-                   console.log(`[SNIPER] ⚠️ KINETIC REVERSAL: Price dropping while OI rising fast! SHORTS ENTERING ${trade.symbol}. Exiting NOW.`);
-                   this.closeTrade(trade, currentPrice, '⚠️ KINETIC_SHORTS_ATTACK');
-                   return;
-               }
-           } else if (trade.type === 'SHORT') {
-               if (oiTrend < -(0.05 * kineticSensitivity) && priceTrend <= 0.05 && trade.pnl > 0) {
-                   console.log(`[SNIPER] 🔴 KINETIC DIVERGENCE: Price holding but OI dropping! SHORTS COVERING in ${trade.symbol}. Securing PnL: +$${trade.pnl.toFixed(2)}`);
-                   this.closeTrade(trade, currentPrice, '🔴 KINETIC_COVER_EXIT');
-                   return;
-               }
-               
-               if (priceTrend > 0.08 && oiTrend > (0.05 * kineticSensitivity)) {
-                   console.log(`[SNIPER] ⚠️ KINETIC REVERSAL: Price rising while OI rising fast! LONGS ENTERING ${trade.symbol}. Exiting NOW.`);
-                   this.closeTrade(trade, currentPrice, '⚠️ KINETIC_LONGS_ATTACK');
-                   return;
-               }
-           }
-       }
-
-       // --- 1. Tactical Profit / Split Taker (اغلاق كلي أو خطف تكتيكي) ---
-       if (!isTpDisabled && trade.pnl >= benchmarkTp) {
-          if (minutesOpen < 1.5 && !trade.isPartialProfitTaken) {
-             // Tactical Split: Extreme velocity detected, secure 50% and leave rest risk-free
-             trade.isPartialProfitTaken = true;
-             trade.realizedPnl = trade.pnl / 2; // Realize half PnL
-             trade.amount = trade.amount / 2;   // Halve position
-             trade.isBreakeven = true;
-             trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.002 : trade.entryPrice * 0.998;
-             console.log(`[SNIPER] ⚡ KINETIC SPLIT: High Velocity! Secured 50% profit (+$${trade.realizedPnl.toFixed(2)}) for ${trade.symbol}.`);
-             updated = true;
-          } else if (trade.isPartialProfitTaken && trade.pnl >= benchmarkTp * 1.5) {
-             // Second target hit (Riding the runners)
-             console.log(`[SNIPER] 🚀 KINETIC ENGINE: Final Target Hit for ${trade.symbol} at +$${trade.pnl.toFixed(2)}`);
-             this.closeTrade(trade, currentPrice, '🚀 KINETIC_PROFIT_MAX');
-             return;
-          } else if (!trade.isPartialProfitTaken) {
-             // Standard Target Hit
-             console.log(`[SNIPER] 🚀 KINETIC ENGINE: Target Hit for ${trade.symbol} at +$${trade.pnl.toFixed(2)}`);
-             this.closeTrade(trade, currentPrice, '🚀 KINETIC_PROFIT');
-             return;
-          }
-       }
-       
-       // --- 2. Trailing Breakeven (تأمين نقطة الدخول والملاحقة) ---
-       if (!trade.isBreakeven && trade.pnl >= baseTrailStart) {
-          trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.0015 : trade.entryPrice * 0.9985;
-          trade.isBreakeven = true;
-          updated = true;
-          console.log(`[SNIPER] 🛡️ KINETIC ENGINE: SL moved to Entry+Fees for ${trade.symbol} at +$${trade.pnl.toFixed(2)} PnL!`);
-       }
-
-       // --- 3. Dynamic Elastic Trailing (الملاحقة المطاطية من أعلى قمة) ---
-       if (trade.pnl > Math.max(0.1, baseTrailStart * 0.5) && trade.highestPrice) {
-          const dropFromHighPerc = trade.type === 'LONG' 
-             ? ((trade.highestPrice - currentPrice) / trade.highestPrice) * 100
-             : ((currentPrice - trade.highestPrice) / trade.highestPrice) * 100;
-
-          if (dropFromHighPerc >= dynamicTrailThreshold) {
-              console.log(`[SNIPER] 📉 KINETIC SHADOW: Elastic Trailing triggered for ${trade.symbol}. Dropped ${dropFromHighPerc.toFixed(2)}% from highest. Exiting with +$${trade.pnl.toFixed(2)}`);
-              this.closeTrade(trade, currentPrice, '📉 KINETIC_TRAILING_EXIT');
-              return;
-          }
-
-          // 🐋 BEAST PARABOLIC GUARD: If in high profit (> 1.0%) and Taker Ratio flips hard, get out immediately!
-          if (this.settings.beastMode && trade.pnlPerc! > 1.0 && currentTakerRatio) {
-              if (trade.type === 'LONG' && currentTakerRatio < 0.4) {
-                  console.log(`[BEAST 🐺] ⚠️ PARABOLIC REVERSAL: Taker pressure flipped hard to Sell (${currentTakerRatio.toFixed(2)}). Exiting to lock in +$${trade.pnl?.toFixed(2)}`);
-                  this.closeTrade(trade, currentPrice, '🐋 BEAST_PARABOLIC_REVERSAL');
-                  return;
-              }
-              if (trade.type === 'SHORT' && currentTakerRatio > 2.5) {
-                  console.log(`[BEAST 🐺] ⚠️ PARABOLIC REVERSAL: Taker pressure flipped hard to Buy (${currentTakerRatio.toFixed(2)}). Exiting to lock in +$${trade.pnl?.toFixed(2)}`);
-                  this.closeTrade(trade, currentPrice, '🐋 BEAST_PARABOLIC_REVERSAL');
-                  return;
-              }
-          }
-
-          // 💀 NIGHTMARE PARABOLIC SQUEEZE: Exponential tightening
-          if (this.settings.isNightmareMode && trade.pnlPerc! > 2.5) {
-              const squeeze = Math.max(0.05, dynamicTrailThreshold * (1 / (trade.pnlPerc! / 1.5)));
-              if (dropFromHighPerc >= squeeze) {
-                  console.log(`[NIGHTMARE 💀] PARABOLIC SQUEEZE TRIGGERED. Secured max profit on ${trade.symbol}: +${trade.pnlPerc?.toFixed(2)}%`);
-                  this.closeTrade(trade, currentPrice, '💀 NIGHTMARE_SQUEEZE');
-                  return;
-              }
-          }
-       }
-
-       // --- 4. Momentum Stagnation (فلتر تجمد الزخم) ---
-       // User Request: Only close if momentum is actually DEAD, not if it's still healthy but taking a breather
-       // A trade is "healthy" if OI is not dropping significantly and volume flow hasn't collapsed.
-       const isHealthyContinuation = oiTrend > -0.01; 
-       
-       if (trade.highestPriceTime && trade.pnl > 0.1) {
-           const minsSinceNewHigh = (Date.now() - trade.highestPriceTime) / 60000;
-           if (minsSinceNewHigh >= momentumStallLimit && !isMomentumActive && !isHealthyContinuation) {
-               console.log(`[SNIPER] 🧊 KINETIC SENSE: Momentum Stalled and Dropping for ${trade.symbol}. No new high in ${minsSinceNewHigh.toFixed(1)}m. Securing profit: +$${trade.pnl.toFixed(2)}`);
-               this.closeTrade(trade, currentPrice, '🧊 KINETIC_STALL_EXIT');
-               return;
-           }
-       }
-
-       // --- 5. Kinetic Time & Volatility Decay (القتل الزمني الديناميكي) ---
-       // a) Dead micro-structure exit (Only if not a healthy continuation)
-       if (liveVolatilityPerc > 0 && liveVolatilityPerc < 0.03 && trade.pnl < benchmarkTp && minutesOpen > 2 && !isMomentumActive && !isHealthyContinuation) {
-           console.log(`[SNIPER] 💤 KINETIC SENSE: Volatility collapsed to ${liveVolatilityPerc.toFixed(3)}%. Micro-structure is dead. Securing PnL: +$${trade.pnl.toFixed(2)}`);
-           this.closeTrade(trade, currentPrice, '💤 KINETIC_VOLATILITY_DEATH');
-           return;
-       }
-
-       // b) OI Collapse Guard (خروج عند انهيار الاوبن انترست)
-       if (this.settings.kineticUseOpenInterest && oiTrend < -(0.08 * kineticSensitivity) && trade.pnl >= 0.1) {
-           console.log(`[SNIPER] 📉 KINETIC SENSE: Open Interest Collapsing (${oiTrend.toFixed(3)}%). Operators leaving. Securing PnL: +$${trade.pnl.toFixed(2)}`);
-           this.closeTrade(trade, currentPrice, '📉 KINETIC_OI_DEATH');
-           return;
-       }
-
-       // c) Standard adaptive time decay (Only if it's struggling/bleeding, don't exit if it's holding healthy structure)
-       if (minutesOpen >= smartTimeDelayLimit && !isMomentumActive && !isHealthyContinuation) {
-          // If time is up and we haven't hit the benchmark TP, and momentum is dead, get out to preserve capital
-          if (trade.pnl < benchmarkTp && trade.pnl > -benchmarkTp * 1.5) { 
-             console.log(`[SNIPER] ⏳ KINETIC DECAY: Time limit reached with weak momentum for ${trade.symbol} (Open ${minutesOpen.toFixed(1)}m). Exiting at PnL: $${trade.pnl.toFixed(2)}`);
-             this.closeTrade(trade, currentPrice, '⏳ KINETIC_DECAY_EXIT');
-             return;
-          }
-       }
-    }
-
-    // Filter 4: Aggressive Trade Management (Fast Breakeven)
-    if (this.settings.strictMode && !trade.isBreakeven) {
-       const triggerPerc = this.settings.strictFastBreakevenPerc ?? 0.4; // Lowered to 0.4% from 0.75%
-       if (triggerPerc > 0 && ((trade.type === 'LONG' && floatingPnlPerc >= triggerPerc) || (trade.type === 'SHORT' && floatingPnlPerc >= triggerPerc))) {
-          trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.001 : trade.entryPrice * 0.999; 
-          trade.isBreakeven = true;
-          updated = true;
-          console.log(`[SNIPER] 🛡️ STRICT MODE: Fast Breakeven triggered for ${trade.symbol} at +${triggerPerc}% PnL!`);
-       }
-    }
-
     if (trade.type === 'LONG') {
-      if (!isInverted) {
-          // Standard LONG Monitoring
-          if (trade.status === 'OPEN' && currentPrice >= trade.tp1) {
-            trade.status = 'TP1_HIT';
-            trade.sl = trade.entryPrice;
-            trade.isBreakeven = true;
-            updated = true;
-            console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven.`);
-          }
-          if (currentPrice >= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 TP2_HIT'); return; }
-          if (currentPrice <= trade.sl) { this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS'); return; }
-      } else {
-          // 🔄 INVERTED LONG Monitoring (Acts like Original SHORT)
-          // Original TP was BELOW entry. Original SL was ABOVE entry.
-          if (trade.status === 'OPEN' && currentPrice <= trade.tp1) {
-             trade.status = 'TP1_HIT';
-             trade.sl = trade.entryPrice;
-             trade.isBreakeven = true;
-             updated = true;
-             console.log(`[SNIPER] 🔄 INVERTED: Original TP hit on ${trade.symbol}! (Profit for short, Loss for long).`);
-          }
-          if (currentPrice <= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 INVERTED_TP_HIT'); return; }
-          if (currentPrice >= trade.sl) { this.closeTrade(trade, currentPrice, '🛡️ INVERTED_SL_HIT'); return; }
+      if (trade.status === 'OPEN' && currentPrice >= trade.tp1) {
+        trade.status = 'TP1_HIT';
+        trade.sl = trade.entryPrice; 
+        trade.isBreakeven = true;
+        updated = true;
+        console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven.`);
       }
-
+      if (currentPrice >= trade.tp2) {
+         this.closeTrade(trade, currentPrice, '🎯 TP2_HIT');
+         return;
+      }
+      if (currentPrice <= trade.sl) {
+         this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS');
+         return;
+      }
     } else { // SHORT
-      if (!isInverted) {
-          // Standard SHORT Monitoring
-          if (trade.status === 'OPEN' && currentPrice <= trade.tp1) {
-            trade.status = 'TP1_HIT';
-            trade.sl = trade.entryPrice;
-            trade.isBreakeven = true;
-            updated = true;
-            console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven.`);
-          }
-          if (currentPrice <= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 TP2_HIT'); return; }
-          if (currentPrice >= trade.sl) { this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS'); return; }
-      } else {
-          // 🔄 INVERTED SHORT Monitoring (Acts like Original LONG)
-          // Original TP was ABOVE entry. Original SL was BELOW entry.
-          if (trade.status === 'OPEN' && currentPrice >= trade.tp1) {
-             trade.status = 'TP1_HIT';
-             trade.sl = trade.entryPrice;
-             trade.isBreakeven = true;
-             updated = true;
-             console.log(`[SNIPER] 🔄 INVERTED: Original TP hit on ${trade.symbol}!`);
-          }
-          if (currentPrice >= trade.tp2) { this.closeTrade(trade, currentPrice, '🎯 INVERTED_TP_HIT'); return; }
-          if (currentPrice <= trade.sl) { this.closeTrade(trade, currentPrice, '🛡️ INVERTED_SL_HIT'); return; }
+      if (trade.status === 'OPEN' && currentPrice <= trade.tp1) {
+        trade.status = 'TP1_HIT';
+        trade.sl = trade.entryPrice;
+        trade.isBreakeven = true;
+        updated = true;
+        console.log(`[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven.`);
+      }
+      if (currentPrice <= trade.tp2) {
+         this.closeTrade(trade, currentPrice, '🎯 TP2_HIT');
+         return;
+      }
+      if (currentPrice >= trade.sl) {
+         this.closeTrade(trade, currentPrice, trade.isBreakeven ? '🛡️ BREAKEVEN' : '🛑 STOP_LOSS');
+         return;
       }
     }
 
-    // Sync live PNL periodically, but let's just do it directly on update for SL moves
     if (updated) {
        saveTrade(trade);
     }
