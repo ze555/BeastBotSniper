@@ -321,15 +321,24 @@ export function SettingsView({
 
                {/* Smart Exit Integrated */}
                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col gap-4">
-                   <div className="flex items-center justify-between">
-                     <div className="flex items-center gap-3">
-                        <ShieldAlert className="w-6 h-6 text-blue-500" />
-                        <div>
-                           <h4 className="font-black text-blue-400">الخروج الذكي والطارئ</h4>
-                           <p className="text-[10px] text-slate-500">إغلاق الصفقة قبل الوقف إذا بدأت الإشارات في الضعف.</p>
-                        </div>
-                     </div>
-                     <input type="checkbox" checked={settings.useSmartExit} onChange={e => setSettings({...settings, useSmartExit: e.target.checked})} className="w-6 h-6 accent-blue-500" />
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                         <ShieldAlert className="w-6 h-6 text-blue-500" />
+                         <div>
+                            <h4 className="font-black text-blue-400">الخروج الذكي (Smart & Wise)</h4>
+                            <p className="text-[10px] text-slate-500">خوارزميات الخروج المؤسساتي قبل عكس الاتجاه.</p>
+                         </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                         <div className="flex items-center gap-2">
+                             <span className="text-[9px] text-slate-500">Smart</span>
+                             <input type="checkbox" checked={settings.useSmartExit} onChange={e => setSettings({...settings, useSmartExit: e.target.checked})} className="w-5 h-5 accent-blue-500" />
+                         </div>
+                         <div className="flex items-center gap-2">
+                             <span className="text-[9px] text-emerald-500">Wise</span>
+                             <input type="checkbox" checked={settings.useWiseExit} onChange={e => setSettings({...settings, useWiseExit: e.target.checked})} className="w-5 h-5 accent-emerald-500" />
+                         </div>
+                      </div>
                   </div>
                   <div className="flex items-center gap-2 mt-auto">
                     <input type="checkbox" checked={settings.dynamicSafetyExit} onChange={e => setSettings({...settings, dynamicSafetyExit: e.target.checked})} className="w-4 h-4 accent-blue-500" />

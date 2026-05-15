@@ -167,7 +167,8 @@ export interface BotSettings {
   strictRetestPullbackPerc?: number;// Default 3.0 (meaning 3% pullback from high)
   strictBreakoutDistancePerc?: number; // Default 0.5 (meaning 0.5% from high)
   useSmartExit?: boolean;           // Default true
-
+  useWiseExit?: boolean;            // 🔥 Wise Exit: Institutional & Structural Exit
+  
   // Smart Control (التحكم الذكي الفائق)
   useSmartControl?: boolean;        // تفعيل التحكم الذكي
   smartTpUsd?: number;              // هدف الربح السريع بالدولار (مثال 1$)

@@ -141,83 +141,95 @@ export async function runTradeLoop() {
                 sniper.manageTrades(t.symbol, currentPx, undefined, undefined, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
               }
 
-              // 🧠 SMART EXIT LOGIC: Check multiple indicators dynamically (Refined against false pullbacks)
-              // We only run this if trade is still open after manageTrades, and if smart exit is enabled
-              if (sniper.getSettings().useSmartExit && (t.status === 'OPEN' || t.status === 'TP1_HIT')) {
+              // 🧠 SMART & WISE EXIT LOGIC: Check multiple indicators dynamically (Refined against false pullbacks)
+              // We only run this if trade is still open after manageTrades, and if smart/wise exit is enabled
+              const useSmart = sniper.getSettings().useSmartExit;
+              const useWise = sniper.getSettings().useWiseExit;
+              
+              if ((useSmart || useWise) && (t.status === 'OPEN' || t.status === 'TP1_HIT')) {
                  try {
                    // Fetch minimal recent klines to evaluate momentum (5m is good for short/medium trades)
                    const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=35`, { timeout: 3000 });
                    const klines = klinesRes.data;
                    
-                   let recentClose = parseFloat(klines[klines.length - 1][4]);
-                   let previousClose = parseFloat(klines[klines.length - 2][4]);
-                   let recentOpen = parseFloat(klines[klines.length - 1][1]);
-                   let currentVol = parseFloat(klines[klines.length - 1][5]);
-                   
-                   // Helper to calculate RSI
-                   const calcRSI = (endIdx: number, period: number) => {
-                       let gains = 0, losses = 0;
-                       for (let i = endIdx - period + 1; i <= endIdx; i++) {
-                           const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
-                           if (change > 0) gains += change;
-                           else losses -= change;
-                       }
-                       let avgGain = gains / period;
-                       let avgLoss = losses / period;
-                       return avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
-                   };
-
-                   // Calculate Current & Previous RSI to find the "Delta" (Momentum Shift)
-                   const currentRsi = calcRSI(klines.length - 1, 14);
-                   const previousRsi = calcRSI(klines.length - 2, 14);
-                   const rsiDelta = currentRsi - previousRsi;
-
-                   // Calculate EMA20 (More stable than EMA9)
-                   const k20 = 2 / (20 + 1);
-                   let ema20 = parseFloat(klines[0][4]); // Initial EMA
-                   for (let i = 1; i < klines.length; i++) {
-                       ema20 = (parseFloat(klines[i][4]) * k20) + (ema20 * (1 - k20));
+                   // 1. WISE EXIT EXECUTION (Direct Engine Analysis)
+                   if (useWise) {
+                      sniper.wiseExit(t.symbol, currentPx, klines);
+                      // If trade was closed by WiseExit, skip SmartExit
+                      if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) continue;
                    }
 
-                   // Calculate RVOL (Relative Volume) over last 15 periods
-                   let sumVol = 0;
-                   for (let i = klines.length - 16; i < klines.length - 1; i++) {
-                       sumVol += parseFloat(klines[i][5]);
-                   }
-                   let avgVol = sumVol / 15;
-                   let rvol = currentVol / avgVol;
+                   // 2. SMART EXIT EXECUTION (Legacy Indicator Reversals)
+                   if (useSmart) {
+                      let recentClose = parseFloat(klines[klines.length - 1][4]);
+                      let recentOpen = parseFloat(klines[klines.length - 1][1]);
+                      let currentVol = parseFloat(klines[klines.length - 1][5]);
+                      
+                      // Helper to calculate RSI
+                      const calcRSI = (endIdx: number, period: number) => {
+                          let gains = 0, losses = 0;
+                          for (let i = endIdx - period + 1; i <= endIdx; i++) {
+                              const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
+                              if (change > 0) gains += change;
+                              else losses -= change;
+                          }
+                          let avgGain = gains / period;
+                          let avgLoss = losses / period;
+                          return avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+                      };
 
-                   // Determine severe reversal conditions
-                   if (t.type === 'LONG') {
-                      const isDumping = recentClose < recentOpen; // Red candle
-                      const heavyDump = isDumping && rvol > 1.5; // Strong volume dump
-                      const lostEma = recentClose < ema20;
-                      const rsiPlunge = rsiDelta <= -15; // RSI collapsed 15+ points in 15 mins
-                      const engulfing = recentClose < parseFloat(klines[klines.length - 3][3]); // Wiped out 3 candles info
+                      // Calculate Current & Previous RSI to find the "Delta" (Momentum Shift)
+                      const currentRsi = calcRSI(klines.length - 1, 14);
+                      const previousRsi = calcRSI(klines.length - 2, 14);
+                      const rsiDelta = currentRsi - previousRsi;
 
-                      // We only exit if there is strong CONFLUENCE of reversal, not just a pullback
-                      if ((heavyDump && lostEma && engulfing) || (rsiPlunge && lostEma) || (heavyDump && rsiPlunge)) {
-                          let reason = '🧠 SMART_EXIT: Critical Trend Reversal (Dumping)';
-                          if (heavyDump && engulfing) reason = '🧠 SMART_EXIT: Bearish Engulfing with RVOL Spiked';
-                          else if (rsiPlunge) reason = `🧠 SMART_EXIT: Sudden RSI Plunge (${rsiDelta.toFixed(1)})`;
-                          
-                          sniper.smartExit(t.symbol, currentPx, reason);
+                      // Calculate EMA20 (More stable than EMA9)
+                      const k20 = 2 / (20 + 1);
+                      let ema20 = parseFloat(klines[0][4]); // Initial EMA
+                      for (let i = 1; i < klines.length; i++) {
+                          ema20 = (parseFloat(klines[i][4]) * k20) + (ema20 * (1 - k20));
                       }
-                   }
-                   
-                   if (t.type === 'SHORT') {
-                      const isPumping = recentClose > recentOpen; // Green candle
-                      const heavyPump = isPumping && rvol > 1.5; // Strong volume pump
-                      const brokeEma = recentClose > ema20;
-                      const rsiSurge = rsiDelta >= 15; // RSI surged 15+ points in 15 mins
-                      const engulfing = recentClose > parseFloat(klines[klines.length - 3][2]); // Wiped out 3 candles highs
 
-                      if ((heavyPump && brokeEma && engulfing) || (rsiSurge && brokeEma) || (heavyPump && rsiSurge)) {
-                          let reason = '🧠 SMART_EXIT: Critical Trend Reversal (Pumping)';
-                          if (heavyPump && engulfing) reason = '🧠 SMART_EXIT: Bullish Engulfing with RVOL Spiked';
-                          else if (rsiSurge) reason = `🧠 SMART_EXIT: Sudden RSI Surge (+${rsiDelta.toFixed(1)})`;
-                          
-                          sniper.smartExit(t.symbol, currentPx, reason);
+                      // Calculate RVOL (Relative Volume) over last 15 periods
+                      let sumVol = 0;
+                      for (let i = klines.length - 16; i < klines.length - 1; i++) {
+                          sumVol += parseFloat(klines[i][5]);
+                      }
+                      let avgVol = sumVol / 15;
+                      let rvol = currentVol / avgVol;
+
+                      // Determine severe reversal conditions
+                      if (t.type === 'LONG') {
+                         const isDumping = recentClose < recentOpen; // Red candle
+                         const heavyDump = isDumping && rvol > 1.5; // Strong volume dump
+                         const lostEma = recentClose < ema20;
+                         const rsiPlunge = rsiDelta <= -15; // RSI collapsed 15+ points in 15 mins
+                         const engulfing = recentClose < parseFloat(klines[klines.length - 3][3]); // Wiped out 3 candles info
+
+                         // We only exit if there is strong CONFLUENCE of reversal, not just a pullback
+                         if ((heavyDump && lostEma && engulfing) || (rsiPlunge && lostEma) || (heavyDump && rsiPlunge)) {
+                             let reason = '🧠 SMART_EXIT: Critical Trend Reversal (Dumping)';
+                             if (heavyDump && engulfing) reason = '🧠 SMART_EXIT: Bearish Engulfing with RVOL Spiked';
+                             else if (rsiPlunge) reason = `🧠 SMART_EXIT: Sudden RSI Plunge (${rsiDelta.toFixed(1)})`;
+                             
+                             sniper.smartExit(t.symbol, currentPx, reason);
+                         }
+                      }
+                      
+                      if (t.type === 'SHORT') {
+                         const isPumping = recentClose > recentOpen; // Green candle
+                         const heavyPump = isPumping && rvol > 1.5; // Strong volume pump
+                         const brokeEma = recentClose > ema20;
+                         const rsiSurge = rsiDelta >= 15; // RSI surged 15+ points in 15 mins
+                         const engulfing = recentClose > parseFloat(klines[klines.length - 3][2]); // Wiped out 3 candles highs
+
+                         if ((heavyPump && brokeEma && engulfing) || (rsiSurge && brokeEma) || (heavyPump && rsiSurge)) {
+                             let reason = '🧠 SMART_EXIT: Critical Trend Reversal (Pumping)';
+                             if (heavyPump && engulfing) reason = '🧠 SMART_EXIT: Bullish Engulfing with RVOL Spiked';
+                             else if (rsiSurge) reason = `🧠 SMART_EXIT: Sudden RSI Surge (+${rsiDelta.toFixed(1)})`;
+                             
+                             sniper.smartExit(t.symbol, currentPx, reason);
+                         }
                       }
                    }
                  } catch(e) {

@@ -3,6 +3,7 @@ import { saveTrade, loadClosedTrades, loadActiveTrades, saveSettingsToDB, loadSe
 import { CoreEngine } from './engine/CoreEngine.js';
 import { RiskEngine } from './engine/RiskEngine.js';
 import { PositionManager } from './engine/PositionManager.js';
+import { WiseExitEngine } from './engine/WiseExitEngine.js';
 import { MarketMetrics, MarketRegime, TrapType, GlobalContext } from '../types/trading.js';
 import { addLog } from './botRunner.js';
 
@@ -13,6 +14,7 @@ export class SniperEngine {
   private core = new CoreEngine();
   private risk = new RiskEngine();
   private manager = new PositionManager();
+  private wiseEngine = new WiseExitEngine();
   
   private settings: BotSettings = {
     portfolioSize: 2000,
@@ -23,6 +25,7 @@ export class SniperEngine {
     strictMinRvol: 1.5,
     strictFastBreakevenPerc: 0.3,
     useSmartExit: true,
+    useWiseExit: true,
     useKineticEngine: true,
     beastMode: false,
     fastExitEnabled: true,
@@ -96,6 +99,7 @@ export class SniperEngine {
              strictRetestPullbackPerc: dbSettings.strictRetestPullbackPerc,
              strictBreakoutDistancePerc: dbSettings.strictBreakoutDistancePerc,
              useSmartExit: dbSettings.useSmartExit ?? false,
+             useWiseExit: dbSettings.useWiseExit ?? false,
              useKineticEngine: dbSettings.useKineticEngine ?? false,
              useSmartControl: dbSettings.useSmartControl ?? false,
              beastMode: dbSettings.beastMode ?? false,
@@ -770,6 +774,17 @@ export class SniperEngine {
     
     // Close trade prematurely due to indicator reversal
     this.closeTrade(trade, currentPrice, reason);
+  }
+
+  public wiseExit(symbol: string, currentPrice: number, klines: any[]) {
+    const trade = this.activeTrades.get(symbol);
+    if (!trade) return;
+    if (trade.status === 'CLOSED') return;
+
+    const result = this.wiseEngine.analyze(trade, klines, trade.oiHistory?.[trade.oiHistory.length-1]);
+    if (result.shouldExit) {
+        this.closeTrade(trade, currentPrice, result.reason);
+    }
   }
 
   private closeTrade(trade: Trade, exitPrice: number, reason: string) {
