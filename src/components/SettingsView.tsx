@@ -116,6 +116,15 @@ export function SettingsView({
                         </div>
                      </div>
                   </div>
+                  
+                  <div className="flex items-center justify-between bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl">
+                     <div>
+                        <h4 className="font-black text-rose-400">🚨 عكس الإشارات (Reverse Trading)</h4>
+                        <p className="text-[10px] text-slate-400 mt-1">الدخول شراء عندما يقرر البوت بيع، والدخول بيع عندما يقرر شراء.</p>
+                     </div>
+                     <input type="checkbox" checked={settings.reverseTradingEnabled} onChange={e => setSettings({...settings, reverseTradingEnabled: e.target.checked})} className="w-6 h-6 accent-rose-500" />
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                      <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400">مدة البولنجر (Period)</label>

@@ -244,4 +244,5 @@ export interface BotSettings {
   quantumBbMultiplier?: number;
   quantumVolThreshold?: number;
   quantumMomentumVol?: number;
+  reverseTradingEnabled?: boolean;
 }
