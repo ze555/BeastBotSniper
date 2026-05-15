@@ -272,7 +272,7 @@ export async function runTradeLoop() {
 
                 try {
                      // Try to get klines first
-                     const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1m&limit=40`, { timeout: 4000 });
+                     const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1m&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
                      // Taker ratio fallback: Try to get it but don't fail if endpoint is dead
@@ -292,12 +292,6 @@ export async function runTradeLoop() {
 
                      if (decision.shouldEnter) {
                           signalFoundInThisLoop = true;
-
-                          if (sniper.getSettings().reverseTradingEnabled) {
-                             decision.type = decision.type === 'LONG' ? 'SHORT' : 'LONG';
-                             decision.reason = `🔄 معکوس: ` + decision.reason;
-                          }
-
                           const currentPx = parseFloat(klines[klines.length - 1][4]);
                           
                           const slDistance = (decision.stopLossPerc / 100) * currentPx;
