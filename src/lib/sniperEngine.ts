@@ -768,7 +768,7 @@ export class SniperEngine {
     // Filter 4: Aggressive Trade Management (Fast Breakeven)
     if (this.settings.strictMode && !trade.isBreakeven) {
        const triggerPerc = this.settings.strictFastBreakevenPerc ?? 0.4; // Lowered to 0.4% from 0.75%
-       if (triggerPerc > 0 && ((trade.type === 'LONG' && floatingPnlPerc >= triggerPerc) || (trade.type === 'SHORT' && floatingPnlPerc >= triggerPerc))) {
+       if (triggerPerc > 0 && ((trade.type === 'LONG' && priceChangePerc >= triggerPerc) || (trade.type === 'SHORT' && priceChangePerc >= triggerPerc))) {
           trade.sl = trade.type === 'LONG' ? trade.entryPrice * 1.001 : trade.entryPrice * 0.999; 
           trade.isBreakeven = true;
           updated = true;

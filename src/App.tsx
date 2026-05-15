@@ -13,6 +13,7 @@ export default function App() {
   const [logs, setLogs] = useState<any[]>([]);
   const [panicActive, setPanicActive] = useState(false);
   const [botActive, setBotActive] = useState(false);
+  const [isInverse, setIsInverse] = useState(false);
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState({ 
     portfolioSize: 2000, 
@@ -287,6 +288,17 @@ export default function App() {
             </div>
             
             <div className="flex gap-2">
+              <button 
+                onClick={() => setIsInverse(!isInverse)}
+                className={`px-3 py-1.5 rounded-full border text-xs font-bold transition-all flex items-center gap-2 ${
+                  isInverse 
+                    ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 shadow-[0_0_10px_-2px_rgba(244,63,94,0.4)]' 
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <div className={`w-2 h-2 rounded-full ${isInverse ? 'bg-rose-500 animate-pulse' : 'bg-slate-600'}`}></div>
+                وضع المعكوس: {isInverse ? 'نشط' : 'معطل'}
+              </button>
               <span className="px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-mono font-medium text-slate-300 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
                 Paper Trading Mode
@@ -297,8 +309,8 @@ export default function App() {
           {activeTab === 'dashboard' && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                   <StatCard title="إجمالي الأرباح" value={`$${stats.totalPnl.toFixed(2)}`} trend="" positive={stats.totalPnl >= 0} />
-                   <StatCard title="نسبة الدقة (Win Rate)" value={`${stats.winRate.toFixed(1)}%`} trend={`${stats.totalTrades} صفقات`} />
+                   <StatCard title="إجمالي الأرباح" value={`$${(stats.totalPnl * (isInverse ? -1 : 1)).toFixed(2)}`} trend="" positive={(stats.totalPnl * (isInverse ? -1 : 1)) >= 0} />
+                   <StatCard title="نسبة الدقة (Win Rate)" value={`${(isInverse ? (100 - stats.winRate) : stats.winRate).toFixed(1)}%`} trend={`${stats.totalTrades} صفقات`} />
                    <StatCard title="الصفقات المفتوحة" value={stats.openCount.toString()}  />
               </div>
 
@@ -368,7 +380,11 @@ export default function App() {
                              <div>
                                 <h4 className="font-bold text-lg font-mono text-white flex items-center gap-2">
                                   {t.symbol} 
-                                  {t.type === 'LONG' ? <span className="text-emerald-500 text-xs bg-emerald-500/10 px-1 rounded">LONG</span> : <span className="text-rose-500 text-xs bg-rose-500/10 px-1 rounded">SHORT</span>}
+                                  {isInverse ? (
+                                    t.type === 'LONG' ? <span className="text-rose-500 text-xs bg-rose-500/10 px-1 rounded">SHORT</span> : <span className="text-emerald-500 text-xs bg-emerald-500/10 px-1 rounded">LONG</span>
+                                  ) : (
+                                    t.type === 'LONG' ? <span className="text-emerald-500 text-xs bg-emerald-500/10 px-1 rounded">LONG</span> : <span className="text-rose-500 text-xs bg-rose-500/10 px-1 rounded">SHORT</span>
+                                  )}
                                 </h4>
                                 <p className="text-xs text-slate-400 mt-1">السعر الحالي: <span className="font-mono text-slate-300">{t.currentPrice ? parseFloat(t.currentPrice as any).toFixed(4) : '...'}</span></p>
                                 <p className="text-xs text-slate-400 mt-1">الدخول: <span className="font-mono text-slate-300">{parseFloat(t.entryPrice as any).toFixed(4)}</span></p>
@@ -376,14 +392,14 @@ export default function App() {
                                   <span>حجم الصفقة: <span className="font-mono text-slate-300">${parseFloat(t.amount as any).toFixed(2)}</span></span>
                                   <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-mono">{(t as any).leverage || 10}x</span>
                                 </p>
-                                <p className="text-xs text-slate-400 mt-1">القيمة الحالية: <span className="font-mono text-slate-300">${(parseFloat(t.amount as any) + (t.pnl || 0)).toFixed(2)}</span></p>
+                                <p className="text-xs text-slate-400 mt-1">القيمة الحالية: <span className="font-mono text-slate-300">${(parseFloat(t.amount as any) + ((t.pnl || 0) * (isInverse ? -1 : 1))).toFixed(2)}</span></p>
                              </div>
                              <div className="text-left">
-                                <span className={`font-mono font-bold text-lg ${t.pnlPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {t.pnlPerc >= 0 ? '+' : ''}{t.pnlPerc?.toFixed(2)}%
+                                <span className={`font-mono font-bold text-lg ${(t.pnlPerc * (isInverse ? -1 : 1)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {(t.pnlPerc * (isInverse ? -1 : 1)) >= 0 ? '+' : ''}{(t.pnlPerc * (isInverse ? -1 : 1))?.toFixed(2)}%
                                 </span>
-                                <p className={`text-xs font-mono text-right ${t.pnl >= 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
-                                  ${t.pnl?.toFixed(2)}
+                                <p className={`text-xs font-mono text-right ${(t.pnl * (isInverse ? -1 : 1)) >= 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
+                                  ${(t.pnl * (isInverse ? -1 : 1))?.toFixed(2)}
                                 </p>
                              </div>
                            </div>
@@ -440,9 +456,13 @@ export default function App() {
                                   {coin.score >= 5 && <span className="text-xs">🔥</span>}
                                 </span>
                               </td>
-                              <td className="px-5 py-4 text-slate-300 flex items-center gap-2 mt-2">
-                                {coin.trend === 'LONG' ? <TrendingUp className="w-4 h-4 text-emerald-400"/> : coin.trend === 'SHORT' ? <TrendingDown className="w-4 h-4 text-rose-400" /> : '-'}
-                                {coin.trend}
+                               <td className="px-5 py-4 text-slate-300 flex items-center gap-2 mt-2">
+                                {isInverse ? (
+                                  coin.trend === 'LONG' ? <TrendingDown className="w-4 h-4 text-rose-400" /> : coin.trend === 'SHORT' ? <TrendingUp className="w-4 h-4 text-emerald-400"/> : '-'
+                                ) : (
+                                  coin.trend === 'LONG' ? <TrendingUp className="w-4 h-4 text-emerald-400"/> : coin.trend === 'SHORT' ? <TrendingDown className="w-4 h-4 text-rose-400" /> : '-'
+                                )}
+                                {isInverse ? (coin.trend === 'LONG' ? 'SHORT' : coin.trend === 'SHORT' ? 'LONG' : coin.trend) : coin.trend}
                               </td>
                               <td className="px-5 py-4 font-mono text-slate-300">{coin.rvol.toFixed(2)}x</td>
                               <td className="px-5 py-4 font-mono text-slate-300">{coin.volatility.toFixed(1)}%</td>
@@ -458,16 +478,20 @@ export default function App() {
                                    <div className="flex flex-col gap-1">
                                       <div className="flex items-center gap-2">
                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                           coin.decision.action === 'ATTACK' ? 'bg-rose-500 text-white animate-pulse' : 
+                                           (isInverse ? (coin.decision.action === 'SLEEP') : (coin.decision.action === 'ATTACK')) ? 'bg-rose-500 text-white animate-pulse' : 
                                            coin.decision.action === 'SLEEP' ? 'bg-slate-700 text-slate-400' : 'bg-blue-500/20 text-blue-400'
                                          }`}>
-                                           {coin.decision.action === 'ATTACK' ? (coin.decision.confidence < 0.6 ? '🔥 الهجوم' : '🎯 قناص') : coin.decision.action === 'SLEEP' ? '😴 خمول' : '⏳ انتظار'}
+                                            {isInverse ? (
+                                                coin.decision.action === 'ATTACK' ? '😴 خمول (معكوس)' : coin.decision.action === 'SLEEP' ? '🔥 الهجوم (معكوس)' : '⏳ انتظار'
+                                            ) : (
+                                                coin.decision.action === 'ATTACK' ? (coin.decision.confidence < 0.6 ? '🔥 الهجوم' : '🎯 قناص') : coin.decision.action === 'SLEEP' ? '😴 خمول' : '⏳ انتظار'
+                                            )}
                                          </span>
                                          <span className="text-[10px] text-slate-400 font-mono">{(coin.decision.confidence * 100).toFixed(0)}%</span>
                                       </div>
-                                      {coin.decision.confidence < 0.6 && coin.decision.action === 'ATTACK' && (
+                                      {(isInverse ? (coin.decision.action === 'SLEEP') : (coin.decision.confidence < 0.6 && coin.decision.action === 'ATTACK')) && (
                                          <div className="text-[9px] text-rose-400 font-bold italic">
-                                            ⚠️ تقييم غير مكتمل
+                                            {isInverse ? '⚠️ تقييم غير مكتمل (معكوس)' : '⚠️ تقييم غير مكتمل'}
                                          </div>
                                       )}
                                       <div className="text-[10px] text-emerald-400/80 font-medium">
@@ -546,7 +570,7 @@ export default function App() {
                      <tbody className="divide-y divide-slate-700/50">
                         {historyTrades.length === 0 ? (
                            <tr>
-                             <td colSpan={8} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد.</td>
+                             <td colSpan={9} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد.</td>
                            </tr>
                         ) : historyTrades.map((t, i) => (
                            <tr key={i} className="hover:bg-slate-700/20">
@@ -558,101 +582,34 @@ export default function App() {
                                           <Zap className="w-3 h-3 fill-current" />
                                           هجومي 🔥
                                        </span>
-                                       <span className="text-[9px] text-rose-400/60 italic font-medium">تقييم غير مكتمل</span>
                                     </div>
                                  ) : (
-                                    <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap font-bold">
-                                       <ShieldCheck className="w-3 h-3" />
+                                    <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap font-medium">
+                                       <Target className="w-3 h-3" />
                                        قناص 🎯
                                     </span>
                                  )}
                               </td>
-                              <td className={`px-5 py-4 font-bold text-xs ${t.type === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.type}</td>
-                              <td className="px-5 py-4 font-mono text-slate-400 text-sm">{(t as any).leverage || 10}x</td>
-                              <td className="px-5 py-4 font-mono">{parseFloat(t.entryPrice).toFixed(4)}</td>
-                              <td className="px-5 py-4 font-mono">{parseFloat(t.exitPrice || 0).toFixed(4)}</td>
-                              <td className={`px-5 py-4 font-mono font-bold ${t.pnlPerc > 0 ? 'text-emerald-400' : t.pnlPerc === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
-                                {t.pnlPerc > 0 ? '+' : ''}{t.pnlPerc?.toFixed(2)}%
-                              </td>
-                              <td className={`px-5 py-4 font-mono ${t.pnl > 0 ? 'text-emerald-400' : t.pnl === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
-                                {t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)}
-                              </td>
                               <td className="px-5 py-4">
-                                <span className={`px-2 py-1 text-[10px] rounded ${t.pnl > 0 ? 'bg-emerald-500/20 text-emerald-400' : t.isBreakeven || t.pnl === 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                                  {t.pnl > 0 ? 'ربح محقق 🎯' : t.isBreakeven || t.pnl === 0 ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
-                                </span>
-                              </td>
-                           </tr>
-                        ))}
-                     </tbody>
-                  </table>
-                </div>
-             </div>
-          )}
-
-          {activeTab === 'wait_engine' && (
-             <div className="rounded-xl bg-slate-800/50 border border-slate-700/50 overflow-hidden">
-                <div className="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/80">
-                  <div className="flex flex-col">
-                    <h3 className="text-lg font-bold flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-amber-400" />
-                      سجل صفقات محرك الانتظار (Wait Engine - Closed Only)
-                    </h3>
-                    <p className="text-[10px] text-slate-500 mt-1">حصرياً للصفقات التي تم الانتظار لها حتى اكتمال شروط القناص.</p>
-                  </div>
-                  <div className="text-xs text-slate-400 font-mono italic bg-slate-900 px-3 py-1 rounded border border-slate-700/50">FILTER: SOURCE_WAIT_ENGINE</div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right text-sm text-slate-300">
-                     <thead className="bg-slate-800/30 text-slate-400">
-                      <tr>
-                        <th className="px-5 py-3 font-medium">وقت الإغلاق</th>
-                        <th className="px-5 py-3 font-medium">العملة</th>
-                        <th className="px-5 py-3 font-medium">الكمية ($)</th>
-                        <th className="px-5 py-3 font-medium">سعر الدخول</th>
-                        <th className="px-5 py-3 font-medium">سعر الخروج</th>
-                        <th className="px-5 py-3 font-medium">نسبة الربح</th>
-                        <th className="px-5 py-3 font-medium">صافي الربح</th>
-                      </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-700/50">
-                        {historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_ENGINE_PROTECTED' || t.source === 'AGGRESSIVE_INCOMPLETE') && t.status === 'CLOSED').length === 0 ? (
-                           <tr>
-                             <td colSpan={7} className="py-20 text-center">
-                                <div className="flex flex-col items-center gap-4 opacity-20">
-                                   <Zap className="w-16 h-16 text-amber-500" />
-                                   <div className="space-y-1">
-                                      <p className="text-xl font-bold text-slate-400">لا توجد صفقات منفذة حتى الآن</p>
-                                      <p className="text-slate-500 text-xs italic">بانتظار محرك الانتظار لاقتناص الفرصة التالية...</p>
-                                   </div>
-                                </div>
-                             </td>
-                           </tr>
-                        ) : historyTrades.filter(t => (t.source === 'WAIT_ENGINE' || t.source === 'WAIT_ENGINE_PROTECTED' || t.source === 'AGGRESSIVE_INCOMPLETE') && t.status === 'CLOSED').map((t, i) => (
-                           <tr key={i} className={`hover:bg-slate-700/20 border-r-2 transition-all group ${t.source === 'AGGRESSIVE_INCOMPLETE' ? 'border-amber-500/30 bg-amber-500/5' : 'border-emerald-500/30'}`}>
-                              <td className="px-5 py-4 font-mono text-slate-400 text-xs text-right">
-                                 {t.exitTime ? new Date(t.exitTime).toLocaleString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '...'}
-                              </td>
-                              <td className="px-5 py-4 font-bold font-mono text-base text-right">
-                                 <div className="flex items-center gap-2 justify-end">
-                                    <span className={t.source === 'AGGRESSIVE_INCOMPLETE' ? 'text-amber-400' : 'text-emerald-400'}>{t.symbol}</span>
-                                    {t.source === 'AGGRESSIVE_INCOMPLETE' ? <Zap className="w-4 h-4 text-amber-500" /> : <ShieldCheck className="w-4 h-4 text-emerald-500" />}
-                                 </div>
-                                 {t.source === 'AGGRESSIVE_INCOMPLETE' && (
-                                    <div className="text-[9px] text-amber-500/70 italic mt-0.5">تقييم غير مكتمل ⚠️</div>
+                                 {isInverse ? (
+                                    t.type === 'LONG' ? <span className="text-rose-500 font-bold">SHORT</span> : <span className="text-emerald-500 font-bold">LONG</span>
+                                 ) : (
+                                    t.type === 'LONG' ? <span className="text-emerald-500 font-bold">LONG</span> : <span className="text-rose-500 font-bold">SHORT</span>
                                  )}
                               </td>
-                              <td className="px-5 py-4 font-mono text-slate-300">${parseFloat(t.amount || 0).toFixed(2)}</td>
-                              <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice || 0).toFixed(4)}</td>
-                              <td className="px-5 py-4 font-mono text-white font-medium">{parseFloat(t.exitPrice || 0).toFixed(4)}</td>
-                              <td className={`px-5 py-4 font-mono font-bold text-base ${t.pnlPerc > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {t.pnlPerc > 0 ? '+' : ''}{t.pnlPerc?.toFixed(2)}%
+                              <td className="px-5 py-4 font-mono text-slate-400">{(t as any).leverage || 10}x</td>
+                              <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice).toFixed(4)}</td>
+                              <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.exitPrice).toFixed(4)}</td>
+                              <td className={`px-5 py-4 font-mono font-bold ${(t.pnlPerc * (isInverse ? -1 : 1)) > 0 ? 'text-emerald-400' : (t.pnlPerc * (isInverse ? -1 : 1)) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
+                                {(t.pnlPerc * (isInverse ? -1 : 1)) > 0 ? '+' : ''}{(t.pnlPerc * (isInverse ? -1 : 1))?.toFixed(2)}%
                               </td>
-                              <td className={`px-5 py-4 font-mono font-black text-lg ${t.pnl > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                <div className="flex items-center gap-2 justify-end">
-                                   <span>{t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)}</span>
-                                   {t.pnl > 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                                </div>
+                              <td className={`px-5 py-4 font-mono ${(t.pnl * (isInverse ? -1 : 1)) > 0 ? 'text-emerald-400' : (t.pnl * (isInverse ? -1 : 1)) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
+                                {(t.pnl * (isInverse ? -1 : 1)) > 0 ? '+' : ''}${(t.pnl * (isInverse ? -1 : 1))?.toFixed(2)}
+                              </td>
+                              <td className="px-5 py-4">
+                                <span className={`px-2 py-1 text-[10px] rounded ${(t.pnl * (isInverse ? -1 : 1)) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || (t.pnl * (isInverse ? -1 : 1)) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                  {(t.pnl * (isInverse ? -1 : 1)) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || (t.pnl * (isInverse ? -1 : 1)) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
+                                </span>
                               </td>
                            </tr>
                         ))}
@@ -720,26 +677,6 @@ function StatCard({ title, value, trend, positive }: { title: string, value: str
                  {trend}
              </span>
         )}
-    </div>
-  );
-}
-
-function TroubleshootRow({ label, passed, failMsg }: { label: string, passed: boolean, failMsg: string }) {
-  return (
-    <div className="space-y-1">
-       <div className="flex items-center justify-between">
-          <span className="text-[10px] text-slate-300 font-bold">{label}</span>
-          {passed ? (
-             <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3" /> جَيِّد
-             </span>
-          ) : (
-             <span className="text-[10px] text-rose-400 font-bold flex items-center gap-1">
-                <Activity className="w-3 h-3" /> بحاجة تدخل
-             </span>
-          )}
-       </div>
-       {!passed && <p className="text-[9px] text-rose-500/80 italic leading-tight">{failMsg}</p>}
     </div>
   );
 }
