@@ -288,14 +288,23 @@ export async function runTradeLoop() {
                          // Default to 1.0 if Binance Taker endpoint fails
                      }
 
-                     const decision = quantum.analyze(klines, takerRatio, sniper.getSettings());
+                     const settings = sniper.getSettings();
+                     const decision = quantum.analyze(klines, takerRatio, settings);
 
                      if (decision.shouldEnter) {
                           signalFoundInThisLoop = true;
                           const currentPx = parseFloat(klines[klines.length - 1][4]);
+
+                          // 🔄 REVERSE MODE
+                          let finalType = decision.type;
+                          let finalReason = decision.reason;
+                          if (settings.reverseMode) {
+                              finalType = decision.type === 'LONG' ? 'SHORT' : 'LONG';
+                              finalReason = `${decision.reason} [REVERSED]`;
+                              addLog(`🔄 REVERSE: Flipping ${decision.type} to ${finalType}`, 'warn');
+                          }
                           
                           const slDistance = (decision.stopLossPerc / 100) * currentPx;
-                          const tpDistance = (decision.takeProfitPerc / 100) * currentPx;
                           
                           const support = currentPx - slDistance;
                           const resistance = currentPx + slDistance;
@@ -303,17 +312,17 @@ export async function runTradeLoop() {
                           const condition: MarketCondition = {
                               symbol: coin.symbol,
                               price: currentPx,
-                              type: decision.type,
+                              type: finalType,
                               score: 5,
                               isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
-                              support: decision.type === 'LONG' ? support : 0,
-                              resistance: decision.type === 'SHORT' ? resistance : 0,
+                              support: finalType === 'LONG' ? support : 0,
+                              resistance: finalType === 'SHORT' ? resistance : 0,
                               takerBuySellRatio: takerRatio,
                               atr: 0 
                           };
                           
-                          addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
-                          sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          addLog(`🚀 ENTRY TRIGGERED: ${finalType} ${coin.symbol} (${finalReason})`, 'success');
+                          sniper.executeQuantumTrade(condition, `QUANTUM_${finalReason}`, decision.takeProfitPerc, decision.stopLossPerc);
                           
                      } else {
                          rejectedCount++;

@@ -133,10 +133,35 @@ export function SettingsView({
                         <p className="text-[9px] text-slate-500 mt-1">الافتراضي 1.02 (أي %102 أعلى من المتوسط). لصفقات ارتداد الضغط.</p>
                      </div>
                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400">عتبة فوليوم الزخم السريع (Momentum Vol)</label>
-                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono" value={settings.quantumMomentumVol ?? 1.5} onChange={e => setSettings({...settings, quantumMomentumVol: parseFloat(e.target.value)})} />
-                        <p className="text-[9px] text-slate-500 mt-1">الافتراضي 1.5. الصعود المفاجئ للسيولة.</p>
+                        <label className="text-[10px] font-bold text-slate-400 text-right block">عتبة فوليوم الزخم السريع (Momentum Vol)</label>
+                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono text-right" value={settings.quantumMomentumVol ?? 1.5} onChange={e => setSettings({...settings, quantumMomentumVol: parseFloat(e.target.value)})} />
+                        <p className="text-[9px] text-slate-500 mt-1 text-right">الافتراضي 1.5. الصعود المفاجئ للسيولة.</p>
                      </div>
+                  </div>
+
+                  {/* 🔥 REVERSE MODE TOGGLE */}
+                  <div className="pt-4 border-t border-slate-800/50">
+                     <button 
+                        onClick={() => setSettings({...settings, reverseMode: !settings.reverseMode})}
+                        className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${settings.reverseMode ? 'bg-orange-500/10 border-orange-500/50 shadow-[0_0_20px_rgba(249,115,22,0.15)]' : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'}`}
+                     >
+                        <div className="flex items-center gap-3">
+                           <div className={`p-2 rounded-lg ${settings.reverseMode ? 'bg-orange-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400'}`}>
+                              <RefreshCw className={`w-5 h-5 ${settings.reverseMode ? 'rotate-180 transition-transform duration-500' : ''}`} />
+                           </div>
+                           <div className="text-right">
+                              <span className={`block font-black text-sm ${settings.reverseMode ? 'text-orange-400' : 'text-slate-300'}`}>
+                                 {settings.reverseMode ? 'وضع العكس (الغاء التفعيل)' : 'تفعيل وضع العكس (Reverse Mode)'}
+                              </span>
+                              <span className="text-[10px] text-slate-500 block underline decoration-dotted">
+                                 عند التفعيل: Long يصبح Short والعكس صحيح.
+                              </span>
+                           </div>
+                        </div>
+                        <div className={`w-12 h-6 rounded-full relative transition-colors duration-300 ${settings.reverseMode ? 'bg-orange-500' : 'bg-slate-700'}`}>
+                           <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all duration-300 ${settings.reverseMode ? 'left-7' : 'left-1'}`} />
+                        </div>
+                     </button>
                   </div>
                </div>
 
