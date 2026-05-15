@@ -105,25 +105,28 @@ export async function runTradeLoop() {
             } else {
                console.error('[BOT RUNNER] API Error fetching ticker prices:', apiError.message);
             }
-            throw apiError; // bubble to outer catch or simply return
+            throw apiError; 
           }
           const prices = pricesRes.data as any[];
           const pxMap = new Map<string, number>();
           prices.forEach(p => pxMap.set(p.symbol, parseFloat(p.price)));
 
-          for (const t of activeTrades) {
+          // 🔥 FIXED: Run trade updates in PARALLEL to prevent one trade from blocking the whole loop
+          await Promise.all(activeTrades.map(async (t) => {
             const currentPx = pxMap.get(t.symbol);
-            if (currentPx) {
+            if (!currentPx) return;
+
+            try {
               let currentOI: number | undefined = undefined;
               let currentVol: number | undefined = undefined;
 
-              // If Kinetic Engine is enabled, we need live Open Interest and Volume data
-              if (sniper.getSettings().useKineticEngine) {
+              // 1. KINETIC DATA FETCHING
+              if (settings.useKineticEngine) {
                  try {
                    const [oiRes, tkrRes, takerVRes] = await Promise.all([
-                     axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${t.symbol}`, { timeout: 2000 }),
-                     axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=1`, { timeout: 2000 }),
-                     axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=5m&limit=1`, { timeout: 2000 })
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${t.symbol}`, { timeout: 3000 }),
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=1`, { timeout: 3000 }),
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=5m&limit=1`, { timeout: 3000 })
                    ]);
                    currentOI = parseFloat(oiRes.data.openInterest);
                    currentVol = parseFloat(tkrRes.data[0][5]);
@@ -141,31 +144,26 @@ export async function runTradeLoop() {
                 sniper.manageTrades(t.symbol, currentPx, undefined, undefined, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
               }
 
-              // 🧠 SMART & WISE EXIT LOGIC: Check multiple indicators dynamically (Refined against false pullbacks)
-              // We only run this if trade is still open after manageTrades, and if smart/wise exit is enabled
-              const useSmart = sniper.getSettings().useSmartExit;
-              const useWise = sniper.getSettings().useWiseExit;
+              // 2. SMART & WISE EXIT LOGIC
+              const useSmart = settings.useSmartExit;
+              const useWise = settings.useWiseExit;
               
               if ((useSmart || useWise) && (t.status === 'OPEN' || t.status === 'TP1_HIT')) {
                  try {
-                   // Fetch minimal recent klines to evaluate momentum (5m is good for short/medium trades)
-                   const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=35`, { timeout: 3000 });
+                   const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=35`, { timeout: 4000 });
                    const klines = klinesRes.data;
                    
-                   // 1. WISE EXIT EXECUTION (Direct Engine Analysis)
                    if (useWise) {
                       sniper.wiseExit(t.symbol, currentPx, klines);
-                      // If trade was closed by WiseExit, skip SmartExit
-                      if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) continue;
+                      // Check if still open
+                      if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) return;
                    }
 
-                   // 2. SMART EXIT EXECUTION (Legacy Indicator Reversals)
                    if (useSmart) {
                       let recentClose = parseFloat(klines[klines.length - 1][4]);
                       let recentOpen = parseFloat(klines[klines.length - 1][1]);
                       let currentVol = parseFloat(klines[klines.length - 1][5]);
                       
-                      // Helper to calculate RSI
                       const calcRSI = (endIdx: number, period: number) => {
                           let gains = 0, losses = 0;
                           for (let i = endIdx - period + 1; i <= endIdx; i++) {
@@ -178,19 +176,16 @@ export async function runTradeLoop() {
                           return avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
                       };
 
-                      // Calculate Current & Previous RSI to find the "Delta" (Momentum Shift)
                       const currentRsi = calcRSI(klines.length - 1, 14);
                       const previousRsi = calcRSI(klines.length - 2, 14);
                       const rsiDelta = currentRsi - previousRsi;
 
-                      // Calculate EMA20 (More stable than EMA9)
                       const k20 = 2 / (20 + 1);
-                      let ema20 = parseFloat(klines[0][4]); // Initial EMA
+                      let ema20 = parseFloat(klines[0][4]); 
                       for (let i = 1; i < klines.length; i++) {
                           ema20 = (parseFloat(klines[i][4]) * k20) + (ema20 * (1 - k20));
                       }
 
-                      // Calculate RVOL (Relative Volume) over last 15 periods
                       let sumVol = 0;
                       for (let i = klines.length - 16; i < klines.length - 1; i++) {
                           sumVol += parseFloat(klines[i][5]);
@@ -198,50 +193,40 @@ export async function runTradeLoop() {
                       let avgVol = sumVol / 15;
                       let rvol = currentVol / avgVol;
 
-                      // Determine severe reversal conditions
                       if (t.type === 'LONG') {
-                         const isDumping = recentClose < recentOpen; // Red candle
-                         const heavyDump = isDumping && rvol > 1.5; // Strong volume dump
+                         const isDumping = recentClose < recentOpen; 
+                         const heavyDump = isDumping && rvol > 1.5; 
                          const lostEma = recentClose < ema20;
-                         const rsiPlunge = rsiDelta <= -15; // RSI collapsed 15+ points in 15 mins
-                         const engulfing = recentClose < parseFloat(klines[klines.length - 3][3]); // Wiped out 3 candles info
+                         const rsiPlunge = rsiDelta <= -15; 
+                         const engulfing = recentClose < parseFloat(klines[klines.length - 3][3]); 
 
-                         // We only exit if there is strong CONFLUENCE of reversal, not just a pullback
                          if ((heavyDump && lostEma && engulfing) || (rsiPlunge && lostEma) || (heavyDump && rsiPlunge)) {
-                             let reason = '🧠 SMART_EXIT: Critical Trend Reversal (Dumping)';
-                             if (heavyDump && engulfing) reason = '🧠 SMART_EXIT: Bearish Engulfing with RVOL Spiked';
-                             else if (rsiPlunge) reason = `🧠 SMART_EXIT: Sudden RSI Plunge (${rsiDelta.toFixed(1)})`;
-                             
-                             sniper.smartExit(t.symbol, currentPx, reason);
+                             sniper.smartExit(t.symbol, currentPx, `🧠 SMART_EXIT: Multi-Signal Reversal`);
                          }
                       }
                       
                       if (t.type === 'SHORT') {
-                         const isPumping = recentClose > recentOpen; // Green candle
-                         const heavyPump = isPumping && rvol > 1.5; // Strong volume pump
+                         const isPumping = recentClose > recentOpen; 
+                         const heavyPump = isPumping && rvol > 1.5; 
                          const brokeEma = recentClose > ema20;
-                         const rsiSurge = rsiDelta >= 15; // RSI surged 15+ points in 15 mins
-                         const engulfing = recentClose > parseFloat(klines[klines.length - 3][2]); // Wiped out 3 candles highs
+                         const rsiSurge = rsiDelta >= 15; 
+                         const engulfing = recentClose > parseFloat(klines[klines.length - 3][2]);
 
                          if ((heavyPump && brokeEma && engulfing) || (rsiSurge && brokeEma) || (heavyPump && rsiSurge)) {
-                             let reason = '🧠 SMART_EXIT: Critical Trend Reversal (Pumping)';
-                             if (heavyPump && engulfing) reason = '🧠 SMART_EXIT: Bullish Engulfing with RVOL Spiked';
-                             else if (rsiSurge) reason = `🧠 SMART_EXIT: Sudden RSI Surge (+${rsiDelta.toFixed(1)})`;
-                             
-                             sniper.smartExit(t.symbol, currentPx, reason);
+                             sniper.smartExit(t.symbol, currentPx, `🧠 SMART_EXIT: Multi-Signal Reversal`);
                          }
                       }
                    }
-                 } catch(e) {
-                   // Ignore rate limits here, silently back off
-                 }
+                 } catch(e) {}
               }
+            } catch (e: any) {
+               console.error(`[BOT RUNNER] Error updating trade for ${t.symbol}:`, e.message);
             }
-          }
+          }));
         } catch (e: any) {
            if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-              console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking prices. Pausing Loop...`);
-              await sleep(10000); // Back off to save IP
+              console.log(`[BOT RUNNER] ⚠️ Rate limit hit. Pausing Monitoring...`);
+              await sleep(10000); 
            }
         }
       }
