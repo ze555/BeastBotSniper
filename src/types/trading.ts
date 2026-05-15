@@ -199,6 +199,8 @@ export interface BotSettings {
   beastMinRvol?: number;                // الحد الأدنى للسيولة في وضع الوحش
   beastInstitutionalStrength?: number;  // قوة الضغط المؤسساتي المطلوبة (0.1 - 1.0)
 
+  useSlyFox?: boolean;                  // 🦊 الثعلب الماكر: صائد التذبذبات والفخاخ
+
   marketPanicThreshold?: number;        // عتبة الذعر: إيقاف التداول عند هبوط عام (مثال 3% في 5 دقائق)
 
   // Strategy Builder Thresholds (عتبات بناء الاستراتيجية)

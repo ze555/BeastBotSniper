@@ -364,6 +364,10 @@ export function SettingsView({
                              <span className="text-[9px] text-purple-500">Wise Entry</span>
                              <input type="checkbox" checked={settings.useWiseEntry} onChange={e => setSettings({...settings, useWiseEntry: e.target.checked})} className="w-5 h-5 accent-purple-500" />
                          </div>
+                         <div className="flex items-center gap-2">
+                             <span className="text-[9px] text-orange-500">الثعلب الماكر (Sly Fox)</span>
+                             <input type="checkbox" checked={settings.useSlyFox} onChange={e => setSettings({...settings, useSlyFox: e.target.checked})} className="w-5 h-5 accent-orange-500" />
+                         </div>
                       </div>
                   </div>
                   <div className="flex items-center gap-2 mt-auto">

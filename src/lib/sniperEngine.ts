@@ -27,6 +27,7 @@ export class SniperEngine {
     useSmartExit: true,
     useWiseExit: true,
     useWiseEntry: true,
+    useSlyFox: true,
     useKineticEngine: true,
     beastMode: false,
     beastConfirmWithSMC: false,
@@ -83,6 +84,7 @@ export class SniperEngine {
              this.settings.useSmartExit = true;
              this.settings.useWiseExit = true;
              this.settings.useWiseEntry = true;
+             this.settings.useSlyFox = true;
              this.settings.useKineticEngine = true;
              this.settings.beastMode = false;
              this.settings.beastConfirmWithSMC = false;
@@ -112,6 +114,7 @@ export class SniperEngine {
              useSmartExit: dbSettings.useSmartExit ?? false,
              useWiseExit: dbSettings.useWiseExit ?? false,
              useWiseEntry: dbSettings.useWiseEntry ?? false,
+             useSlyFox: dbSettings.useSlyFox ?? false,
              useKineticEngine: dbSettings.useKineticEngine ?? false,
              useSmartControl: dbSettings.useSmartControl ?? false,
              beastMode: dbSettings.beastMode ?? false,
