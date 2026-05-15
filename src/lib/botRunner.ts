@@ -261,272 +261,71 @@ export async function runTradeLoop() {
         let rejectedCount = 0;
         let rejectionReasons: Record<string, number> = {};
 
-        for (const coin of targetsToCheck) {
-          // Check if already in trade
-          if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
+        // Only use Quantum Scalper now
+        try {
+            const { QuantumScalpEngine } = await import('./engine/QuantumScalpEngine.js');
+            const quantum = new QuantumScalpEngine();
 
-          // Instead of fetching all prices again, just fetch the specific klines
-          try {
-            const [klinesRes, htfRes] = await Promise.all([
-               axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=5m&limit=100`, { timeout: 10000 }),
-               axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1h&limit=51`, { timeout: 10000 })
-            ]);
-            
-            const klines = klinesRes.data;
-            const htfKlines = htfRes.data;
-            
-            // 1. Calculate ATR (14 period) on 5m
-            let trSum = 0;
-            for (let i = klines.length - 15; i < klines.length - 1; i++) {
-                const high = parseFloat(klines[i][2]);
-                const low = parseFloat(klines[i][3]);
-                const prevClose = parseFloat(klines[i-1][4]);
-                const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-                trSum += tr;
-            }
-            const atr = trSum / 14;
+            for (const coin of targetsToCheck) {
+                if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
 
-            // 2. Higher Timeframe Trend (EMA 50 on 1H)
-            const htfCloses = htfKlines.map((k: any) => parseFloat(k[4]));
-            const k50 = 2 / (50 + 1);
-            let htfEma50 = htfCloses[0];
-            for (let i = 1; i < htfCloses.length; i++) {
-                htfEma50 = (htfCloses[i] * k50) + (htfEma50 * (1 - k50));
-            }
-            const currentPx = parseFloat(klines[klines.length - 1][4]);
-            const htfTrend = currentPx > htfEma50 ? 'LONG' : (currentPx < htfEma50 ? 'SHORT' : 'FLAT');
+                try {
+                     const [klinesRes, takerRes] = await Promise.all([
+                         axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1m&limit=40`, { timeout: 4000 }),
+                         axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=5m&limit=1`, { timeout: 4000 })
+                     ]);
 
-            // 3. Institutional Data: Open Interest, Order Book, Funding, and Market Pressure
-            let oi = 0;
-            let spreadPerc = 0;
-            let fundingRate = 0;
-            let takerRatio = 1.0;
-            let currentRsi = 50;
+                     const klines = klinesRes.data;
+                     let takerRatio = 1.0;
+                     if (takerRes.data && takerRes.data.length > 0) {
+                         const bv = parseFloat(takerRes.data[0].buyVol);
+                         const sv = parseFloat(takerRes.data[0].sellVol);
+                         if (sv > 0) takerRatio = bv / sv;
+                     }
 
-            try {
-               const [oiRes, bookRes, fundingRes, takerRes] = await Promise.all([
-                 axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 }),
-                 axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker?symbol=${coin.symbol}`, { timeout: 3000 }),
-                 axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex?symbol=${coin.symbol}`, { timeout: 3000 }),
-                 axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=5m&limit=1`, { timeout: 3000 })
-               ]);
-               
-               oi = parseFloat(oiRes.data.openInterest);
-               const bid = parseFloat(bookRes.data.bidPrice);
-               const ask = parseFloat(bookRes.data.askPrice);
-               spreadPerc = ((ask - bid) / bid) * 100;
-               fundingRate = parseFloat(fundingRes.data.lastFundingRate);
-               
-               if (takerRes.data && takerRes.data.length > 0) {
-                 const buyVol = parseFloat(takerRes.data[0].buyVol);
-                 const sellVol = parseFloat(takerRes.data[0].sellVol);
-                 takerRatio = buyVol / sellVol;
-               }
+                     const decision = quantum.analyze(klines, takerRatio);
 
-               // Quick RSI Calculation for filtering
-               let gains = 0, losses = 0;
-               for (let i = klines.length - 15; i < klines.length - 1; i++) {
-                  if (i <= 0) continue;
-                  const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
-                  if (change > 0) gains += change;
-                  else losses -= change;
-               }
-               const avgGain = gains / 14;
-               const avgLoss = losses / 14;
-               currentRsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+                     if (decision.shouldEnter) {
+                          const currentPx = parseFloat(klines[klines.length - 1][4]);
+                          
+                          // Raw calculation for SL based on dynamic percent
+                          const slDistance = (decision.stopLossPerc / 100) * currentPx;
+                          const tpDistance = (decision.takeProfitPerc / 100) * currentPx;
+                          
+                          // Setting support/resistance carefully to act as valid initialSl calculation inside SniperEngine
+                          const support = currentPx - slDistance;
+                          const resistance = currentPx + slDistance;
 
-            } catch (e) {}
-
-            // 4. V2V Analysis (Volume to Value)
-            const lastK = klines[klines.length - 2];
-            const kHigh = parseFloat(lastK[2]);
-            const kLow = parseFloat(lastK[3]);
-            const kVolUsd = parseFloat(lastK[7]); // Quote volume (USDT)
-            const kRvol = coin.rvol;
-            
-            // If spread is too high (> 0.2%), whale manipulation is easier. Beast avoids it.
-            const spreadPass = spreadPerc < 0.2;
-            
-            // If price moved > 1.2% but RVOL is low (< 0.8), it's a void (Ghost Move)
-            const bodyPerc = Math.abs(kHigh - kLow) / kLow * 100;
-            const isLiquidityVoid = bodyPerc > 1.2 && kRvol < 0.8;
-            
-            // --- BEAST TRAP LOGIC (Advanced) ---
-            // A move is a TRAP if: Price moves aggressively but OI falls (unwinding)
-            let isTrapTrade = false;
-            let trapType: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
-
-            // Placeholder for OI change detection (would need historical OI in a real app, 
-            // but we can simulate with current volume/price correlation)
-            if (isLiquidityVoid && sniper.getSettings().beastMode) {
-                const moveUp = parseFloat(klines[klines.length - 1][4]) > parseFloat(klines[klines.length - 1][1]);
-                trapType = moveUp ? 'SHORT' : 'LONG'; 
-                isTrapTrade = true;
-            }
-
-            // --- INSTITUTIONAL ENTRY LOGIC (EMA + MACD + Volume Displacement) ---
-            const computeEMA = (data: number[], period: number) => {
-               let k = 2 / (period + 1);
-               let ema = data[0];
-               for (let i = 1; i < data.length; i++) {
-                 ema = data[i] * k + ema * (1 - k);
-               }
-               return ema;
-            };
-
-            const closes = klines.map((k: any) => parseFloat(k[4]));
-            const ema9 = computeEMA(closes, 9);
-            const ema21 = computeEMA(closes, 21);
-
-            // Check displacement on the last fully closed 5m candle
-            const lastClosed = klines[klines.length - 2];
-            const lcOpen = parseFloat(lastClosed[1]);
-            const lcClose = parseFloat(lastClosed[4]);
-            const lcVol = parseFloat(lastClosed[5]);
-            
-            let sumVol = 0;
-            let count = 0;
-            for (let i = klines.length - 22; i < klines.length - 2; i++) {
-               if(i >= 0) { sumVol += parseFloat(klines[i][5]); count++; }
-            }
-            const avgVol = count > 0 ? (sumVol / count) : 1;
-            const rvolLocal = lcVol / avgVol;
-
-            // Institutional candle: High volume + Strong close direction
-            const isBullishDisplacement = lcClose > lcOpen && (isBeastMode ? rvolLocal >= 0.8 : rvolLocal >= 1.5);
-            const isBearishDisplacement = lcClose < lcOpen && (isBeastMode ? rvolLocal >= 0.8 : rvolLocal >= 1.5);
-
-            let type: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
-            let isValidEntry = false;
-
-            // 🧠 ADAPTIVE LOGIC: Decide whether to use TREND-FOLLOWING or RANGE-TRADING
-            const isRangeBound = coin.trend === 'FLAT' || (currentRsi > 40 && currentRsi < 60 && rvolLocal < 1.0);
-            
-            if (isRangeBound && isBeastMode) {
-               // 🏹 RANGE-TRADING (Chop Strategy): Buy low, Sell high
-               if (currentRsi < 28 && lcClose > lcOpen) {
-                   type = 'LONG';
-                   isValidEntry = true;
-                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Oversold (RSI:${currentRsi.toFixed(1)}) - Trading back to mean`, 'info');
-               } else if (currentRsi > 72 && lcClose < lcOpen) {
-                   type = 'SHORT';
-                   isValidEntry = true;
-                   addLog(`🏹 RANGE_SNIPE ${coin.symbol}: Overbought (RSI:${currentRsi.toFixed(1)}) - Trading back to mean`, 'info');
-               }
-            }
-
-            // To enter LONG: 9 EMA > 21 EMA, Price pulled back safely near EMA9 instead of chasing blindly, AND Institutional volume supports it
-            if (!isValidEntry && isBeastMode) {
-              // BEAST MODE: Extreme fast response, less care about EMA cross alignment
-              if (lcClose > lcOpen) {
-                  type = 'LONG';
-                  isValidEntry = true;
-              } else if (lcClose < lcOpen) {
-                  type = 'SHORT';
-                  isValidEntry = true;
-              }
-            } else if (!isValidEntry && ema9 > ema21 && isBullishDisplacement && coin.trend === 'LONG') {
-                // Ensure we are not buying the absolute top by restricting distance from EMA9
-                const distanceFromEma = ((currentPx - ema9) / ema9) * 100;
-                if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
-                   type = 'LONG';
-                   isValidEntry = true;
-                }
-            } else if (ema9 < ema21 && isBearishDisplacement && coin.trend === 'SHORT') {
-                const distanceFromEma = ((ema9 - currentPx) / ema9) * 100;
-                if (distanceFromEma <= 1.5 && distanceFromEma >= -0.5) {
-                   type = 'SHORT';
-                   isValidEntry = true;
+                          const condition: MarketCondition = {
+                              symbol: coin.symbol,
+                              price: currentPx,
+                              type: decision.type,
+                              score: 5,
+                              isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
+                              support: decision.type === 'LONG' ? support : 0,
+                              resistance: decision.type === 'SHORT' ? resistance : 0,
+                              takerBuySellRatio: takerRatio,
+                              atr: 0 // Explicitly 0 so executeTrade uses our support/resistance
+                          };
+                          
+                          addLog(`⚡ QUANTUM ${decision.type}: ${coin.symbol} (${decision.reason})`, 'success');
+                          
+                          // Force execution
+                          sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          
+                     } else {
+                         rejectedCount++;
+                         rejectionReasons['Quantum Scalp No Signal'] = (rejectionReasons['Quantum Scalp No Signal'] || 0) + 1;
+                     }
+                } catch(e: any) {
+                     if (e.response && (e.response.status === 429 || e.response.status === 418)) {
+                       console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 1m. Pausing Loop...`);
+                       await sleep(10000);
+                     }
                 }
             }
-
-            const RequiredRvol = isBeastMode ? 0.8 : (sniper.getSettings().strictMinRvol ?? 1.5);
-            // 🚀 BEAST UPGRADE: Relax score if HTF Trend is aligned, but be stricter if against it.
-            let RequiredScore = isStrict ? (sniper.getSettings().strictMinScore ?? 6) : (isBeastMode ? 2 : 4);
-            if (htfTrend === type && type !== 'NEUTRAL') {
-                RequiredScore = Math.max(isBeastMode ? 1 : 4, RequiredScore - 1); // Confluence bonus!
-            }
-
-            const UseBTC = isStrict ? (sniper.getSettings().strictBtcAlignment !== false) : false;
-            const UseRsi = isStrict ? (sniper.getSettings().strictRsiFilter !== false) : false;
-
-            let strictPass = true;
-            
-            // Block Liquidity Voids or High Spread (Ghost moves are dangerous)
-            if (!isBeastMode && (isLiquidityVoid || !spreadPass)) strictPass = false;
-
-            // NEW: Anti-Whale Funding Filter
-            if (isStrict) {
-                if (type === 'LONG' && fundingRate > 0.05) strictPass = false;
-                if (type === 'SHORT' && fundingRate < -0.05) strictPass = false;
-            }
-
-            if (isStrict && isValidEntry) {
-                if (coin.rvol < RequiredRvol) strictPass = false;
-                if (UseBTC) {
-                    if (type === 'LONG' && btcTrend !== 'LONG') strictPass = false;
-                    if (type === 'SHORT' && btcTrend !== 'SHORT') strictPass = false;
-                }
-                if (UseRsi) {
-                    const rsiHi = sniper.getSettings().strictRsiHigh ?? 75;
-                    const rsiLo = sniper.getSettings().strictRsiLow ?? 25;
-                    if (type === 'LONG' && currentRsi > rsiHi) strictPass = false;
-                    if (type === 'SHORT' && currentRsi < rsiLo) strictPass = false;
-                }
-            }
-
-            if (isValidEntry && coin.score >= RequiredScore && strictPass) {
-              const finalType = isTrapTrade ? trapType : type;
-              if (finalType === 'NEUTRAL') continue;
-
-              let finalScore = isTrapTrade ? 6 : coin.score;
-              if (finalType === 'LONG' && takerRatio > 1.5) finalScore += 0.5;
-              if (finalType === 'SHORT' && takerRatio < 0.6) finalScore += 0.5;
-
-              const condition: MarketCondition = {
-                symbol: coin.symbol,
-                price: currentPx,
-                isRanging: false,
-                isBreakout: true, 
-                isRetestOrHold: false, 
-                isLiquidityGood: true,
-                isMomentumHigh: true,
-                isOrderBookClear: true,
-                score: finalScore, 
-                type: finalType,
-                support: finalType === 'LONG' ? ema21 : currentPx * 0.95,
-                resistance: finalType === 'SHORT' ? ema21 : currentPx * 1.05,
-                atr: atr,
-                htfTrend: htfTrend,
-                oi: oi,
-                spread: spreadPerc,
-                fundingRate: fundingRate,
-                takerBuySellRatio: takerRatio
-              };
-              
-              addLog(`🎯 SIGNAL ${coin.symbol}: Score ${finalScore.toFixed(1)} - Evaluating...`, 'success');
-              sniper.evaluateSignal(condition, klines, htfKlines, globalContext);
-              coin.decision = condition.decision;
-              
-              if (condition.decision && condition.decision.action !== 'ATTACK') {
-                  rejectedCount++;
-                  rejectionReasons[condition.decision.reason || 'UNKNOWN'] = (rejectionReasons[condition.decision.reason || 'UNKNOWN'] || 0) + 1;
-              }
-            } else {
-                rejectedCount++;
-                let r = 'Criteria Not Met';
-                if (!isValidEntry) r = 'Invalid Entry Pattern';
-                else if (coin.score < RequiredScore) r = 'Low Initial Score';
-                else if (!strictPass) r = 'Strict Filter Block';
-                rejectionReasons[r] = (rejectionReasons[r] || 0) + 1;
-            }
-
-          } catch (e: any) {
-             if (e.response && (e.response.status === 429 || e.response.status === 418)) {
-               console.log(`[BOT RUNNER] ⚠️ Rate limit hit checking 15m. Pausing Loop...`);
-               await sleep(10000);
-             }
-          }
+        } catch (e) {
+            console.error("Error loading Quantum Engine", e);
         }
 
         // Summary log every 10 loops

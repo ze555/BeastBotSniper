@@ -313,6 +313,51 @@ export class SniperEngine {
     saveTrade(trade);
   }
 
+  public executeQuantumTrade(cond: MarketCondition, source: string, tpPerc: number, slPerc: number) {
+    const entryPrice = cond.price;
+    const slDistance = (slPerc / 100) * entryPrice;
+    const sl = cond.type === 'LONG' ? entryPrice - slDistance : entryPrice + slDistance;
+
+    const tp1Distance = (tpPerc / 100) * entryPrice;
+    const tp1 = cond.type === 'LONG' ? entryPrice + tp1Distance : entryPrice - tp1Distance;
+    const tp2 = cond.type === 'LONG' ? entryPrice + (tp1Distance * 2.5) : entryPrice - (tp1Distance * 2.5);
+
+    const leverage = this.settings.leverage || 10;
+    const maxTrades = this.settings.maxConcurrentTrades || 10;
+    const positionSizeUsd = this.risk.calculatePositionSize(this.settings.portfolioSize, entryPrice, sl, leverage, maxTrades);
+    
+    if (positionSizeUsd <= 0) {
+       console.warn(`[SNIPER] ⚠️ Aborting trade on ${cond.symbol}: Calculated size is zero.`);
+       return;
+    }
+
+    const trade: Trade = {
+      id: Date.now().toString(),
+      symbol: cond.symbol,
+      type: cond.type,
+      mode: this.mode,
+      entryPrice,
+      entryTime: Date.now(),
+      amount: positionSizeUsd, 
+      leverage,
+      sl,
+      initialSl: sl,
+      tp1,
+      tp2,
+      status: 'OPEN',
+      score: 5,
+      source: source || 'QUANTUM',
+      isBreakeven: false,
+      pnl: 0,
+      pnlPerc: 0
+    };
+
+    this.activeTrades.set(trade.symbol, trade);
+    addLog(`QUANTUM ENTRY: ${trade.type} ${trade.symbol} @ ${entryPrice.toFixed(2)}`, 'info');
+    console.log(`[QUANTUM] 🟢 EXECUTED: ${trade.type} on ${trade.symbol}. SL: ${sl.toFixed(4)}, TP: ${tp1.toFixed(4)}`);
+    saveTrade(trade);
+  }
+
   /**
    * Manage active trades (Trailing stops, Take Profits, and Dynamic Safety Exits)
    */
