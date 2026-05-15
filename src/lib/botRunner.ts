@@ -295,34 +295,33 @@ export async function runTradeLoop() {
                           signalFoundInThisLoop = true;
                           const currentPx = parseFloat(klines[klines.length - 1][4]);
 
-                          // 🔄 REVERSE MODE
+                          // 🔄 REVERSE MODE LOGIC
                           let finalType = decision.type;
                           let finalReason = decision.reason;
+                          let isReversed = false;
+                          
                           if (settings.reverseMode) {
+                              isReversed = true;
                               finalType = decision.type === 'LONG' ? 'SHORT' : 'LONG';
                               finalReason = `${decision.reason} [REVERSED]`;
-                              addLog(`🔄 REVERSE: Flipping ${decision.type} to ${finalType}`, 'warn');
+                              addLog(`🔄 REVERSE ACTIVE: Converting ${decision.type} signal to ${finalType} execution.`, 'warn');
                           }
                           
-                          const slDistance = (decision.stopLossPerc / 100) * currentPx;
-                          
-                          const support = currentPx - slDistance;
-                          const resistance = currentPx + slDistance;
-
                           const condition: MarketCondition = {
                               symbol: coin.symbol,
                               price: currentPx,
                               type: finalType,
                               score: 5,
                               isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
-                              support: finalType === 'LONG' ? support : 0,
-                              resistance: finalType === 'SHORT' ? resistance : 0,
+                              support: decision.type === 'LONG' ? (currentPx * (1 - decision.stopLossPerc/100)) : 0,
+                              resistance: decision.type === 'SHORT' ? (currentPx * (1 + decision.stopLossPerc/100)) : 0,
                               takerBuySellRatio: takerRatio,
                               atr: 0 
                           };
                           
                           addLog(`🚀 ENTRY TRIGGERED: ${finalType} ${coin.symbol} (${finalReason})`, 'success');
-                          sniper.executeQuantumTrade(condition, `QUANTUM_${finalReason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          // Pass original type to engine for exit logic mapping
+                          sniper.executeQuantumTrade(condition, `QUANTUM_${finalReason}`, decision.takeProfitPerc, decision.stopLossPerc, decision.type);
                           
                      } else {
                          rejectedCount++;
