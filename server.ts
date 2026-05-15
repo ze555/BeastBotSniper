@@ -41,11 +41,6 @@ async function startServer() {
     res.json(sniper.getTradeHistory().slice(0, 50)); // Return last 50 for UI speed
   });
 
-  app.post("/api/trades/clear", async (req, res) => {
-    await sniper.clearAllTrades();
-    res.json({ success: true });
-  });
-
   app.get("/api/stats", (req, res) => {
     res.json(sniper.getStats());
   });

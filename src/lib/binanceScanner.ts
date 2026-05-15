@@ -47,10 +47,7 @@ export async function runBinanceScanner() {
       bookRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/bookTicker`, { timeout: 10000 });
     } catch (apiError: any) {
       if (apiError.response && apiError.response.status === 418) {
-         console.error('[SCANNER] ⚠️ IP BLOCKED BY BINANCE (Error 418).');
-      } else if (apiError.response && apiError.response.status === 403) {
-         console.error(`[SCANNER] ⚠️ API ERROR 403 (Forbidden/WAF Block). Rate limit hit or IP restricted. Sleeping for 60s...`);
-         await sleep(60000);
+         console.error('[SCANNER] ⚠️ IP BLOCKED BY BINANCE (Error 418). Render proxy or VPN needed.');
       } else {
          console.error('[SCANNER] API Error fetching tickers:', apiError.message);
       }
@@ -82,13 +79,12 @@ export async function runBinanceScanner() {
       !excludedAssets.includes(t.symbol) &&
       !t.symbol.includes('UPUSDT') && !t.symbol.includes('DOWNUSDT') && // Exclude leveraged tokens
       !t.symbol.includes('BULLUSDT') && !t.symbol.includes('BEARUSDT')
-    ).sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-     .slice(0, 100); // Limit to top 100 by volume to avoid Binance WAF IP bans
+    );
 
-    console.log(`[SCANNER] Found ${validTickers.length} coins matching criteria. Analyzing...`);
-
+    console.log(`[SCANNER] Found ${validTickers.length} coins matching volume criteria. Analyzing...`);
+    
     // Log only every few scans to avoid spam
-    if (Math.random() > 0.5) {
+    if (Math.random() > 0.8) {
       addLog(`Scanner Found ${validTickers.length} potential coins...`, 'info');
     }
 
@@ -97,7 +93,6 @@ export async function runBinanceScanner() {
 
     // Analyze each valid coin
     for (const ticker of validTickers) {
-      await sleep(20); // Throttle to prevent Binance WAF 403 Forbidden bans
       const symbol = ticker.symbol;
       const price = parseFloat(ticker.lastPrice);
       const high = parseFloat(ticker.highPrice);
