@@ -86,6 +86,9 @@ export const initDB = () => {
           layerMomentumEnabled INTEGER DEFAULT 1,
           layerConfidenceEnabled INTEGER DEFAULT 1,
           layerRiskEnabled INTEGER DEFAULT 1,
+          binanceApiKey TEXT,
+          binanceSecretKey TEXT,
+          tradingMode TEXT DEFAULT 'PAPER',
           quantumBbPeriod REAL DEFAULT 20,
           quantumBbMultiplier REAL DEFAULT 1.8,
           quantumVolThreshold REAL DEFAULT 1.02,
@@ -141,7 +144,10 @@ export const initDB = () => {
         "quantumBbMultiplier REAL DEFAULT 1.8",
         "quantumVolThreshold REAL DEFAULT 1.02",
         "quantumMomentumVol REAL DEFAULT 1.5",
-        "tradingFeeRate REAL DEFAULT 0.001"
+        "tradingFeeRate REAL DEFAULT 0.001",
+        "binanceApiKey TEXT",
+        "binanceSecretKey TEXT",
+        "tradingMode TEXT DEFAULT 'PAPER'"
       ];
       
       let pending = newCols.length;
@@ -237,9 +243,10 @@ export function saveSettingsToDB(settings: any) {
       useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule,
       dynamicSafetyExit,
       layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled,
+      binanceApiKey, binanceSecretKey, tradingMode,
       quantumBbPeriod, quantumBbMultiplier, quantumVolThreshold, quantumMomentumVol
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -287,6 +294,9 @@ export function saveSettingsToDB(settings: any) {
       layerMomentumEnabled=excluded.layerMomentumEnabled,
       layerConfidenceEnabled=excluded.layerConfidenceEnabled,
       layerRiskEnabled=excluded.layerRiskEnabled,
+      binanceApiKey=excluded.binanceApiKey,
+      binanceSecretKey=excluded.binanceSecretKey,
+      tradingMode=excluded.tradingMode,
       quantumBbPeriod=excluded.quantumBbPeriod,
       quantumBbMultiplier=excluded.quantumBbMultiplier,
       quantumVolThreshold=excluded.quantumVolThreshold,
@@ -305,6 +315,7 @@ export function saveSettingsToDB(settings: any) {
     settings.dynamicSafetyExit ? 1 : 0,
     settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0,
     settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0,
+    settings.binanceApiKey ?? null, settings.binanceSecretKey ?? null, settings.tradingMode ?? 'PAPER',
     settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 1.8, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5
   ], (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
@@ -338,6 +349,9 @@ export function loadSettingsFromDB(): Promise<any> {
         row.layerMomentumEnabled = row.layerMomentumEnabled !== 0;
         row.layerConfidenceEnabled = row.layerConfidenceEnabled !== 0;
         row.layerRiskEnabled = row.layerRiskEnabled !== 0;
+        row.binanceApiKey = row.binanceApiKey || null;
+        row.binanceSecretKey = row.binanceSecretKey || null;
+        row.tradingMode = row.tradingMode || 'PAPER';
         resolve(row);
       }
     });

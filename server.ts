@@ -71,7 +71,20 @@ async function startServer() {
   });
 
   app.get("/api/settings", (req, res) => {
-    res.json(sniper.getSettings());
+    const settings = { ...sniper.getSettings() };
+    // Mask sensitive keys
+    if (settings.binanceApiKey) settings.binanceApiKey = settings.binanceApiKey.substring(0, 4) + "****" + settings.binanceApiKey.substring(settings.binanceApiKey.length - 4);
+    if (settings.binanceSecretKey) settings.binanceSecretKey = "****";
+    res.json(settings);
+  });
+
+  app.get("/api/binance/test-connection", async (req, res) => {
+    try {
+      const result = await sniper.testBinanceConnection();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
   });
 
   app.post("/api/settings", (req, res) => {

@@ -240,6 +240,11 @@ export interface BotSettings {
   // Layer 6: Neural Confidence
   layerConfidenceEnabled: boolean;      // تفعيل بوابة اليقين الاصطناعي
   
+  // Binance API Settings
+  binanceApiKey?: string;
+  binanceSecretKey?: string;
+  tradingMode?: 'PAPER' | 'LIVE';
+
   // Quantum Scalp Engine Settings
   quantumBbPeriod?: number;
   quantumBbMultiplier?: number;

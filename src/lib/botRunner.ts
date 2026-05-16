@@ -136,12 +136,12 @@ export async function runTradeLoop() {
                       currentTakerRatio = parseFloat(takerVRes.data[0].buyVol) / parseFloat(takerVRes.data[0].sellVol);
                    }
                    
-                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, currentTakerRatio, { emaTrend: currentPx > parseFloat(tkrRes.data[0][4]) ? 'LONG' : 'SHORT' });
+                   await sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, currentTakerRatio, { emaTrend: currentPx > parseFloat(tkrRes.data[0][4]) ? 'LONG' : 'SHORT' });
                  } catch (e) {
-                   sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
+                   await sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
                  }
               } else {
-                sniper.manageTrades(t.symbol, currentPx, undefined, undefined, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
+                await sniper.manageTrades(t.symbol, currentPx, undefined, undefined, undefined, { emaTrend: currentPx > t.entryPrice ? 'LONG' : 'SHORT' });
               }
 
               // 2. SMART & WISE EXIT LOGIC
@@ -154,7 +154,7 @@ export async function runTradeLoop() {
                    const klines = klinesRes.data;
                    
                    if (useWise) {
-                      sniper.wiseExit(t.symbol, currentPx, klines);
+                      await sniper.wiseExit(t.symbol, currentPx, klines);
                       // Check if still open
                       if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) return;
                    }
@@ -201,7 +201,7 @@ export async function runTradeLoop() {
                          const engulfing = recentClose < parseFloat(klines[klines.length - 3][3]); 
 
                          if ((heavyDump && lostEma && engulfing) || (rsiPlunge && lostEma) || (heavyDump && rsiPlunge)) {
-                             sniper.smartExit(t.symbol, currentPx, `🧠 SMART_EXIT: Multi-Signal Reversal`);
+                             await sniper.smartExit(t.symbol, currentPx, `🧠 SMART_EXIT: Multi-Signal Reversal`);
                          }
                       }
                       
@@ -213,7 +213,7 @@ export async function runTradeLoop() {
                          const engulfing = recentClose > parseFloat(klines[klines.length - 3][2]);
 
                          if ((heavyPump && brokeEma && engulfing) || (rsiSurge && brokeEma) || (heavyPump && rsiSurge)) {
-                             sniper.smartExit(t.symbol, currentPx, `🧠 SMART_EXIT: Multi-Signal Reversal`);
+                             await sniper.smartExit(t.symbol, currentPx, `🧠 SMART_EXIT: Multi-Signal Reversal`);
                          }
                       }
                    }
@@ -313,7 +313,7 @@ export async function runTradeLoop() {
                           };
                           
                           addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
-                          sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          await sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
                           
                      } else {
                          rejectedCount++;

@@ -21,13 +21,16 @@ export default function App() {
     maxConcurrentTrades: 10,
     leverage: 10,
     tradingFeeRate: 0.001,
+    binanceApiKey: "",
+    binanceSecretKey: "",
+    tradingMode: "PAPER" as "PAPER" | "LIVE",
     dynamicSafetyExit: true,
     fastExitEnabled: true,
     fastExitPerc: 0.5,
     quantumBbPeriod: 20,
     quantumBbMultiplier: 1.8,
     quantumVolThreshold: 1.02,
-    quantumMomentumVol: 1.5
+    quantumMomentumVol: 1.5,
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -301,9 +304,13 @@ export default function App() {
                 <div className={`w-2 h-2 rounded-full ${isInverse ? 'bg-rose-500 animate-pulse' : 'bg-slate-600'}`}></div>
                 وضع المعكوس: {isInverse ? 'نشط' : 'معطل'}
               </button>
-              <span className="px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-mono font-medium text-slate-300 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
-                Paper Trading Mode
+              <span className={`px-3 py-1.5 rounded-full border text-xs font-mono font-medium flex items-center gap-2 ${
+                settings.tradingMode === 'LIVE' 
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-400' 
+                  : 'bg-slate-800 border-slate-700 text-slate-300'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${settings.tradingMode === 'LIVE' ? 'bg-rose-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`}></span>
+                {settings.tradingMode === 'LIVE' ? '🚀 LIVE Trading Mode' : '🛡️ Paper Trading Mode'}
               </span>
             </div>
           </header>
