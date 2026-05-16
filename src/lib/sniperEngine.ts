@@ -453,7 +453,8 @@ export class SniperEngine {
 
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
-        const side = trade.type === "LONG" ? "buy" : "sell";
+        // [INVERSE LOGIC] عكس الصفقة عند الإرسال لبايننس
+        const side = trade.type === "LONG" ? "sell" : "buy";
         const symbol = trade.symbol;
 
         try {
@@ -465,7 +466,7 @@ export class SniperEngine {
         const roundedAmount = this.exchange.amountToPrecision(symbol, quantity);
 
         console.log(
-          `[BINANCE] 🚀 Executing LIVE ${trade.type} on ${symbol} | Amount: ${roundedAmount}`,
+          `[BINANCE] 🔄 INVERSE EXECUTION: القرار الأصلي ${trade.type} -> إرسال ${side.toUpperCase()} لبايننس | الكمية: ${roundedAmount}`,
         );
         const order = await this.exchange.createOrder(
           symbol,
@@ -550,7 +551,8 @@ export class SniperEngine {
 
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
-        const side = trade.type === "LONG" ? "buy" : "sell";
+        // [INVERSE LOGIC] عكس الصفقة عند الإرسال لبايننس (Quantum)
+        const side = trade.type === "LONG" ? "sell" : "buy";
         const symbol = trade.symbol;
 
         try {
@@ -562,7 +564,7 @@ export class SniperEngine {
         const roundedAmount = this.exchange.amountToPrecision(symbol, quantity);
 
         console.log(
-          `[BINANCE] 🚀 Executing QUANTUM LIVE ${trade.type} on ${symbol} | Amount: ${roundedAmount}`,
+          `[BINANCE] 🚀 Executing QUANTUM INVERSE ${trade.type} on ${symbol} | Sending ${side.toUpperCase()}`,
         );
         const order = await this.exchange.createOrder(
           symbol,
@@ -1284,14 +1286,16 @@ export class SniperEngine {
   private async closeTrade(trade: Trade, exitPrice: number, reason: string) {
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
-        const side = trade.type === "LONG" ? "sell" : "buy";
+        // [INVERSE LOGIC] لإغلاق الصفقة المعكوسة، نستخدم نفس اتجاه القرار الأصلي
+        // إذا كان القرار الأصلي LONG (فُتح بـ SELL)، نغلقه بـ BUY
+        const side = trade.type === "LONG" ? "buy" : "sell";
         const symbol = trade.symbol;
         const market = this.exchange.market(symbol);
         const quantity = trade.amount / trade.entryPrice;
         const roundedAmount = this.exchange.amountToPrecision(symbol, quantity);
 
         console.log(
-          `[BINANCE] 🏁 Closing LIVE ${trade.type} on ${symbol} | Amount: ${roundedAmount} | Reason: ${reason}`,
+          `[BINANCE] 🏁 Closing INVERSE LIVE ${trade.type} on ${symbol} | Order: ${side.toUpperCase()} | Reason: ${reason}`,
         );
         const order = await this.exchange.createOrder(
           symbol,

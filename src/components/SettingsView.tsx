@@ -71,10 +71,15 @@ export function SettingsView({
             <div className="flex items-center justify-between mb-10 border-b border-slate-800 pb-6 relative z-10">
                <div className="flex items-center gap-4">
                   <div className={`p-3 rounded-2xl transition-all ${settings.tradingMode === 'LIVE' ? 'bg-rose-500/20' : 'bg-slate-800'}`}><Key className={`w-7 h-7 ${settings.tradingMode === 'LIVE' ? 'text-rose-400' : 'text-slate-400'}`} /></div>
-                  <div>
-                     <h2 className="text-2xl font-black text-white">ربط منصة بايننس (Binance Live)</h2>
-                     <p className="text-slate-500 text-sm mt-1">تداول حقيقي باستخدام مفاتيح الـ API أو متغيرات البيئة (.env).</p>
+               <div>
+                  <h2 className="text-2xl font-black text-white">ربط منصة بايننس (Binance Live)</h2>
+                  <div className="flex items-center gap-2 mt-1">
+                     <p className="text-slate-500 text-sm">تداول حقيقي باستخدام مفاتيح الـ API أو متغيرات البيئة (.env).</p>
+                     <span className="px-2 py-0.5 bg-rose-500/20 text-rose-400 text-[10px] font-black rounded-lg border border-rose-500/30 animate-pulse">
+                        وضع التداول المعاكس (INVERSE) نَشِط 🔄
+                     </span>
                   </div>
+               </div>
                </div>
                <div className="flex gap-2">
                   <button 
