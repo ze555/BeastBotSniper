@@ -149,6 +149,7 @@ export interface BotSettings {
   riskPerTradePerc: number; // 1 = 1%
   maxConcurrentTrades: number;
   leverage?: number;
+  tradingFeeRate?: number; // Fee rate (e.g. 0.001 for 0.1%)
   strictMode?: boolean;
   
   // Customizable Strict Mode filters

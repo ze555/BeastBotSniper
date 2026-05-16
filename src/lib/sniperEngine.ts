@@ -21,6 +21,7 @@ export class SniperEngine {
     riskPerTradePerc: 1, // 1%
     maxConcurrentTrades: 10,
     leverage: 10,
+    tradingFeeRate: 0.001, // 0.1% total (Entry + Exit)
     strictMode: true,
     strictMinRvol: 1.5,
     strictFastBreakevenPerc: 0.3,
@@ -98,6 +99,7 @@ export class SniperEngine {
              riskPerTradePerc: dbSettings.riskPerTradePerc,
              maxConcurrentTrades: dbSettings.maxConcurrentTrades,
              leverage: dbSettings.leverage ?? 10,
+             tradingFeeRate: dbSettings.tradingFeeRate ?? 0.001,
              strictMode: dbSettings.strictMode,
              strictMinVolume: dbSettings.strictMinVolume,
              strictMinRvol: dbSettings.strictMinRvol,
@@ -461,8 +463,8 @@ export class SniperEngine {
     
     trade.currentPrice = currentPrice;
     
-    // Total Fees = 0.1% of position size (Notional)
-    const totalFeeRate = 0.001; 
+    // Total Fees from Settings (default 0.1% of position size)
+    const totalFeeRate = this.settings.tradingFeeRate ?? 0.001; 
     const leverage = trade.leverage || 10;
     
     // ROE % = (PriceChange% - Fee%) * Leverage
@@ -858,20 +860,22 @@ export class SniperEngine {
         ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100 
         : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
         
-      // Real ROE = (PriceChange% - Fees%) * Leverage
-      const totalFeeRate = 0.001;
+      // Fees = (Entry Notional * fee) + (Exit Notional * fee)
+      // We assume tradingFeeRate is the TOTAL (Entry+Exit) for a neutral trade
+      const singleSideFeeRate = (this.settings.tradingFeeRate ?? 0.001) / 2;
+      const entryFee = trade.amount * singleSideFeeRate;
+      const exitValue = trade.amount * (exitPrice / trade.entryPrice);
+      const exitFee = exitValue * singleSideFeeRate;
+      const totalFees = entryFee + exitFee;
+      
       const leverage = trade.leverage || 10;
       
-      trade.pnlPerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
-      
-      // Calculate PnL and subtract estimated fees (0.1% total)
-      let finalPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
-      
-      if (trade.realizedPnl) {
-          finalPnl += trade.realizedPnl;
-      }
+      // Calculate Gross PnL
+      const grossPnl = (trade.amount * priceChangePerc) / 100;
+      const finalPnl = grossPnl - totalFees + (trade.realizedPnl || 0);
       
       trade.pnl = finalPnl;
+      trade.pnlPerc = (finalPnl / (trade.amount / leverage)) * 100;
       
       const badge = trade.pnl > 0 ? '🟢' : '🔴';
       addLog(`EXIT ${trade.symbol}: $${trade.pnl.toFixed(2)} (${reason})`, trade.pnl > 0 ? 'info' : 'warn');

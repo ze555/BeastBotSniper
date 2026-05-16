@@ -19,6 +19,8 @@ export default function App() {
     portfolioSize: 2000, 
     riskPerTradePerc: 1, 
     maxConcurrentTrades: 10,
+    leverage: 10,
+    tradingFeeRate: 0.001,
     dynamicSafetyExit: true,
     fastExitEnabled: true,
     fastExitPerc: 0.5,

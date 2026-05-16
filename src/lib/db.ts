@@ -44,6 +44,7 @@ export const initDB = () => {
           riskPerTradePerc REAL NOT NULL,
           maxConcurrentTrades INTEGER NOT NULL,
           leverage REAL DEFAULT 10,
+          tradingFeeRate REAL DEFAULT 0.001,
           strictMode INTEGER DEFAULT 0,
           strictMinVolume REAL DEFAULT 5000000,
           strictMinRvol REAL DEFAULT 3.0,
@@ -77,7 +78,18 @@ export const initDB = () => {
           useStrategyVolatilityRule INTEGER DEFAULT 1,
           useStrategyConfidenceGate INTEGER DEFAULT 1,
           useStrategyMomentumRule INTEGER DEFAULT 1,
-          dynamicSafetyExit INTEGER DEFAULT 1
+          dynamicSafetyExit INTEGER DEFAULT 1,
+          layerGlobalContextEnabled INTEGER DEFAULT 1,
+          layerRegimeEnabled INTEGER DEFAULT 1,
+          layerBiasEnabled INTEGER DEFAULT 1,
+          layerLiquidityEnabled INTEGER DEFAULT 1,
+          layerMomentumEnabled INTEGER DEFAULT 1,
+          layerConfidenceEnabled INTEGER DEFAULT 1,
+          layerRiskEnabled INTEGER DEFAULT 1,
+          quantumBbPeriod REAL DEFAULT 20,
+          quantumBbMultiplier REAL DEFAULT 1.8,
+          quantumVolThreshold REAL DEFAULT 1.02,
+          quantumMomentumVol REAL DEFAULT 1.5
         )
       `);
       
@@ -128,7 +140,8 @@ export const initDB = () => {
         "quantumBbPeriod REAL DEFAULT 20",
         "quantumBbMultiplier REAL DEFAULT 1.8",
         "quantumVolThreshold REAL DEFAULT 1.02",
-        "quantumMomentumVol REAL DEFAULT 1.5"
+        "quantumMomentumVol REAL DEFAULT 1.5",
+        "tradingFeeRate REAL DEFAULT 0.001"
       ];
       
       let pending = newCols.length;
@@ -212,7 +225,7 @@ export function loadActiveTrades(): Promise<Trade[]> {
 export function saveSettingsToDB(settings: any) {
   db.run(`
     INSERT INTO settings (
-      id, portfolioSize, riskPerTradePerc, maxConcurrentTrades, leverage, strictMode,
+      id, portfolioSize, riskPerTradePerc, maxConcurrentTrades, leverage, tradingFeeRate, strictMode,
       strictMinVolume, strictMinRvol, strictMaxRisk, strictMinScore,
       strictBtcAlignment, strictRsiFilter, strictRetest, strictFastBreakevenPerc,
       strictRsiHigh, strictRsiLow, strictRetestPullbackPerc, strictBreakoutDistancePerc,
@@ -223,14 +236,16 @@ export function saveSettingsToDB(settings: any) {
       strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
       useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule,
       dynamicSafetyExit,
-      layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled
+      layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled,
+      quantumBbPeriod, quantumBbMultiplier, quantumVolThreshold, quantumMomentumVol
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
       maxConcurrentTrades=excluded.maxConcurrentTrades,
       leverage=excluded.leverage,
+      tradingFeeRate=excluded.tradingFeeRate,
       strictMode=excluded.strictMode,
       strictMinVolume=excluded.strictMinVolume,
       strictMinRvol=excluded.strictMinRvol,
@@ -277,7 +292,7 @@ export function saveSettingsToDB(settings: any) {
       quantumVolThreshold=excluded.quantumVolThreshold,
       quantumMomentumVol=excluded.quantumMomentumVol
   `, [
-    settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.strictMode ? 1 : 0,
+    settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.tradingFeeRate ?? 0.001, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
     settings.strictBtcAlignment ? 1 : 0, settings.strictRsiFilter ? 1 : 0, settings.strictRetest ? 1 : 0, settings.strictFastBreakevenPerc ?? 0.75,
     settings.strictRsiHigh ?? 75, settings.strictRsiLow ?? 25, settings.strictRetestPullbackPerc ?? 3.0, settings.strictBreakoutDistancePerc ?? 0.5,
