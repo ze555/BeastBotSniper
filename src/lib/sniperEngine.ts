@@ -754,14 +754,28 @@ export class SniperEngine {
     const roePerc = (priceChangePerc * leverage) - (feeImpactOnPerc * leverage);
     trade.pnlPerc = roePerc;
 
-    // PnL $ = Gross PnL - Total Fees
-    const grossPnl = (trade.amount * priceChangePerc) / 100;
-    let currentPnl = grossPnl - totalFees;
+    // Calculate Net PnL $
+    const naturalGrossPnl = (trade.amount * priceChangePerc) / 100;
+    
+    // If Natural Strategy direction is used for display, we subtract fees normally.
+    // If the UI flip button is handled at the engine level for the 'live inverse' trade:
+    let displayGrossPnl = naturalGrossPnl;
+    
+    // Note: The UI has its own flip state, but for the DB and shared logic to match reality:
+    // When LIVE active and it's an 'inverse' trade on Binance:
+    if (this.mode === "LIVE") {
+      displayGrossPnl = -naturalGrossPnl;
+    }
+
+    let currentPnl = displayGrossPnl - totalFees;
     
     if (trade.realizedPnl) {
       currentPnl += trade.realizedPnl;
     }
     trade.pnl = currentPnl;
+    
+    // ROE % = (Final PnL / Margin) * 100
+    trade.pnlPerc = (currentPnl / (trade.amount / leverage)) * 100;
 
     // 1. Layered Position Management Verdict
     const verdict = this.manager.manage(trade as any, currentPrice);
@@ -1387,8 +1401,15 @@ export class SniperEngine {
     const leverage = trade.leverage || 10;
 
     // Calculate Net PnL $
-    const grossPnl = (trade.amount * priceChangePerc) / 100;
-    const finalPnl = grossPnl - totalFees + (trade.realizedPnl || 0);
+    const naturalGrossPnl = (trade.amount * priceChangePerc) / 100;
+    let displayGrossPnl = naturalGrossPnl;
+
+    // Fix: If in LIVE mode (where we inverse trades on Binance), PnL must be flipped BUT fees still deducted.
+    if (this.mode === "LIVE") {
+      displayGrossPnl = -naturalGrossPnl;
+    }
+
+    const finalPnl = displayGrossPnl - totalFees + (trade.realizedPnl || 0);
 
     trade.pnl = finalPnl;
     
