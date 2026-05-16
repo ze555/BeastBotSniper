@@ -195,6 +195,60 @@ export default function App() {
     } catch(e) { }
   }
 
+  const getDisplayPnL = (pnl: number, amount: number) => {
+    if (!isInverse) return pnl;
+    const feeRate = settings.tradingFeeRate || 0.001;
+    const totalFees = amount * feeRate;
+    // Inverse PnL = - (Gross PnL) - Fees
+    // Since pnl = Gross - Fees => Gross = pnl + Fees
+    // Inverse PnL = - (pnl + Fees) - Fees = -pnl - 2*Fees
+    return -pnl - (2 * totalFees);
+  };
+
+  const getDisplayPnLPerc = (pnlPerc: number, amount: number, leverage: number = 10) => {
+    if (!isInverse) return pnlPerc;
+    const feeRate = settings.tradingFeeRate || 0.001;
+    const margin = amount / leverage;
+    const totalFees = amount * feeRate;
+    const feeImpactPerc = (totalFees / margin) * 100;
+    // roe_inv = -gross_roe - fee_impact
+    // roe_orig = gross_roe - fee_impact => gross_roe = roe_orig + fee_impact
+    // roe_inv = -(roe_orig + fee_impact) - fee_impact = -roePerc - 2*fee_impact
+    return -pnlPerc - (2 * feeImpactPerc);
+  };
+
+  const displayStats = (() => {
+    if (!isInverse) return stats;
+    
+    // Calculate display values for the visible history slice for table consistency
+    const displayHistory = historyTrades.map(t => ({
+      ...t,
+      displayPnL: getDisplayPnL(t.pnl || 0, t.amount || 0)
+    }));
+
+    // For the total PnL in the header, we estimate based on the total stats from server
+    // Since we don't have individual fee data for ALL historical trades in the DB,
+    // we use an average fee estimation: TotalFees = TotalTrades * AvgAmount * FeeRate
+    const feeRate = settings.tradingFeeRate || 0.001;
+    const avgAmount = stats.totalTrades > 0 ? (historyTrades.reduce((acc, t) => acc + (t.amount || 0), 0) / (historyTrades.length || 1)) : 0;
+    const estimatedTotalFees = stats.totalTrades * avgAmount * feeRate;
+    
+    // Inverse Total PnL = - (Gross Total PnL) - Total Fees
+    // Gross Total PnL = stats.totalPnl + estimatedTotalFees
+    // Inverse Total PnL = - (stats.totalPnl + estimatedTotalFees) - estimatedTotalFees = -stats.totalPnl - 2*estimatedTotalFees
+    const totalPnl = -stats.totalPnl - (2 * estimatedTotalFees);
+    
+    // Win rate estimation for inverse
+    const wins = displayHistory.filter(t => t.displayPnL > 0).length;
+    const winRate = historyTrades.length > 0 ? (wins / historyTrades.length) * 100 : (100 - stats.winRate);
+
+    return {
+      ...stats,
+      totalPnl,
+      winRate
+    };
+  })();
+
   const togglePanic = async () => {
     const newState = !panicActive;
     try {
@@ -318,9 +372,9 @@ export default function App() {
           {activeTab === 'dashboard' && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                   <StatCard title="إجمالي الأرباح" value={`$${(stats.totalPnl * (isInverse ? -1 : 1)).toFixed(2)}`} trend="" positive={(stats.totalPnl * (isInverse ? -1 : 1)) >= 0} />
-                   <StatCard title="نسبة الدقة (Win Rate)" value={`${(isInverse ? (100 - stats.winRate) : stats.winRate).toFixed(1)}%`} trend={`${stats.totalTrades} صفقات`} />
-                   <StatCard title="الصفقات المفتوحة" value={stats.openCount.toString()}  />
+                   <StatCard title="إجمالي الأرباح" value={`$${displayStats.totalPnl.toFixed(2)}`} trend="" positive={displayStats.totalPnl >= 0} />
+                   <StatCard title="نسبة الدقة (Win Rate)" value={`${displayStats.winRate.toFixed(1)}%`} trend={`${displayStats.totalTrades} صفقات`} />
+                   <StatCard title="الصفقات المفتوحة" value={displayStats.openCount.toString()}  />
               </div>
 
               {/* Intelligence Hub */}
@@ -401,14 +455,14 @@ export default function App() {
                                   <span>حجم الصفقة: <span className="font-mono text-slate-300">${parseFloat(t.amount as any).toFixed(2)}</span></span>
                                   <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-mono">{(t as any).leverage || 10}x</span>
                                 </p>
-                                <p className="text-xs text-slate-400 mt-1">القيمة الحالية: <span className="font-mono text-slate-300">${(parseFloat(t.amount as any) + ((t.pnl || 0) * (isInverse ? -1 : 1))).toFixed(2)}</span></p>
+                                <p className="text-xs text-slate-400 mt-1">القيمة الحالية: <span className="font-mono text-slate-300">${(parseFloat(t.amount as any) + getDisplayPnL(t.pnl || 0, t.amount || 0)).toFixed(2)}</span></p>
                              </div>
                              <div className="text-left">
-                                <span className={`font-mono font-bold text-lg ${(t.pnlPerc * (isInverse ? -1 : 1)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {(t.pnlPerc * (isInverse ? -1 : 1)) >= 0 ? '+' : ''}{(t.pnlPerc * (isInverse ? -1 : 1))?.toFixed(2)}%
+                                <span className={`font-mono font-bold text-lg ${getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) >= 0 ? '+' : ''}{getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10)?.toFixed(2)}%
                                 </span>
-                                <p className={`text-xs font-mono text-right ${(t.pnl * (isInverse ? -1 : 1)) >= 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
-                                  ${(t.pnl * (isInverse ? -1 : 1))?.toFixed(2)}
+                                <p className={`text-xs font-mono text-right ${getDisplayPnL(t.pnl || 0, t.amount || 0) >= 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
+                                  ${getDisplayPnL(t.pnl || 0, t.amount || 0)?.toFixed(2)}
                                 </p>
                              </div>
                            </div>
@@ -609,15 +663,15 @@ export default function App() {
                               <td className="px-5 py-4 font-mono text-slate-400">{(t as any).leverage || 10}x</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice).toFixed(4)}</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.exitPrice).toFixed(4)}</td>
-                              <td className={`px-5 py-4 font-mono font-bold ${(t.pnlPerc * (isInverse ? -1 : 1)) > 0 ? 'text-emerald-400' : (t.pnlPerc * (isInverse ? -1 : 1)) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
-                                {(t.pnlPerc * (isInverse ? -1 : 1)) > 0 ? '+' : ''}{(t.pnlPerc * (isInverse ? -1 : 1))?.toFixed(2)}%
+                              <td className={`px-5 py-4 font-mono font-bold ${getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) > 0 ? 'text-emerald-400' : getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
+                                {getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) > 0 ? '+' : ''}{getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10)?.toFixed(2)}%
                               </td>
-                              <td className={`px-5 py-4 font-mono ${(t.pnl * (isInverse ? -1 : 1)) > 0 ? 'text-emerald-400' : (t.pnl * (isInverse ? -1 : 1)) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
-                                {(t.pnl * (isInverse ? -1 : 1)) > 0 ? '+' : ''}${(t.pnl * (isInverse ? -1 : 1))?.toFixed(2)}
+                              <td className={`px-5 py-4 font-mono ${getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'text-emerald-400' : getDisplayPnL(t.pnl || 0, t.amount || 0) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
+                                {getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? '+' : ''}${getDisplayPnL(t.pnl || 0, t.amount || 0)?.toFixed(2)}
                               </td>
                               <td className="px-5 py-4">
-                                <span className={`px-2 py-1 text-[10px] rounded ${(t.pnl * (isInverse ? -1 : 1)) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || (t.pnl * (isInverse ? -1 : 1)) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                                  {(t.pnl * (isInverse ? -1 : 1)) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || (t.pnl * (isInverse ? -1 : 1)) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
+                                <span className={`px-2 py-1 text-[10px] rounded ${getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                  {getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
                                 </span>
                               </td>
                            </tr>
