@@ -87,6 +87,16 @@ async function startServer() {
     }
   });
 
+  app.get("/api/utils/server-ip", async (req, res) => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      res.json({ ip: data.ip });
+    } catch (e) {
+      res.status(500).json({ error: "Failed to fetch server IP" });
+    }
+  });
+
   app.post("/api/settings", (req, res) => {
     sniper.updateSettings(req.body);
     res.json(sniper.getSettings());

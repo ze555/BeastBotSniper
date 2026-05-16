@@ -22,6 +22,14 @@ export function SettingsView({
 }) {
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{success: boolean, message: string} | null>(null);
+  const [serverIp, setServerIp] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetch('/api/utils/server-ip')
+      .then(res => res.json())
+      .then(data => setServerIp(data.ip))
+      .catch(() => setServerIp('فشل في جلب الـ IP'));
+  }, []);
 
   const handleTestConnection = async () => {
     setTesting(true);
@@ -126,14 +134,38 @@ export function SettingsView({
                </button>
 
                {testResult && (
-                  <div className={`px-4 py-3 rounded-2xl border text-sm font-bold flex items-center gap-3 animate-in slide-in-from-left duration-300 ${
-                     testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                  }`}>
-                     {testResult.success ? <ShieldCheck className="w-5 h-5" /> : <Zap className="w-5 h-5 animate-pulse" />}
-                     {testResult.message}
+                  <div className="flex flex-col gap-2 w-full">
+                     <div className={`px-4 py-3 rounded-2xl border text-sm font-bold flex items-center gap-3 animate-in slide-in-from-left duration-300 ${
+                        testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                     }`}>
+                        {testResult.success ? <ShieldCheck className="w-5 h-5" /> : <Zap className="w-5 h-5 animate-pulse" />}
+                        {testResult.message}
+                     </div>
+                     {!testResult.success && testResult.message.includes('-2015') && (
+                        <div className="px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-[10px] text-slate-400 space-y-1">
+                           <p className="text-rose-400 font-bold">حلول مقترحة لخطأ API Key / IP:</p>
+                           <ul className="list-disc list-inside">
+                              <li>تأكد من تفعيل <span className="text-white italic">Enable Futures</span> في إعدادات API بايننس.</li>
+                              <li>إذا كنت تستخدم Railway، تأكد من تعطيل <span className="text-white italic">Unrestricted IP Access</span> أو إضافة الـ IP الصحيح.</li>
+                              {serverIp && (
+                                <li className="text-emerald-400 font-bold">
+                                  عنوان IP السيرفر الحالي: <span className="underline select-all">{serverIp}</span> (انسخه وضعه في بايننس)
+                                </li>
+                              )}
+                              <li>تأكد من شحن رصيد USDT في محفظة <span className="text-white italic">Futures</span> وليس Spot.</li>
+                           </ul>
+                        </div>
+                     )}
                   </div>
                )}
             </div>
+
+            {serverIp && !testResult && (
+              <div className="mt-4 px-4 py-2 bg-slate-800/30 border border-slate-800 rounded-xl inline-flex items-center gap-3 text-[10px] text-slate-400">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                عنوان IP السيرفر (للإضافة في بايننس): <span className="text-white font-mono font-bold select-all">{serverIp}</span>
+              </div>
+            )}
 
             {settings.tradingMode === 'LIVE' && (
               <div className="mt-8 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-4 relative z-10">
