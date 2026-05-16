@@ -728,6 +728,8 @@ export class SniperEngine {
     }
 
     // Update floating PnL (Price Change %)
+    // --- PnL Calculation Logic (Internal Strategy View) ---
+    // We keep this "Natural" to the strategy. User has a UI button to flip it.
     const priceChangePerc =
       trade.type === "LONG"
         ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100
@@ -735,18 +737,27 @@ export class SniperEngine {
 
     trade.currentPrice = currentPrice;
 
-    // Total Fees from Settings (default 0.1% of position size)
+    // Total Fees from Settings (default 0.1% of position size = 0.05% entry + 0.05% exit)
     const totalFeeRate = this.settings.tradingFeeRate ?? 0.001;
+    const singleSideFeeRate = totalFeeRate / 2;
     const leverage = trade.leverage || 10;
 
-    // ROE % = (PriceChange% - Fee%) * Leverage
-    // This gives a real "Return on Equity" including fees.
-    const roePerc = (priceChangePerc - totalFeeRate * 100) * leverage;
+    // Calculate Exact Fees (Entry vs Exit Notional)
+    const entryFee = trade.amount * singleSideFeeRate;
+    const exitNotional = trade.amount * (currentPrice / trade.entryPrice);
+    const exitFee = exitNotional * singleSideFeeRate;
+    const totalFees = entryFee + exitFee;
+
+    // ROE % = (PriceChange% - TotalFees%) * Leverage
+    // This matches Binance's ROE calculation for Futures.
+    const feeImpactOnPerc = (totalFees / trade.amount) * 100;
+    const roePerc = (priceChangePerc * leverage) - (feeImpactOnPerc * leverage);
     trade.pnlPerc = roePerc;
 
-    // PnL $ = (Amount * PriceChange / 100) - Fees + Realized
-    let currentPnl =
-      (trade.amount * priceChangePerc) / 100 - trade.amount * totalFeeRate;
+    // PnL $ = Gross PnL - Total Fees
+    const grossPnl = (trade.amount * priceChangePerc) / 100;
+    let currentPnl = grossPnl - totalFees;
+    
     if (trade.realizedPnl) {
       currentPnl += trade.realizedPnl;
     }
@@ -1354,31 +1365,37 @@ export class SniperEngine {
       }
     }
 
+    const market = this.activeTrades.get(trade.symbol);
     trade.exitPrice = exitPrice;
     trade.status = "CLOSED";
     trade.exitTime = Date.now();
 
+    // --- PnL Calculation Logic (Internal Strategy View) ---
     const priceChangePerc =
       trade.type === "LONG"
         ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100
         : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
 
     // Fees = (Entry Notional * fee) + (Exit Notional * fee)
-    // We assume tradingFeeRate is the TOTAL (Entry+Exit) for a neutral trade
-    const singleSideFeeRate = (this.settings.tradingFeeRate ?? 0.001) / 2;
+    const totalFeeRate = this.settings.tradingFeeRate ?? 0.001;
+    const singleSideFeeRate = totalFeeRate / 2;
     const entryFee = trade.amount * singleSideFeeRate;
-    const exitValue = trade.amount * (exitPrice / trade.entryPrice);
-    const exitFee = exitValue * singleSideFeeRate;
+    const exitNotional = trade.amount * (exitPrice / trade.entryPrice);
+    const exitFee = exitNotional * singleSideFeeRate;
     const totalFees = entryFee + exitFee;
 
     const leverage = trade.leverage || 10;
 
-    // Calculate Gross PnL
+    // Calculate Net PnL $
     const grossPnl = (trade.amount * priceChangePerc) / 100;
     const finalPnl = grossPnl - totalFees + (trade.realizedPnl || 0);
 
     trade.pnl = finalPnl;
-    trade.pnlPerc = (finalPnl / (trade.amount / leverage)) * 100;
+    
+    // ROE % = (Final PnL / Margin) * 100
+    // This gives the exact ROE shown on Binance
+    const margin = trade.amount / leverage;
+    trade.pnlPerc = (finalPnl / margin) * 100;
 
     const badge = trade.pnl > 0 ? "🟢" : "🔴";
     addLog(
