@@ -69,6 +69,8 @@ export class SniperEngine {
     layerMomentumEnabled: true,
     layerConfidenceEnabled: true,
     layerRiskEnabled: true,
+    inverseTrailingEnabled: false,
+    inverseTrailingSensitivity: 0.05,
   };
 
   constructor() {
@@ -804,6 +806,40 @@ export class SniperEngine {
       trade.highestPrice = currentPrice;
       trade.highestPriceTime = Date.now();
       updated = true;
+    }
+
+    // --- 🔄 INVERSE BEST PRICE TRACKER (تتبع أفضل سعر لبايننس) ---
+    // تتبع السعر الذي يحقق أكبر "خسارة داخلية" (أي أكبر ربح في بايننس)
+    if (
+      !trade.inverseBestPrice ||
+      (trade.type === "LONG"
+        ? currentPrice < trade.inverseBestPrice // للأعلى: نريد أقل سعر (أكبر خسارة)
+        : currentPrice > trade.inverseBestPrice) // للأسفل: نريد أعلى سعر (أكبر خسارة)
+    ) {
+      trade.inverseBestPrice = currentPrice;
+      updated = true;
+    }
+
+    // --- 🔄 INVERSE DYNAMIC TRAILING (ملاحقة السعر المعكوس) ---
+    // إذا كان الخيار مفعلاً، الخروج عند ارتداد السعر ضد اتجاه ربح بايننس
+    if (this.settings.inverseTrailingEnabled && trade.inverseBestPrice) {
+      const sensitivity = this.settings.inverseTrailingSensitivity || 0.05;
+      
+      // حساب نسبة الارتداد من "أفضل سعر وصل له ربح بايننس"
+      const reversalPerc = trade.type === "LONG"
+        ? ((currentPrice - trade.inverseBestPrice) / trade.inverseBestPrice) * 100
+        : ((trade.inverseBestPrice - currentPrice) / trade.inverseBestPrice) * 100;
+
+      // الخروج إذا كان الارتداد أكبر من الحساسية (بشرط وجود خسارة داخلية أي ربح في بايننس)
+      const isBinanceInProfit = trade.type === "LONG" 
+        ? currentPrice < trade.entryPrice 
+        : currentPrice > trade.entryPrice;
+
+      if (reversalPerc >= sensitivity && isBinanceInProfit) {
+        console.log(`[INVERSE TRAILING] 📉 Reversal Detected: ${reversalPerc.toFixed(3)}% from best inverse price. Securing Binance profits.`);
+        await this.closeTrade(trade, currentPrice, "🔄 INVERSE_TRAILING_EXIT");
+        return;
+      }
     }
 
     // 🌟 KINETIC ENGINE (نظام الزخم الحركي الشامل)

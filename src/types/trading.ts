@@ -60,6 +60,7 @@ export interface Trade {
   highestPrice?: number;
   highestPriceTime?: number;
   isPartialProfitTaken?: boolean;
+  inverseBestPrice?: number; // Added for the new inverse trailing logic
   tickHistory?: number[]; // Live Data: Tracks every incoming price tick
   oiHistory?: number[]; // Open Interest history
   volHistory?: number[]; // Volume history
@@ -250,4 +251,8 @@ export interface BotSettings {
   quantumBbMultiplier?: number;
   quantumVolThreshold?: number;
   quantumMomentumVol?: number;
+
+  // New Inverse Trailing Logic
+  inverseTrailingEnabled?: boolean;
+  inverseTrailingSensitivity?: number; // % reversal to trigger exit
 }

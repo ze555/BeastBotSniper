@@ -92,7 +92,9 @@ export const initDB = () => {
           quantumBbPeriod REAL DEFAULT 20,
           quantumBbMultiplier REAL DEFAULT 1.8,
           quantumVolThreshold REAL DEFAULT 1.02,
-          quantumMomentumVol REAL DEFAULT 1.5
+          quantumMomentumVol REAL DEFAULT 1.5,
+          inverseTrailingEnabled INTEGER DEFAULT 0,
+          inverseTrailingSensitivity REAL DEFAULT 0.05
         )
       `);
       
@@ -147,7 +149,9 @@ export const initDB = () => {
         "tradingFeeRate REAL DEFAULT 0.001",
         "binanceApiKey TEXT",
         "binanceSecretKey TEXT",
-        "tradingMode TEXT DEFAULT 'PAPER'"
+        "tradingMode TEXT DEFAULT 'PAPER'",
+        "inverseTrailingEnabled INTEGER DEFAULT 0",
+        "inverseTrailingSensitivity REAL DEFAULT 0.05"
       ];
       
       let pending = newCols.length;
@@ -244,9 +248,10 @@ export function saveSettingsToDB(settings: any) {
       dynamicSafetyExit,
       layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled,
       binanceApiKey, binanceSecretKey, tradingMode,
-      quantumBbPeriod, quantumBbMultiplier, quantumVolThreshold, quantumMomentumVol
+      quantumBbPeriod, quantumBbMultiplier, quantumVolThreshold, quantumMomentumVol,
+      inverseTrailingEnabled, inverseTrailingSensitivity
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -300,7 +305,9 @@ export function saveSettingsToDB(settings: any) {
       quantumBbPeriod=excluded.quantumBbPeriod,
       quantumBbMultiplier=excluded.quantumBbMultiplier,
       quantumVolThreshold=excluded.quantumVolThreshold,
-      quantumMomentumVol=excluded.quantumMomentumVol
+      quantumMomentumVol=excluded.quantumMomentumVol,
+      inverseTrailingEnabled=excluded.inverseTrailingEnabled,
+      inverseTrailingSensitivity=excluded.inverseTrailingSensitivity
   `, [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.tradingFeeRate ?? 0.001, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
@@ -316,7 +323,8 @@ export function saveSettingsToDB(settings: any) {
     settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0,
     settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0,
     settings.binanceApiKey ?? null, settings.binanceSecretKey ?? null, settings.tradingMode ?? 'PAPER',
-    settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 1.8, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5
+    settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 1.8, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5,
+    settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05
   ], (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
   });
@@ -352,6 +360,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.binanceApiKey = row.binanceApiKey || null;
         row.binanceSecretKey = row.binanceSecretKey || null;
         row.tradingMode = row.tradingMode || 'PAPER';
+        row.inverseTrailingEnabled = row.inverseTrailingEnabled === 1;
         resolve(row);
       }
     });

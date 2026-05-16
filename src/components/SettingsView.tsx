@@ -341,6 +341,40 @@ export function SettingsView({
                     <span className="text-xs text-emerald-500 font-bold">%</span>
                   </div>
                </div>
+
+               {/* Inverse Dynamic Trailing (ملاحقة السعر المعكوس) */}
+               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                     <div className="flex items-center gap-3">
+                        <RefreshCw className="w-6 h-6 text-rose-500" />
+                        <div>
+                           <h4 className="font-black text-rose-400">ملاحقة السعر المعكوس (Dynamic Inverse)</h4>
+                           <p className="text-[10px] text-slate-500">ملاحقة أفضل سعر داخلي والإغلاق عند أول ارتداد.</p>
+                        </div>
+                     </div>
+                     <input type="checkbox" checked={settings.inverseTrailingEnabled} onChange={e => setSettings({...settings, inverseTrailingEnabled: e.target.checked})} className="w-6 h-6 accent-rose-500" />
+                  </div>
+                  <div className={`space-y-4 transition-all ${!settings.inverseTrailingEnabled ? 'opacity-30 blur-[1px]' : ''}`}>
+                     <div className="space-y-1">
+                        <div className="flex justify-between items-center">
+                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right w-full">حساسية الارتداد العكسي لتأمين الربح %</label>
+                        </div>
+                        <div className="relative">
+                           <input 
+                              type="number" 
+                              step="0.005" 
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono text-center" 
+                              value={settings.inverseTrailingSensitivity ?? 0.05} 
+                              onChange={e => setSettings({...settings, inverseTrailingSensitivity: parseFloat(e.target.value)})} 
+                           />
+                           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">%</span>
+                        </div>
+                        <p className="text-[9px] text-slate-500 mt-1 leading-relaxed text-right">
+                           قيمة صغيرة (مثل 0.05) تجعل البوت يخرج بمجرد توقف الزخم. قيمة أكبر تعطي السعر مساحة للتذبذب.
+                        </p>
+                     </div>
+                  </div>
+               </div>
             </div>
          </section>
 
