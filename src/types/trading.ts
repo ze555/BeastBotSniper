@@ -255,7 +255,4 @@ export interface BotSettings {
   // New Inverse Trailing Logic
   inverseTrailingEnabled?: boolean;
   inverseTrailingSensitivity?: number; // % reversal to trigger exit
-
-  // Minimal Profit Mode
-  minProfitMode?: boolean;
 }
