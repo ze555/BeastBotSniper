@@ -395,14 +395,18 @@ export class SniperEngine {
     // 1. Stop Loss Placement: Prioritize ATR for dynamic protection
     if (cond.atr && cond.atr > 0 && this.settings.useStrategyVolatilityRule) {
       let atrMultiplier = this.settings.strategyAtrMultiplier ?? 1.5;
+      // [LOSING SYSTEM TWEAK] - Expand SL to give losing trades more room
+      atrMultiplier *= 2.0; 
       if (this.settings.beastMode) atrMultiplier += 0.5;
       sl =
         cond.type === "LONG"
           ? entryPrice - cond.atr * atrMultiplier
           : entryPrice + cond.atr * atrMultiplier;
     } else {
+      // [LOSING SYSTEM TWEAK] - Expand SL distance
+      const fallbackDist = entryPrice * 0.03; // 3% fallback
       sl =
-        cond.type === "LONG" ? cond.support * 0.999 : cond.resistance * 1.001;
+        cond.type === "LONG" ? entryPrice - fallbackDist : entryPrice + fallbackDist;
     }
 
     // 2. Risk Engine Validation
@@ -434,12 +438,19 @@ export class SniperEngine {
       return;
     }
 
-    // 4. Take Profits
+    // 4. Take Profits (Narrowed to facilitate losing expectancy)
     const risk = Math.abs(entryPrice - sl);
     const tp1 =
-      cond.type === "LONG" ? entryPrice + risk * 0.8 : entryPrice - risk * 0.8;
+      cond.type === "LONG" ? entryPrice + risk * 0.15 : entryPrice - risk * 0.15;
     const tp2 =
-      cond.type === "LONG" ? entryPrice + risk * 2.5 : entryPrice - risk * 2.5;
+      cond.type === "LONG" ? entryPrice + risk * 0.5 : entryPrice - risk * 0.5;
+
+    // 4.5 Trade Rejection (Reject if range is too small to cover fees + minimal profit)
+    const tp1DistPerc = (Math.abs(entryPrice - tp1) / entryPrice) * 100;
+    if (tp1DistPerc < 0.15) {
+      console.log(`[SNIPER] 🛡️ Entry Blocked: Trade range too narrow (${tp1DistPerc.toFixed(3)}%).`);
+      return;
+    }
 
     const trade: Trade = {
       id: Date.now().toString(),
