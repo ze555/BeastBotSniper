@@ -70,6 +70,15 @@ async function startServer() {
     res.json({ success: true, panicActive: active });
   });
 
+  app.post("/api/bot/reset", async (req, res) => {
+    try {
+      await sniper.resetStats();
+      res.json({ success: true, message: "Stats reset successfully" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
   app.get("/api/settings", (req, res) => {
     const settings = { ...sniper.getSettings() };
     // Mask sensitive keys

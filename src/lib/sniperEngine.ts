@@ -6,6 +6,7 @@ import {
   saveSettingsToDB,
   loadSettingsFromDB,
   initDB,
+  clearHistoryDB,
 } from "./db.js";
 import ccxt from "ccxt";
 import { CoreEngine } from "./engine/CoreEngine.js";
@@ -299,6 +300,14 @@ export class SniperEngine {
       openCount: this.activeTrades.size,
       totalTrades: closed.length,
     };
+  }
+
+  public async resetStats() {
+    await clearHistoryDB();
+    this.activeTrades.clear();
+    this.tradeHistory = [];
+    console.log("[SNIPER] 🧹 All trades and stats have been RESET.");
+    addLog("Full System Reset: All trades and stats cleared 🧹", "warn");
   }
 
   /**

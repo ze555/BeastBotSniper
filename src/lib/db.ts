@@ -367,3 +367,16 @@ export function loadSettingsFromDB(): Promise<any> {
   });
 }
 
+export function clearHistoryDB(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    db.run(`DELETE FROM trades`, (err) => {
+      if (err) {
+        console.error('[DB ERROR] Failed to clear trades:', err.message);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+

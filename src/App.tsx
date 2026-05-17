@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap } from 'lucide-react';
+import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap, RotateCcw } from 'lucide-react';
 import { SettingsView } from './components/SettingsView';
 
 export default function App() {
@@ -217,37 +217,35 @@ export default function App() {
     return -pnlPerc - (2 * feeImpactPerc);
   };
 
-  const displayStats = (() => {
+  const displayStats = React.useMemo(() => {
     if (!isInverse) return stats;
     
-    // Calculate display values for the visible history slice for table consistency
+    const feeRate = settings.tradingFeeRate || 0.001;
+
+    // Calculate display values for the history slice for precise Win Rate
+    // In Inverse: A trade is a WIN only if (-Gross - Fees) > 0
+    // Since pnl (original) = Gross - Fees => Gross = pnl + Fees
+    // Inverse PnL = - (pnl + Fees) - Fees = -pnl - 2*Fees
     const displayHistory = historyTrades.map(t => ({
       ...t,
-      displayPnL: getDisplayPnL(t.pnl || 0, t.amount || 0)
+      displayPnL: - (t.pnl || 0) - (2 * (t.amount || 0) * feeRate)
     }));
 
-    // For the total PnL in the header, we estimate based on the total stats from server
-    // Since we don't have individual fee data for ALL historical trades in the DB,
-    // we use an average fee estimation: TotalFees = TotalTrades * AvgAmount * FeeRate
-    const feeRate = settings.tradingFeeRate || 0.001;
-    const avgAmount = stats.totalTrades > 0 ? (historyTrades.reduce((acc, t) => acc + (t.amount || 0), 0) / (historyTrades.length || 1)) : 0;
-    const estimatedTotalFees = stats.totalTrades * avgAmount * feeRate;
-    
-    // Inverse Total PnL = - (Gross Total PnL) - Total Fees
-    // Gross Total PnL = stats.totalPnl + estimatedTotalFees
-    // Inverse Total PnL = - (stats.totalPnl + estimatedTotalFees) - estimatedTotalFees = -stats.totalPnl - 2*estimatedTotalFees
-    const totalPnl = -stats.totalPnl - (2 * estimatedTotalFees);
-    
-    // Win rate estimation for inverse
+    // Calculate win rate based on the processed history
     const wins = displayHistory.filter(t => t.displayPnL > 0).length;
     const winRate = historyTrades.length > 0 ? (wins / historyTrades.length) * 100 : (100 - stats.winRate);
+
+    // Total PnL calculation (Inverted and adjusted for fees)
+    const avgAmount = stats.totalTrades > 0 ? (historyTrades.reduce((acc, t) => acc + (t.amount || 0), 0) / (historyTrades.length || 1)) : 0;
+    const estimatedTotalFees = stats.totalTrades * avgAmount * feeRate;
+    const totalPnl = -stats.totalPnl - (2 * estimatedTotalFees);
 
     return {
       ...stats,
       totalPnl,
       winRate
     };
-  })();
+  }, [isInverse, stats, historyTrades, settings.tradingFeeRate]);
 
   const togglePanic = async () => {
     const newState = !panicActive;
@@ -262,6 +260,22 @@ export default function App() {
         setPanicActive(newState);
       }
     } catch(e) {}
+  };
+
+  const handleResetStats = async () => {
+    if (window.confirm('هل أنت متأكد من تصفير جميع الصفقات والأرباح؟ لا يمكن التراجع عن هذه الخطوة.')) {
+      try {
+        const res = await fetch('/api/bot/reset', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          fetchStats();
+          fetchHistory();
+          fetchActiveTrades();
+        }
+      } catch (e) {
+        console.error('Failed to reset stats:', e);
+      }
+    }
   };
 
   const manualRefreshScanner = async () => {
@@ -366,6 +380,14 @@ export default function App() {
                 <span className={`w-2 h-2 rounded-full ${settings.tradingMode === 'LIVE' ? 'bg-rose-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`}></span>
                 {settings.tradingMode === 'LIVE' ? '🚀 LIVE Trading Mode' : '🛡️ Paper Trading Mode'}
               </span>
+              <button
+                onClick={handleResetStats}
+                className="px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/50 hover:text-rose-400 text-xs font-bold transition-all flex items-center gap-2"
+                title="تصفير جميع الصفقات والارباح"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                تصفير البيانات
+              </button>
             </div>
           </header>
 
