@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap, RotateCcw } from 'lucide-react';
+import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap } from 'lucide-react';
 import { SettingsView } from './components/SettingsView';
 
 export default function App() {
@@ -217,35 +217,24 @@ export default function App() {
     return -pnlPerc - (2 * feeImpactPerc);
   };
 
-  const displayStats = React.useMemo(() => {
+  const displayStats = (() => {
     if (!isInverse) return stats;
     
-    const feeRate = settings.tradingFeeRate || 0.001;
-
-    // Calculate display values for the history slice for precise Win Rate
-    // In Inverse: A trade is a WIN only if (-Gross - Fees) > 0
-    // Since pnl (original) = Gross - Fees => Gross = pnl + Fees
-    // Inverse PnL = - (pnl + Fees) - Fees = -pnl - 2*Fees
     const displayHistory = historyTrades.map(t => ({
       ...t,
-      displayPnL: - (t.pnl || 0) - (2 * (t.amount || 0) * feeRate)
+      displayPnL: getDisplayPnL(t.pnl || 0, t.amount || 0)
     }));
 
-    // Calculate win rate based on the processed history
+    const totalPnl = displayHistory.reduce((acc, t) => acc + t.displayPnL, 0);
     const wins = displayHistory.filter(t => t.displayPnL > 0).length;
-    const winRate = historyTrades.length > 0 ? (wins / historyTrades.length) * 100 : (100 - stats.winRate);
-
-    // Total PnL calculation (Inverted and adjusted for fees)
-    const avgAmount = stats.totalTrades > 0 ? (historyTrades.reduce((acc, t) => acc + (t.amount || 0), 0) / (historyTrades.length || 1)) : 0;
-    const estimatedTotalFees = stats.totalTrades * avgAmount * feeRate;
-    const totalPnl = -stats.totalPnl - (2 * estimatedTotalFees);
+    const winRate = displayHistory.length > 0 ? (wins / displayHistory.length) * 100 : 0;
 
     return {
       ...stats,
       totalPnl,
       winRate
     };
-  }, [isInverse, stats, historyTrades, settings.tradingFeeRate]);
+  })();
 
   const togglePanic = async () => {
     const newState = !panicActive;
@@ -260,22 +249,6 @@ export default function App() {
         setPanicActive(newState);
       }
     } catch(e) {}
-  };
-
-  const handleResetStats = async () => {
-    if (window.confirm('هل أنت متأكد من تصفير جميع الصفقات والأرباح؟ لا يمكن التراجع عن هذه الخطوة.')) {
-      try {
-        const res = await fetch('/api/bot/reset', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-          fetchStats();
-          fetchHistory();
-          fetchActiveTrades();
-        }
-      } catch (e) {
-        console.error('Failed to reset stats:', e);
-      }
-    }
   };
 
   const manualRefreshScanner = async () => {
@@ -380,14 +353,6 @@ export default function App() {
                 <span className={`w-2 h-2 rounded-full ${settings.tradingMode === 'LIVE' ? 'bg-rose-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`}></span>
                 {settings.tradingMode === 'LIVE' ? '🚀 LIVE Trading Mode' : '🛡️ Paper Trading Mode'}
               </span>
-              <button
-                onClick={handleResetStats}
-                className="px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800 text-slate-400 hover:bg-rose-500/10 hover:border-rose-500/50 hover:text-rose-400 text-xs font-bold transition-all flex items-center gap-2"
-                title="تصفير جميع الصفقات والارباح"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                تصفير البيانات
-              </button>
             </div>
           </header>
 

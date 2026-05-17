@@ -70,15 +70,6 @@ async function startServer() {
     res.json({ success: true, panicActive: active });
   });
 
-  app.post("/api/bot/reset", async (req, res) => {
-    try {
-      await sniper.resetStats();
-      res.json({ success: true, message: "Stats reset successfully" });
-    } catch (e: any) {
-      res.status(500).json({ success: false, message: e.message });
-    }
-  });
-
   app.get("/api/settings", (req, res) => {
     const settings = { ...sniper.getSettings() };
     // Mask sensitive keys
@@ -109,6 +100,15 @@ async function startServer() {
   app.post("/api/settings", (req, res) => {
     sniper.updateSettings(req.body);
     res.json(sniper.getSettings());
+  });
+
+  app.post("/api/utils/reset-db", async (req, res) => {
+    try {
+      await sniper.resetData();
+      res.json({ success: true, message: "Database cleared successfully" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
   });
 
   app.get("/api/export", (req, res) => {

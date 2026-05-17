@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key
+  Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key, Trash2
 } from 'lucide-react';
 
 export function SettingsView({ 
@@ -42,6 +42,29 @@ export function SettingsView({
       setTestResult({ success: false, message: e.message || 'خطأ في الاتصال بالسيرفر' });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const [resetting, setResetting] = React.useState(false);
+  const [showResetConfirm, setShowResetConfirm] = React.useState(false);
+
+  const handleResetDB = async () => {
+    setResetting(true);
+    try {
+      const response = await fetch('/api/utils/reset-db', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        alert('تم مسح قاعدة البيانات بنجاح.');
+        setShowResetConfirm(false);
+        // Refresh page to clear local history in UI
+        window.location.reload();
+      } else {
+        alert('فشل المسح: ' + data.message);
+      }
+    } catch (e: any) {
+      alert('خطأ في الاتصال: ' + e.message);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -251,20 +274,58 @@ export function SettingsView({
             </div>
          </section>
 
-         {/* 5. Tactical Sub-Engines */}
-         <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl">
-            <div className="flex items-center justify-between mb-10 border-b border-slate-800 pb-6">
-               <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/20 rounded-2xl"><Cpu className="w-7 h-7 text-blue-400" /></div>
-                  <div>
-                     <h2 className="text-2xl font-black text-white">إعدادات محرك الاسكالبنج</h2>
-                     <p className="text-slate-500 text-sm mt-1">تحديد آليات الخروج السريع والملاحقة.</p>
-                  </div>
-               </div>
-            </div>
+          {/* 5. Tactical Sub-Engines */}
+          <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl">
+             <div className="flex items-center justify-between mb-10 border-b border-slate-800 pb-6">
+                <div className="flex items-center gap-4">
+                   <div className="p-3 bg-blue-500/20 rounded-2xl"><Cpu className="w-7 h-7 text-blue-400" /></div>
+                   <div>
+                      <h2 className="text-2xl font-black text-white">إعدادات محرك التداول</h2>
+                      <p className="text-slate-500 text-sm mt-1">تحديد آليات الدخول، الخروج، والفريمات الزمنية.</p>
+                   </div>
+                </div>
+             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-               {/* Quantum Engine Integrated */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* 📊 الخيار الطويل (Long Option) */}
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6 md:col-span-2 border-l-4 border-l-amber-500">
+                   <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                         <Settings className="w-8 h-8 text-amber-500" />
+                         <div>
+                            <h4 className="font-black text-amber-400 text-xl">📊 الخيار الطويل (Long-Term Mode)</h4>
+                            <p className="text-xs text-slate-400">تغيير الفريمات الزمنية من دقيقة إلى فريمات مؤسساتية (15م، 1س، 4س).</p>
+                         </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                         <span className={`text-[10px] font-bold px-2 py-1 rounded ${settings.isLongTerm ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-500'}`}>
+                            {settings.isLongTerm ? 'مُفعّل (مؤسساتي)' : 'مُعطّل (سكالبنج)'}
+                         </span>
+                         <input 
+                           type="checkbox" 
+                           checked={settings.isLongTerm} 
+                           onChange={e => setSettings({...settings, isLongTerm: e.target.checked})} 
+                           className="w-8 h-8 accent-amber-500 cursor-pointer" 
+                         />
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                       <div className="px-4 py-2 bg-slate-900/50 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-[10px] text-slate-500">الفريم الأساسي:</span>
+                          <span className="text-sm font-bold text-white">{settings.isLongTerm ? '15 دقيقة' : '1 دقيقة'}</span>
+                       </div>
+                       <div className="px-4 py-2 bg-slate-900/50 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-[10px] text-slate-500">فريم التحليل:</span>
+                          <span className="text-sm font-bold text-white">{settings.isLongTerm ? '1 ساعة' : '5 دقيقة'}</span>
+                       </div>
+                       <div className="px-4 py-2 bg-slate-900/50 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-[10px] text-slate-500">فريم الاتجاه:</span>
+                          <span className="text-sm font-bold text-white">{settings.isLongTerm ? '4 ساعات' : '15 دقيقة'}</span>
+                       </div>
+                   </div>
+                </div>
+
+                {/* Quantum Engine Integrated */}
                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6 md:col-span-2">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                      <div className="flex items-center gap-3">
@@ -389,6 +450,55 @@ export function SettingsView({
                {savingSettings ? 'جاري توظيف الذكاء المدمج...' : 'تثبيت الإعدادات في قلب النظام الكمي'}
             </button>
          </div>
+
+          {/* Maintenance Section */}
+          <section className="bg-slate-900/50 border border-slate-800/50 rounded-3xl p-8 md:p-10 shadow-xl opacity-80 hover:opacity-100 transition-opacity mb-20">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                 <div className="p-3 bg-rose-500/10 rounded-2xl border border-rose-500/20"><Trash2 className="w-6 h-6 text-rose-500" /></div>
+                 <div>
+                    <h2 className="text-xl font-black text-white">صيانة النظام (System Maintenance)</h2>
+                    <p className="text-slate-500 text-sm mt-1 text-right">إجراءات حساسة لمسح البيانات وإعادة الضبط.</p>
+                 </div>
+              </div>
+            </div>
+            
+            <div className="bg-rose-500/5 border border-rose-500/20 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+               <div className="space-y-1 text-center md:text-right">
+                  <h4 className="font-bold text-rose-400">مسح تاريخ التداول (Clear Trading History)</h4>
+                  <p className="text-[11px] text-slate-400">سيتم مسح جميع الصفقات المفتوحة والمغلقة من قاعدة البيانات. لن يتم لمس الإعدادات.</p>
+               </div>
+               
+               {!showResetConfirm ? (
+                 <button 
+                   type="button"
+                   onClick={() => setShowResetConfirm(true)}
+                   className="px-8 py-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-sm font-black transition-all active:scale-95 flex items-center gap-2"
+                 >
+                    <Trash2 className="w-4 h-4" />
+                    مسح بيانات التداول
+                 </button>
+               ) : (
+                 <div className="flex items-center gap-3 animate-in zoom-in-95 duration-200">
+                    <button 
+                      type="button"
+                      onClick={() => setShowResetConfirm(false)}
+                      className="px-4 py-2 bg-slate-800 text-slate-400 rounded-lg text-xs font-bold"
+                    >
+                       إلغاء
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={handleResetDB}
+                      className="px-6 py-2 bg-rose-600 text-white rounded-lg text-xs font-black shadow-lg shadow-rose-900/40 flex items-center gap-2"
+                    >
+                       {resetting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                       تأكيد المسح النهائي
+                    </button>
+                 </div>
+               )}
+            </div>
+          </section>
 
       </form>
     </div>

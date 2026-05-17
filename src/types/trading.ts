@@ -255,4 +255,5 @@ export interface BotSettings {
   // New Inverse Trailing Logic
   inverseTrailingEnabled?: boolean;
   inverseTrailingSensitivity?: number; // % reversal to trigger exit
+  isLongTerm?: boolean;                 // 📊 الخيار الطويل: تداول على فريمات زمنية أكبر (15م، 1س، 4س)
 }

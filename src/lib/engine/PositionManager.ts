@@ -51,30 +51,10 @@ export class PositionManager {
       return { action: 'CLOSE', reason: 'TAKE_PROFIT_2_HIT' };
     }
 
-    // 4. SL Hit & Trailing Logic
+    // 4. SL Hit
     const hitSl = trade.type === 'LONG' ? currentPrice <= trade.sl : currentPrice >= trade.sl;
     if (hitSl) {
       return { action: 'CLOSE', reason: 'STOP_LOSS_HIT' };
-    }
-
-    // [TRAILING SL - LOSer SYSTEM TWEAK]
-    // If trade is in profit (bot merit), trail the stop loss to secure some loss-prevention
-    // but keep it wide enough to allow pullbacks (expanding the range)
-    const trailTriggerPerc = 0.4; // 0.4% price change to start trailing
-    const trailDistancePerc = 0.8; // Distance to maintain from highest price
-
-    if (priceChangePerc > trailTriggerPerc) {
-      const highestPrice = trade.highestPrice || currentPrice;
-      const newSl = trade.type === 'LONG'
-        ? highestPrice * (1 - (trailDistancePerc / 100))
-        : highestPrice * (1 + (trailDistancePerc / 100));
-
-      // Only update if it moves SL in favor of the trade (closing the gap)
-      const betterSl = trade.type === 'LONG' ? newSl > trade.sl : newSl < trade.sl;
-      if (betterSl) {
-        newTrade.sl = newSl;
-        updated = true;
-      }
     }
 
     if (updated) {

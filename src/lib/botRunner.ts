@@ -2,6 +2,7 @@ import axios from 'axios';
 import { sniper } from './sniperEngine.js';
 import { getWatchlist } from './binanceScanner.js';
 import { MarketCondition, GlobalContext } from '../types/trading.js';
+import { getTimeframes } from './timeframeUtils.js';
 
 const BINANCE_FAPI = 'https://fapi.binance.com';
 let isRunning = false;
@@ -122,11 +123,12 @@ export async function runTradeLoop() {
 
               // 1. KINETIC DATA FETCHING
               if (settings.useKineticEngine) {
+                 const tfs = getTimeframes(!!settings.isLongTerm);
                  try {
                    const [oiRes, tkrRes, takerVRes] = await Promise.all([
                      axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${t.symbol}`, { timeout: 3000 }),
-                     axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=1m&limit=1`, { timeout: 3000 }),
-                     axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=5m&limit=1`, { timeout: 3000 })
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=${tfs.m1}&limit=1`, { timeout: 3000 }),
+                     axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 })
                    ]);
                    currentOI = parseFloat(oiRes.data.openInterest);
                    currentVol = parseFloat(tkrRes.data[0][5]);
@@ -149,8 +151,9 @@ export async function runTradeLoop() {
               const useWise = settings.useWiseExit;
               
               if ((useSmart || useWise) && (t.status === 'OPEN' || t.status === 'TP1_HIT')) {
+                 const tfs = getTimeframes(!!settings.isLongTerm);
                  try {
-                   const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=35`, { timeout: 4000 });
+                   const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=${tfs.m5}&limit=35`, { timeout: 4000 });
                    const klines = klinesRes.data;
                    
                    if (useWise) {
@@ -270,15 +273,16 @@ export async function runTradeLoop() {
             for (const coin of targetsToCheck) {
                 if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
 
+                const tfs = getTimeframes(!!settings.isLongTerm);
                 try {
                      // Try to get klines first
-                     const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=1m&limit=60`, { timeout: 4000 });
+                     const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
                      // Taker ratio fallback: Try to get it but don't fail if endpoint is dead
                      let takerRatio = 1.0;
                      try {
-                        const takerRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=5m&limit=1`, { timeout: 3000 });
+                        const takerRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 });
                         if (takerRes.data && takerRes.data.length > 0) {
                             const bv = parseFloat(takerRes.data[0].buyVol);
                             const sv = parseFloat(takerRes.data[0].sellVol);

@@ -2,6 +2,7 @@ import axios from 'axios';
 import { sniper } from './sniperEngine.js';
 import { EngineDecision } from '../types/trading.js';
 import { addLog } from './botRunner.js';
+import { getTimeframes } from './timeframeUtils.js';
 
 export interface ScannedCoin {
   symbol: string;
@@ -98,6 +99,9 @@ export async function runBinanceScanner() {
       const high = parseFloat(ticker.highPrice);
       const low = parseFloat(ticker.lowPrice);
       const volume = parseFloat(ticker.quoteVolume);
+      
+      const settings = sniper.getSettings();
+      const tfs = getTimeframes(!!settings.isLongTerm);
 
       // --- Filter 3: Volatility (>= 1.5%) ---
       const volatility = ((high - low) / low) * 100;
@@ -111,10 +115,10 @@ export async function runBinanceScanner() {
         spread = ((ask - bid) / bid) * 100;
       }
 
-      // Fetch Klines (15m) to calculate RVOL, EMA50, and Pump Exclusion
+      // Fetch Klines (HTF) to calculate RVOL, EMA50, and Pump Exclusion
       let klines;
       try {
-        const klineRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=51`, { timeout: 5000 });
+        const klineRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${symbol}&interval=${tfs.m15}&limit=51`, { timeout: 5000 });
         klines = klineRes.data;
       } catch (e: any) {
          continue; // skip on error

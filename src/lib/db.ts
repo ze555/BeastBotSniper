@@ -367,15 +367,33 @@ export function loadSettingsFromDB(): Promise<any> {
   });
 }
 
-export function clearHistoryDB(): Promise<void> {
+export function clearTrades(): Promise<void> {
   return new Promise((resolve, reject) => {
     db.run(`DELETE FROM trades`, (err) => {
       if (err) {
         console.error('[DB ERROR] Failed to clear trades:', err.message);
         reject(err);
       } else {
+        console.log('[DB] All trades cleared successfully.');
         resolve();
       }
+    });
+  });
+}
+
+export function clearAllData(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run(`DELETE FROM trades`);
+      db.run(`DELETE FROM settings`, (err) => {
+        if (err) {
+          console.error('[DB ERROR] Failed to clear all data:', err.message);
+          reject(err);
+        } else {
+          console.log('[DB] All database data cleared successfully.');
+          resolve();
+        }
+      });
     });
   });
 }

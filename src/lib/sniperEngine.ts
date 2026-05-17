@@ -6,7 +6,7 @@ import {
   saveSettingsToDB,
   loadSettingsFromDB,
   initDB,
-  clearHistoryDB,
+  clearTrades,
 } from "./db.js";
 import ccxt from "ccxt";
 import { CoreEngine } from "./engine/CoreEngine.js";
@@ -302,14 +302,6 @@ export class SniperEngine {
     };
   }
 
-  public async resetStats() {
-    await clearHistoryDB();
-    this.activeTrades.clear();
-    this.tradeHistory = [];
-    console.log("[SNIPER] 🧹 All trades and stats have been RESET.");
-    addLog("Full System Reset: All trades and stats cleared 🧹", "warn");
-  }
-
   /**
    * Evaluate a symbol against the new 7-layer architecture
    */
@@ -395,18 +387,14 @@ export class SniperEngine {
     // 1. Stop Loss Placement: Prioritize ATR for dynamic protection
     if (cond.atr && cond.atr > 0 && this.settings.useStrategyVolatilityRule) {
       let atrMultiplier = this.settings.strategyAtrMultiplier ?? 1.5;
-      // [LOSING SYSTEM TWEAK] - Expand SL to give losing trades more room
-      atrMultiplier *= 2.0; 
       if (this.settings.beastMode) atrMultiplier += 0.5;
       sl =
         cond.type === "LONG"
           ? entryPrice - cond.atr * atrMultiplier
           : entryPrice + cond.atr * atrMultiplier;
     } else {
-      // [LOSING SYSTEM TWEAK] - Expand SL distance
-      const fallbackDist = entryPrice * 0.03; // 3% fallback
       sl =
-        cond.type === "LONG" ? entryPrice - fallbackDist : entryPrice + fallbackDist;
+        cond.type === "LONG" ? cond.support * 0.999 : cond.resistance * 1.001;
     }
 
     // 2. Risk Engine Validation
@@ -438,19 +426,12 @@ export class SniperEngine {
       return;
     }
 
-    // 4. Take Profits (Narrowed to facilitate losing expectancy)
+    // 4. Take Profits
     const risk = Math.abs(entryPrice - sl);
     const tp1 =
-      cond.type === "LONG" ? entryPrice + risk * 0.15 : entryPrice - risk * 0.15;
+      cond.type === "LONG" ? entryPrice + risk * 0.8 : entryPrice - risk * 0.8;
     const tp2 =
-      cond.type === "LONG" ? entryPrice + risk * 0.5 : entryPrice - risk * 0.5;
-
-    // 4.5 Trade Rejection (Reject if range is too small to cover fees + minimal profit)
-    const tp1DistPerc = (Math.abs(entryPrice - tp1) / entryPrice) * 100;
-    if (tp1DistPerc < 0.15) {
-      console.log(`[SNIPER] 🛡️ Entry Blocked: Trade range too narrow (${tp1DistPerc.toFixed(3)}%).`);
-      return;
-    }
+      cond.type === "LONG" ? entryPrice + risk * 2.5 : entryPrice - risk * 2.5;
 
     const trade: Trade = {
       id: Date.now().toString(),
@@ -801,10 +782,13 @@ export class SniperEngine {
 
     // --- HARD TIME LIMIT EXIT (Max 3 hours to avoid dead money) ---
     const minutesOpenTrade = (Date.now() - trade.entryTime) / 60000;
-    if (minutesOpenTrade >= 180) {
-      // 3 Hours maximum
+    const timeLimitMultiplier = this.settings.isLongTerm ? 15 : 1;
+    const hardTimeLimit = 180 * timeLimitMultiplier;
+
+    if (minutesOpenTrade >= hardTimeLimit) {
+      // 3 Hours maximum (or ~45h in Long Term)
       console.log(
-        `[SNIPER] ⏱️ TRADE EXPIRED: ${trade.symbol} holding for over 3 hours without hitting TP/SL. Exiting now to free up capital.`,
+        `[SNIPER] ⏱️ TRADE EXPIRED: ${trade.symbol} holding for over ${hardTimeLimit / 60} hours without hitting TP/SL. Exiting now to free up capital.`,
       );
       await this.closeTrade(trade, currentPrice, "⏱️ TIME_LIMIT_EXIT");
       return;
@@ -881,17 +865,6 @@ export class SniperEngine {
       // benchmarkTp: يُستخدم كمرجع داخلي لنظام الوحش (Kinetic) لتنسيق سرعة الملاحقة، حتى لو كان الإغلاق التلقائي معطلاً
       const benchmarkTp = isTpDisabled ? 1.5 : rawTpInput;
       const baseTrailStart = this.settings.smartTrailingStartUsd ?? 0.4;
-      let smartTimeDelayLimit = this.settings.smartTimeDecayMinutes ?? 5;
-      let dynamicTrailThreshold =
-        this.settings.smartTrailingThresholdPerc ?? 0.3;
-      let momentumStallLimit = this.settings.smartMomentumStallMinutes ?? 2.5;
-
-      // 💀 NIGHTMARE UPGRADE: Aggressive Tightening
-      if (this.settings.isNightmareMode) {
-        dynamicTrailThreshold *= 0.8; // Be 20% more sensitive by default
-        momentumStallLimit *= 0.7; // Don't wait for stalls
-      }
-
       const minutesOpen = (Date.now() - trade.entryTime) / 60000;
       let liveVolatilityPerc = 0;
 
@@ -956,10 +929,22 @@ export class SniperEngine {
 
       // --- KINETIC ENGINE: DYNAMIC MODIFIERS (التكيف المطاطي) ---
 
+      const timeLimitMultiplier = this.settings.isLongTerm ? 15 : 1;
+      let smartTimeDelayLimit = (this.settings.smartTimeDecayMinutes ?? 5) * timeLimitMultiplier;
+      let dynamicTrailThreshold =
+        this.settings.smartTrailingThresholdPerc ?? 0.3;
+      let momentumStallLimit = (this.settings.smartMomentumStallMinutes ?? 2.5) * timeLimitMultiplier;
+
+      // 💀 NIGHTMARE UPGRADE: Aggressive Tightening
+      if (this.settings.isNightmareMode) {
+        dynamicTrailThreshold *= 0.8; // Be 20% more sensitive by default
+        momentumStallLimit *= 0.7; // Don't wait for stalls
+      }
+
       // 1. Elastic Shadow (الملاحقة المطاطية): Expand buffer if new/volatile, tighten if old
-      if (minutesOpen < 3 || liveVolatilityPerc > 0.5)
+      if (minutesOpen < 3 * timeLimitMultiplier || liveVolatilityPerc > 0.5)
         dynamicTrailThreshold *= 1.5;
-      else if (minutesOpen > 10) dynamicTrailThreshold *= 0.6;
+      else if (minutesOpen > 10 * timeLimitMultiplier) dynamicTrailThreshold *= 0.6;
 
       // 2. Open Interest & Volume Modifiers (المحركات الحية)
       if (this.settings.kineticUseOpenInterest) {
@@ -986,10 +971,10 @@ export class SniperEngine {
       if (
         liveVolatilityPerc > 0 &&
         liveVolatilityPerc < 0.03 &&
-        minutesOpen > 2
+        minutesOpen > 2 * timeLimitMultiplier
       ) {
         // Micro-structure is dead flat. Kill it much faster.
-        smartTimeDelayLimit = Math.min(smartTimeDelayLimit, 2);
+        smartTimeDelayLimit = Math.min(smartTimeDelayLimit, 2 * timeLimitMultiplier);
       } else if (liveVolatilityPerc > 0.4) {
         // Market is wild, give it extra time to bounce
         smartTimeDelayLimit *= 1.5;
@@ -1432,6 +1417,20 @@ export class SniperEngine {
     // --- BEAST MODE: NEURAL LEARNING & TRAP REVERSAL ---
     if (this.settings.beastMode) {
       this.handleBeastLearning(trade, exitPrice, reason);
+    }
+  }
+
+  public async resetData() {
+    try {
+      await clearTrades();
+      this.activeTrades.clear();
+      this.tradeHistory = [];
+      console.log("[SNIPER] 🧹 Database and memory cleared.");
+      addLog("Database and history cleared successfully", "info");
+    } catch (e: any) {
+      console.error("[SNIPER] ❌ Failed to clear database:", e.message);
+      addLog(`Failed to clear database: ${e.message}`, "error");
+      throw e;
     }
   }
 
