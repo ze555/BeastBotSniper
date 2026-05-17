@@ -94,7 +94,13 @@ export const initDB = () => {
           quantumVolThreshold REAL DEFAULT 1.02,
           quantumMomentumVol REAL DEFAULT 1.5,
           inverseTrailingEnabled INTEGER DEFAULT 0,
-          inverseTrailingSensitivity REAL DEFAULT 0.05
+          inverseTrailingSensitivity REAL DEFAULT 0.05,
+          quantumBeastMode INTEGER DEFAULT 0,
+          quantumSmartExit INTEGER DEFAULT 0,
+          quantumWiseEntry INTEGER DEFAULT 0,
+          quantumBeastAggression REAL DEFAULT 1.5,
+          quantumSmartExitAggression REAL DEFAULT 0.8,
+          quantumWiseEntryThreshold REAL DEFAULT 1.05
         )
       `);
       
@@ -151,7 +157,22 @@ export const initDB = () => {
         "binanceSecretKey TEXT",
         "tradingMode TEXT DEFAULT 'PAPER'",
         "inverseTrailingEnabled INTEGER DEFAULT 0",
-        "inverseTrailingSensitivity REAL DEFAULT 0.05"
+        "inverseTrailingSensitivity REAL DEFAULT 0.05",
+        "quantumTakerLongThresh REAL DEFAULT 1.01",
+        "quantumTakerShortThresh REAL DEFAULT 0.99",
+        "quantumMomentumLongThresh REAL DEFAULT 1.15",
+        "quantumMomentumShortThresh REAL DEFAULT 0.85",
+        "quantumTpScale REAL DEFAULT 1.0",
+        "quantumSlScale REAL DEFAULT 1.0",
+        "quantumUseReversion INTEGER DEFAULT 1",
+        "quantumUseMomentum INTEGER DEFAULT 1",
+        "isLongTerm INTEGER DEFAULT 0",
+        "quantumBeastMode INTEGER DEFAULT 0",
+        "quantumSmartExit INTEGER DEFAULT 0",
+        "quantumWiseEntry INTEGER DEFAULT 0",
+        "quantumBeastAggression REAL DEFAULT 1.5",
+        "quantumSmartExitAggression REAL DEFAULT 0.8",
+        "quantumWiseEntryThreshold REAL DEFAULT 1.05"
       ];
       
       let pending = newCols.length;
@@ -249,9 +270,13 @@ export function saveSettingsToDB(settings: any) {
       layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled,
       binanceApiKey, binanceSecretKey, tradingMode,
       quantumBbPeriod, quantumBbMultiplier, quantumVolThreshold, quantumMomentumVol,
-      inverseTrailingEnabled, inverseTrailingSensitivity
+      quantumTakerLongThresh, quantumTakerShortThresh, quantumMomentumLongThresh, quantumMomentumShortThresh,
+      quantumTpScale, quantumSlScale, quantumUseReversion, quantumUseMomentum,
+      quantumBeastMode, quantumSmartExit, quantumWiseEntry,
+      quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
+      inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -306,8 +331,23 @@ export function saveSettingsToDB(settings: any) {
       quantumBbMultiplier=excluded.quantumBbMultiplier,
       quantumVolThreshold=excluded.quantumVolThreshold,
       quantumMomentumVol=excluded.quantumMomentumVol,
+      quantumTakerLongThresh=excluded.quantumTakerLongThresh,
+      quantumTakerShortThresh=excluded.quantumTakerShortThresh,
+      quantumMomentumLongThresh=excluded.quantumMomentumLongThresh,
+      quantumMomentumShortThresh=excluded.quantumMomentumShortThresh,
+      quantumTpScale=excluded.quantumTpScale,
+      quantumSlScale=excluded.quantumSlScale,
+      quantumUseReversion=excluded.quantumUseReversion,
+      quantumUseMomentum=excluded.quantumUseMomentum,
+      quantumBeastMode=excluded.quantumBeastMode,
+      quantumSmartExit=excluded.quantumSmartExit,
+      quantumWiseEntry=excluded.quantumWiseEntry,
+      quantumBeastAggression=excluded.quantumBeastAggression,
+      quantumSmartExitAggression=excluded.quantumSmartExitAggression,
+      quantumWiseEntryThreshold=excluded.quantumWiseEntryThreshold,
       inverseTrailingEnabled=excluded.inverseTrailingEnabled,
-      inverseTrailingSensitivity=excluded.inverseTrailingSensitivity
+      inverseTrailingSensitivity=excluded.inverseTrailingSensitivity,
+      isLongTerm=excluded.isLongTerm
   `, [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.tradingFeeRate ?? 0.001, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
@@ -323,8 +363,14 @@ export function saveSettingsToDB(settings: any) {
     settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0,
     settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0,
     settings.binanceApiKey ?? null, settings.binanceSecretKey ?? null, settings.tradingMode ?? 'PAPER',
-    settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 1.8, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5,
-    settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05
+    settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 2.0, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5,
+    settings.quantumTakerLongThresh ?? 1.01, settings.quantumTakerShortThresh ?? 0.99, settings.quantumMomentumLongThresh ?? 1.15, settings.quantumMomentumShortThresh ?? 0.85,
+    settings.quantumTpScale ?? 1.0, settings.quantumSlScale ?? 1.0,
+    settings.quantumUseReversion !== false ? 1 : 0, settings.quantumUseMomentum !== false ? 1 : 0,
+    settings.quantumBeastMode ? 1 : 0, settings.quantumSmartExit ? 1 : 0, settings.quantumWiseEntry ? 1 : 0,
+    settings.quantumBeastAggression ?? 1.5, settings.quantumSmartExitAggression ?? 0.8, settings.quantumWiseEntryThreshold ?? 1.05,
+    settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05,
+    settings.isLongTerm ? 1 : 0
   ], (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
   });
@@ -361,6 +407,12 @@ export function loadSettingsFromDB(): Promise<any> {
         row.binanceSecretKey = row.binanceSecretKey || null;
         row.tradingMode = row.tradingMode || 'PAPER';
         row.inverseTrailingEnabled = row.inverseTrailingEnabled === 1;
+        row.isLongTerm = row.isLongTerm === 1;
+        row.quantumUseReversion = row.quantumUseReversion !== 0;
+        row.quantumUseMomentum = row.quantumUseMomentum !== 0;
+        row.quantumBeastMode = row.quantumBeastMode === 1;
+        row.quantumSmartExit = row.quantumSmartExit === 1;
+        row.quantumWiseEntry = row.quantumWiseEntry === 1;
         resolve(row);
       }
     });

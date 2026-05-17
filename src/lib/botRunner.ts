@@ -267,8 +267,8 @@ export async function runTradeLoop() {
 
         // Only use Quantum Scalper now
         try {
-            const { QuantumScalpEngine } = await import('./engine/QuantumScalpEngine.js');
-            const quantum = new QuantumScalpEngine();
+            const { QuantumEngine } = await import('./engine/QuantumEngine.js');
+            const quantum = new QuantumEngine();
 
             for (const coin of targetsToCheck) {
                 if (activeTrades.find(t => t.symbol === coin.symbol)) continue;

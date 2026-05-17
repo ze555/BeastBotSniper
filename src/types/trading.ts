@@ -246,11 +246,27 @@ export interface BotSettings {
   binanceSecretKey?: string;
   tradingMode?: 'PAPER' | 'LIVE';
 
-  // Quantum Scalp Engine Settings
+  // Quantum Engine Settings (Advanced Controls)
   quantumBbPeriod?: number;
   quantumBbMultiplier?: number;
   quantumVolThreshold?: number;
   quantumMomentumVol?: number;
+  quantumTakerLongThresh?: number;    // Default 1.01
+  quantumTakerShortThresh?: number;   // Default 0.99
+  quantumMomentumLongThresh?: number; // Default 1.15
+  quantumMomentumShortThresh?: number;// Default 0.85
+  quantumTpScale?: number;            // Multiplier for take profit
+  quantumSlScale?: number;            // Multiplier for stop loss
+  quantumUseReversion?: boolean;      // Default true
+  quantumUseMomentum?: boolean;       // Default true
+  quantumBeastMode?: boolean;         // 🐺 Beast Mode: Aggressive tuning
+  quantumSmartExit?: boolean;         // 🧠 Smart Exit: Intelligent target management
+  quantumWiseEntry?: boolean;         // 🛡️ Wise Entry: Strict reversal confirmation
+  
+  // Sensitivities for the above
+  quantumBeastAggression?: number;    // Multiplier for Beast Mode intensity (1.0 - 2.0)
+  quantumSmartExitAggression?: number;// How early to exit (0.5 - 1.0)
+  quantumWiseEntryThreshold?: number; // Taker ratio threshold for Wise Entry (1.05 - 1.20)
 
   // New Inverse Trailing Logic
   inverseTrailingEnabled?: boolean;

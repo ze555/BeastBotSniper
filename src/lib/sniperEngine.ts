@@ -835,10 +835,11 @@ export class SniperEngine {
       updated = true;
     }
 
-    // --- 🔄 INVERSE DYNAMIC TRAILING (ملاحقة السعر المعكوس) ---
+      // --- 🔄 INVERSE DYNAMIC TRAILING (ملاحقة السعر المعكوس) ---
     // إذا كان الخيار مفعلاً، الخروج عند ارتداد السعر ضد اتجاه ربح بايننس
     if (this.settings.inverseTrailingEnabled && trade.inverseBestPrice) {
-      const sensitivity = this.settings.inverseTrailingSensitivity || 0.05;
+      const isLongTerm = !!this.settings.isLongTerm;
+      const sensitivity = (this.settings.inverseTrailingSensitivity || 0.05) * (isLongTerm ? 4 : 1);
       
       // حساب نسبة الارتداد من "أفضل سعر وصل له ربح بايننس"
       const reversalPerc = trade.type === "LONG"
@@ -863,8 +864,11 @@ export class SniperEngine {
       const rawTpInput = this.settings.smartTpUsd ?? 1.5;
       const isTpDisabled = rawTpInput <= 0;
       // benchmarkTp: يُستخدم كمرجع داخلي لنظام الوحش (Kinetic) لتنسيق سرعة الملاحقة، حتى لو كان الإغلاق التلقائي معطلاً
-      const benchmarkTp = isTpDisabled ? 1.5 : rawTpInput;
-      const baseTrailStart = this.settings.smartTrailingStartUsd ?? 0.4;
+      const isLongTerm = !!this.settings.isLongTerm;
+      const ltMultiplier = isLongTerm ? 10 : 1; 
+
+      const benchmarkTp = (isTpDisabled ? 1.5 : rawTpInput) * ltMultiplier;
+      const baseTrailStart = (this.settings.smartTrailingStartUsd ?? 0.4) * ltMultiplier;
       const minutesOpen = (Date.now() - trade.entryTime) / 60000;
       let liveVolatilityPerc = 0;
 
@@ -929,10 +933,10 @@ export class SniperEngine {
 
       // --- KINETIC ENGINE: DYNAMIC MODIFIERS (التكيف المطاطي) ---
 
-      const timeLimitMultiplier = this.settings.isLongTerm ? 15 : 1;
+      const timeLimitMultiplier = isLongTerm ? 15 : 1;
       let smartTimeDelayLimit = (this.settings.smartTimeDecayMinutes ?? 5) * timeLimitMultiplier;
       let dynamicTrailThreshold =
-        this.settings.smartTrailingThresholdPerc ?? 0.3;
+        (this.settings.smartTrailingThresholdPerc ?? 0.3) * (isLongTerm ? 4 : 1); // 4x room for long term
       let momentumStallLimit = (this.settings.smartMomentumStallMinutes ?? 2.5) * timeLimitMultiplier;
 
       // 💀 NIGHTMARE UPGRADE: Aggressive Tightening
@@ -942,9 +946,9 @@ export class SniperEngine {
       }
 
       // 1. Elastic Shadow (الملاحقة المطاطية): Expand buffer if new/volatile, tighten if old
-      if (minutesOpen < 3 * timeLimitMultiplier || liveVolatilityPerc > 0.5)
-        dynamicTrailThreshold *= 1.5;
-      else if (minutesOpen > 10 * timeLimitMultiplier) dynamicTrailThreshold *= 0.6;
+      if (minutesOpen < 5 * timeLimitMultiplier || liveVolatilityPerc > 0.5)
+        dynamicTrailThreshold *= 1.8; // More room at start
+      else if (minutesOpen > 20 * timeLimitMultiplier) dynamicTrailThreshold *= 0.5; // Tighten after mature
 
       // 2. Open Interest & Volume Modifiers (المحركات الحية)
       if (this.settings.kineticUseOpenInterest) {
