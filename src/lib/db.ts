@@ -254,7 +254,7 @@ export function loadActiveTrades(): Promise<Trade[]> {
 }
 
 export function saveSettingsToDB(settings: any) {
-  db.run(`
+  const query = `
     INSERT INTO settings (
       id, portfolioSize, riskPerTradePerc, maxConcurrentTrades, leverage, tradingFeeRate, strictMode,
       strictMinVolume, strictMinRvol, strictMaxRisk, strictMinScore,
@@ -267,7 +267,8 @@ export function saveSettingsToDB(settings: any) {
       strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
       useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule,
       dynamicSafetyExit,
-      layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled,
+      layerGlobalContextEnabled, layerRegimeEnabled, layerBiasEnabled, 
+      layerLiquidityEnabled, layerMomentumEnabled, layerConfidenceEnabled, layerRiskEnabled,
       binanceApiKey, binanceSecretKey, tradingMode,
       quantumBbPeriod, quantumBbMultiplier, quantumVolThreshold, quantumMomentumVol,
       quantumTakerLongThresh, quantumTakerShortThresh, quantumMomentumLongThresh, quantumMomentumShortThresh,
@@ -276,7 +277,7 @@ export function saveSettingsToDB(settings: any) {
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
       inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -348,7 +349,9 @@ export function saveSettingsToDB(settings: any) {
       inverseTrailingEnabled=excluded.inverseTrailingEnabled,
       inverseTrailingSensitivity=excluded.inverseTrailingSensitivity,
       isLongTerm=excluded.isLongTerm
-  `, [
+  `;
+
+  const values = [
     settings.portfolioSize, settings.riskPerTradePerc, settings.maxConcurrentTrades, settings.leverage ?? 10, settings.tradingFeeRate ?? 0.001, settings.strictMode ? 1 : 0,
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
     settings.strictBtcAlignment ? 1 : 0, settings.strictRsiFilter ? 1 : 0, settings.strictRetest ? 1 : 0, settings.strictFastBreakevenPerc ?? 0.75,
@@ -371,7 +374,9 @@ export function saveSettingsToDB(settings: any) {
     settings.quantumBeastAggression ?? 1.5, settings.quantumSmartExitAggression ?? 0.8, settings.quantumWiseEntryThreshold ?? 1.05,
     settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05,
     settings.isLongTerm ? 1 : 0
-  ], (err) => {
+  ];
+
+  db.run(query, values, (err) => {
     if (err) console.error('[DB ERROR] Failed to save settings:', err.message);
   });
 }
