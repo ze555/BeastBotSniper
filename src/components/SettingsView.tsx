@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key
+  Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key, TrendingDown
 } from 'lucide-react';
 
 export function SettingsView({ 
@@ -374,6 +374,28 @@ export function SettingsView({
                         </p>
                      </div>
                   </div>
+               </div>
+
+               {/* Minimal Profit Mode (وضع الربح الأدنى) */}
+               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                     <div className="flex items-center gap-3">
+                        <TrendingDown className="w-6 h-6 text-orange-500" />
+                        <div>
+                           <h4 className="font-black text-orange-400">وضع الربح الأدنى (Minimal Profit Mode)</h4>
+                           <p className="text-[10px] text-slate-500">تقليل الأرباح للحد الأدنى وزيادة الخسائر (تحكم عبر الـ TP).</p>
+                        </div>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold ${settings.minProfitMode ? 'text-orange-500' : 'text-slate-500'}`}>
+                           {settings.minProfitMode ? 'نَشِط 🔥' : 'مُعطل'}
+                        </span>
+                        <input type="checkbox" checked={settings.minProfitMode || false} onChange={e => setSettings({...settings, minProfitMode: e.target.checked})} className="w-6 h-6 accent-orange-500" />
+                     </div>
+                  </div>
+                  <p className="text-[9px] text-slate-500 leading-relaxed text-right">
+                     عند التفعيل: سيقوم النظام بضبط هدف الربح (Take Profit) عند أدنى مستوى ممكن (قرب الدخول) لتقليل النتائج الإيجابية وزيادة احتمالية الخروج بخسارة الرسوم أو وقف الخسارة.
+                  </p>
                </div>
             </div>
          </section>

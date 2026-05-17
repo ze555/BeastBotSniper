@@ -72,6 +72,7 @@ export class SniperEngine {
     layerRiskEnabled: true,
     inverseTrailingEnabled: false,
     inverseTrailingSensitivity: 0.05,
+    minProfitMode: false,
   };
 
   constructor() {
@@ -249,6 +250,7 @@ export class SniperEngine {
             layerMomentumEnabled: dbSettings.layerMomentumEnabled ?? true,
             layerConfidenceEnabled: dbSettings.layerConfidenceEnabled ?? true,
             layerRiskEnabled: dbSettings.layerRiskEnabled ?? true,
+            minProfitMode: dbSettings.minProfitMode ?? false,
           };
         }
         console.log("[SNIPER] Loaded settings from database", this.settings);
@@ -436,10 +438,20 @@ export class SniperEngine {
 
     // 4. Take Profits
     const risk = Math.abs(entryPrice - sl);
-    const tp1 =
+    let tp1 =
       cond.type === "LONG" ? entryPrice + risk * 0.8 : entryPrice - risk * 0.8;
-    const tp2 =
+    let tp2 =
       cond.type === "LONG" ? entryPrice + risk * 2.5 : entryPrice - risk * 2.5;
+
+    // --- 📉 MINIMAL PROFIT MODE OVERRIDE ---
+    if (this.settings.minProfitMode) {
+      // Set TP1 so close that it barely covers fees or results in tiny profit
+      // 0.02% offset is usually enough for a target that "fails" to make significant profit
+      const offset = entryPrice * 0.0002; 
+      tp1 = cond.type === "LONG" ? entryPrice + offset : entryPrice - offset;
+      tp2 = tp1; // Push both targets to the minimal level
+      console.log(`[SNIPER] 📉 MINIMAL PROFIT MODE: Overriding TP on ${cond.symbol} to target minimal gain.`);
+    }
 
     const trade: Trade = {
       id: Date.now().toString(),
@@ -517,14 +529,22 @@ export class SniperEngine {
       cond.type === "LONG" ? entryPrice - slDistance : entryPrice + slDistance;
 
     const tp1Distance = (tpPerc / 100) * entryPrice;
-    const tp1 =
+    let tp1 =
       cond.type === "LONG"
         ? entryPrice + tp1Distance
         : entryPrice - tp1Distance;
-    const tp2 =
+    let tp2 =
       cond.type === "LONG"
         ? entryPrice + tp1Distance * 2.5
         : entryPrice - tp1Distance * 2.5;
+
+    // --- 📉 MINIMAL PROFIT MODE OVERRIDE (QUANTUM) ---
+    if (this.settings.minProfitMode) {
+      const offset = entryPrice * 0.0002;
+      tp1 = cond.type === "LONG" ? entryPrice + offset : entryPrice - offset;
+      tp2 = tp1;
+      console.log(`[QUANTUM] 📉 MINIMAL PROFIT MODE: Overriding TP on ${cond.symbol}`);
+    }
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;

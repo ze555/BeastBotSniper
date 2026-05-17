@@ -217,22 +217,26 @@ export default function App() {
     return -pnlPerc - (2 * feeImpactPerc);
   };
 
+  const displayHistory = React.useMemo(() => {
+    if (!isInverse) return historyTrades;
+    return historyTrades.map(t => {
+      const feeRate = settings.tradingFeeRate || 0.001;
+      const totalFees = (t.amount || 0) * feeRate;
+      const invPnL = - (t.pnl || 0) - (2 * totalFees);
+      const leverage = (t as any).leverage || 10;
+      const margin = (t.amount || 0) / leverage;
+      const invPnLPerc = margin > 0 ? (invPnL / margin) * 100 : 0;
+      return { ...t, displayPnL: invPnL, displayPnLPerc: invPnLPerc };
+    });
+  }, [historyTrades, isInverse, settings.tradingFeeRate]);
+
   const displayStats = React.useMemo(() => {
     if (!isInverse) return stats;
     
     const feeRate = settings.tradingFeeRate || 0.001;
 
-    // Calculate display values for the history slice for precise Win Rate
-    // In Inverse: A trade is a WIN only if (-Gross - Fees) > 0
-    // Since pnl (original) = Gross - Fees => Gross = pnl + Fees
-    // Inverse PnL = - (pnl + Fees) - Fees = -pnl - 2*Fees
-    const displayHistory = historyTrades.map(t => ({
-      ...t,
-      displayPnL: - (t.pnl || 0) - (2 * (t.amount || 0) * feeRate)
-    }));
-
     // Calculate win rate based on the processed history
-    const wins = displayHistory.filter(t => t.displayPnL > 0).length;
+    const wins = displayHistory.filter((t: any) => t.displayPnL > 0).length;
     const winRate = historyTrades.length > 0 ? (wins / historyTrades.length) * 100 : (100 - stats.winRate);
 
     // Total PnL calculation (Inverted and adjusted for fees)
@@ -245,7 +249,7 @@ export default function App() {
       totalPnl,
       winRate
     };
-  }, [isInverse, stats, historyTrades, settings.tradingFeeRate]);
+  }, [isInverse, stats, historyTrades, settings.tradingFeeRate, displayHistory]);
 
   const togglePanic = async () => {
     const newState = !panicActive;
@@ -653,11 +657,11 @@ export default function App() {
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
-                        {historyTrades.length === 0 ? (
+                        {displayHistory.length === 0 ? (
                            <tr>
                              <td colSpan={9} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد.</td>
                            </tr>
-                        ) : historyTrades.map((t, i) => (
+                        ) : displayHistory.map((t: any, i) => (
                            <tr key={i} className="hover:bg-slate-700/20">
                               <td className="px-5 py-4 font-bold font-mono text-slate-100">{t.symbol}</td>
                               <td className="px-5 py-4">
@@ -685,15 +689,15 @@ export default function App() {
                               <td className="px-5 py-4 font-mono text-slate-400">{(t as any).leverage || 10}x</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice).toFixed(4)}</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.exitPrice).toFixed(4)}</td>
-                              <td className={`px-5 py-4 font-mono font-bold ${getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) > 0 ? 'text-emerald-400' : getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
-                                {getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) > 0 ? '+' : ''}{getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10)?.toFixed(2)}%
+                              <td className={`px-5 py-4 font-mono font-bold ${(isInverse ? t.displayPnLPerc : (t.pnlPerc || 0)) > 0 ? 'text-emerald-400' : (isInverse ? t.displayPnLPerc : (t.pnlPerc || 0)) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
+                                {(isInverse ? t.displayPnLPerc : (t.pnlPerc || 0)) > 0 ? '+' : ''}{(isInverse ? t.displayPnLPerc : (t.pnlPerc || 0))?.toFixed(2)}%
                               </td>
-                              <td className={`px-5 py-4 font-mono ${getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'text-emerald-400' : getDisplayPnL(t.pnl || 0, t.amount || 0) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
-                                {getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? '+' : ''}${getDisplayPnL(t.pnl || 0, t.amount || 0)?.toFixed(2)}
+                              <td className={`px-5 py-4 font-mono ${(isInverse ? t.displayPnL : (t.pnl || 0)) > 0 ? 'text-emerald-400' : (isInverse ? t.displayPnL : (t.pnl || 0)) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
+                                {(isInverse ? t.displayPnL : (t.pnl || 0)) > 0 ? '+' : ''}${(isInverse ? t.displayPnL : (t.pnl || 0))?.toFixed(2)}
                               </td>
                               <td className="px-5 py-4">
-                                <span className={`px-2 py-1 text-[10px] rounded ${getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                                  {getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
+                                <span className={`px-2 py-1 text-[10px] rounded ${(isInverse ? t.displayPnL : (t.pnl || 0)) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || (isInverse ? t.displayPnL : (t.pnl || 0)) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                  {(isInverse ? t.displayPnL : (t.pnl || 0)) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || (isInverse ? t.displayPnL : (t.pnl || 0)) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
                                 </span>
                               </td>
                            </tr>
