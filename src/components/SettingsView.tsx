@@ -1,7 +1,8 @@
 import React from 'react';
 import { 
   Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key, Trash2,
-  ChevronDown, ChevronUp, Gauge, History, BarChart3, Activity, Flame, Shield, Skull
+  ChevronDown, ChevronUp, Gauge, History, BarChart3, Activity, Flame, Shield, Skull,
+  Waves, ShieldAlert, AlertTriangle
 } from 'lucide-react';
 
 export function SettingsView({ 
@@ -21,6 +22,7 @@ export function SettingsView({
   STRATEGY_TEMPLATES: any[], 
   intensity: any 
 }) {
+  const [activeTab, setActiveTab] = React.useState<'account' | 'risk' | 'entry' | 'exit' | 'tuning'>('account');
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{success: boolean, message: string} | null>(null);
   const [serverIp, setServerIp] = React.useState<string | null>(null);
@@ -48,8 +50,6 @@ export function SettingsView({
 
   const [resetting, setResetting] = React.useState(false);
   const [showResetConfirm, setShowResetConfirm] = React.useState(false);
-  const [showAdvancedQuantum, setShowAdvancedQuantum] = React.useState(false);
-  const [showFusion, setShowFusion] = React.useState(false);
 
   const handleResetDB = async () => {
     setResetting(true);
@@ -57,163 +57,92 @@ export function SettingsView({
       const response = await fetch('/api/utils/reset-db', { method: 'POST' });
       const data = await response.json();
       if (data.success) {
-        alert('تم مسح قاعدة البيانات بنجاح.');
-        setShowResetConfirm(false);
-        // Refresh page to clear local history in UI
+        alert('تم المسح بنجاح.');
         window.location.reload();
-      } else {
-        alert('فشل المسح: ' + data.message);
       }
-    } catch (e: any) {
-      alert('خطأ في الاتصال: ' + e.message);
     } finally {
       setResetting(false);
     }
   };
 
+  const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
+    <button
+      type="button"
+      onClick={() => setActiveTab(id)}
+      className={`flex items-center gap-2 px-6 py-4 border-b-2 font-bold transition-all shrink-0 ${
+        activeTab === id 
+          ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5' 
+          : 'border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+      }`}
+    >
+      <Icon className="w-5 h-5" />
+      {label}
+    </button>
+  );
+
   return (
-    <div className="max-w-6xl mx-auto space-y-12 animate-in fade-in duration-700 pb-40">
+    <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-700 pb-40" dir="rtl">
       
-      {/* 1. Header & Mission Description */}
-      <div className="text-center space-y-4 pt-6">
-         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-widest mb-2">
-            Quantum Scalping Engine V1.0 (True Edge)
-         </div>
-         <h1 className="text-4xl md:text-5xl font-black text-white flex justify-center items-center gap-4">
-             <BrainCircuit className="w-12 h-12 text-emerald-400 animate-pulse" />
-             النظام الكمي السريع (الاسكالبنج المؤسساتي)
-         </h1>
-         <p className="text-slate-400 max-w-3xl mx-auto text-base md:text-lg leading-relaxed">
-            تم إلغاء كل تعقيدات النظام القديم والطبقات البطيئة بناءً على طلبك. النظام الآن يبحث عن فرص حقيقية وفروق أسعار فورية على فريم (1 دقيقة) لدخول صفقات سريعة وكثيرة مستنداً على 
-            الانحراف المعياري (Bollinger Bands) وضغط الشراء (Taker Ratio).
-         </p>
+      {/* Advanced Header */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="flex items-center gap-6">
+          <div className="relative">
+            <div className="w-20 h-20 bg-emerald-500/20 rounded-2xl flex items-center justify-center border border-emerald-500/30 text-emerald-400 shadow-[0_0_20px_-10px_rgba(16,185,129,0.5)]">
+              <BrainCircuit className="w-10 h-10 animate-pulse" />
+            </div>
+            <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-black px-2 py-1 rounded-full animate-bounce shadow-lg">V1.5 PRO</div>
+          </div>
+          <div className="text-right">
+            <h1 className="text-3xl font-black text-white">مركز التحكم المتقدم</h1>
+            <p className="text-slate-500 text-sm mt-1">تنسيق الأنظمة، ضبط الحساسية، وإدارة المخاطر المؤسساتية.</p>
+          </div>
+        </div>
+        <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+          <button type="button" onClick={() => setSettings({...settings, tradingMode: 'PAPER'})} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${settings.tradingMode === 'PAPER' ? 'bg-emerald-500 text-white' : 'text-slate-500 hover:text-slate-300'}`}>TRIAL</button>
+          <button type="button" onClick={() => setSettings({...settings, tradingMode: 'LIVE'})} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${settings.tradingMode === 'LIVE' ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'text-slate-500 hover:text-rose-400'}`}>LIVE EXECUTION</button>
+        </div>
       </div>
 
-      <form onSubmit={saveSettings} className="space-y-12">
-         
-         {/* 0. Binance Live Connection */}
-         <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl relative overflow-hidden">
-            <div className={`absolute inset-0 bg-rose-500/5 pointer-events-none transition-opacity ${settings.tradingMode === 'LIVE' ? 'opacity-100' : 'opacity-0'}`}></div>
-            <div className="flex items-center justify-between mb-10 border-b border-slate-800 pb-6 relative z-10">
-               <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-2xl transition-all ${settings.tradingMode === 'LIVE' ? 'bg-rose-500/20' : 'bg-slate-800'}`}><Key className={`w-7 h-7 ${settings.tradingMode === 'LIVE' ? 'text-rose-400' : 'text-slate-400'}`} /></div>
-               <div>
-                  <h2 className="text-2xl font-black text-white">ربط منصة بايننس (Binance Live)</h2>
-                  <div className="flex items-center gap-2 mt-1">
-                     <p className="text-slate-500 text-sm">تداول حقيقي باستخدام مفاتيح الـ API أو متغيرات البيئة (.env).</p>
-                     <span className="px-2 py-0.5 bg-rose-500/20 text-rose-400 text-[10px] font-black rounded-lg border border-rose-500/30 animate-pulse">
-                        وضع التداول المعاكس (INVERSE) نَشِط 🔄
-                     </span>
+      <form onSubmit={saveSettings} className="space-y-8">
+        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+          {/* Navigation Tabs */}
+          <div className="flex overflow-x-auto border-b border-slate-800 bg-slate-900/80 backdrop-blur-xl sticky top-0 z-20 no-scrollbar">
+            <TabButton id="account" label="الحساب والربط" icon={Key} />
+            <TabButton id="risk" label="إدارة المخاطر" icon={ShieldCheck} />
+            <TabButton id="entry" label="محركات الدخول" icon={Zap} />
+            <TabButton id="exit" label="دروع الخروج" icon={Shield} />
+            <TabButton id="tuning" label="المعايرة الفنية" icon={Gauge} />
+          </div>
+
+          <div className="p-8 md:p-10 min-h-[500px]">
+            {/* 1. Account & Connectivity */}
+            {activeTab === 'account' && (
+              <div className="space-y-10 animate-in slide-in-from-left-4 duration-300">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-right">
+                  <div className="space-y-3">
+                    <label className="text-slate-310 text-sm font-bold">Binance API Key</label>
+                    <input type="password" placeholder="لاستخدام .env اتركه فارغاً..." className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-emerald-400 font-mono focus:border-emerald-500 outline-none transition-all text-left" value={settings.binanceApiKey || ''} onChange={e => setSettings({...settings, binanceApiKey: e.target.value})} />
                   </div>
-               </div>
-               </div>
-               <div className="flex gap-2">
-                  <button 
-                    type="button"
-                    onClick={() => setSettings({...settings, tradingMode: 'PAPER'})}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${settings.tradingMode === 'PAPER' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-500 hover:bg-slate-700'}`}
-                  >
-                     وضع التجريبي (PAPER)
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setSettings({...settings, tradingMode: 'LIVE'})}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${settings.tradingMode === 'LIVE' ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'bg-slate-800 text-slate-500 hover:bg-rose-700 hover:text-white'}`}
-                  >
-                     وضع الحقيقي (LIVE)
-                  </button>
-               </div>
-            </div>
-
-            <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10 transition-all ${settings.tradingMode === 'LIVE' ? 'opacity-100' : 'opacity-50'}`}>
-               <div className="space-y-3">
-                  <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
-                     Binance API Key
-                  </label>
-                  <input 
-                    type="password" 
-                    placeholder="أدخل مفتاح الـ API هنا (أو اتركه فارغاً لاستخدام .env)..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-slate-300 font-mono focus:border-rose-500 outline-none transition-all" 
-                    value={settings.binanceApiKey || ''} 
-                    onChange={e => setSettings({...settings, binanceApiKey: e.target.value})} 
-                  />
-               </div>
-
-               <div className="space-y-3">
-                  <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
-                     Binance Secret Key
-                  </label>
-                  <input 
-                    type="password" 
-                    placeholder="أدخل المفتاح السري هنا (أو اتركه فارغاً لاستخدام .env)..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-slate-300 font-mono focus:border-rose-500 outline-none transition-all" 
-                    value={settings.binanceSecretKey || ''} 
-                    onChange={e => setSettings({...settings, binanceSecretKey: e.target.value})} 
-                  />
-               </div>
-            </div>
-            
-            <div className="mt-8 flex flex-wrap items-center gap-4 relative z-10">
-               <button
-                  type="button"
-                  onClick={handleTestConnection}
-                  disabled={testing}
-                  className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl text-sm font-bold flex items-center gap-3 transition-all border border-slate-700 active:scale-95 disabled:opacity-50"
-               >
-                  {testing ? <RefreshCw className="w-4 h-4 animate-spin text-rose-400" /> : <Zap className="w-4 h-4 text-rose-400" />}
-                  فحص الاتصال بمنصة بايننس
-               </button>
-
-               {testResult && (
-                  <div className="flex flex-col gap-2 w-full">
-                     <div className={`px-4 py-3 rounded-2xl border text-sm font-bold flex items-center gap-3 animate-in slide-in-from-left duration-300 ${
-                        testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                     }`}>
-                        {testResult.success ? <ShieldCheck className="w-5 h-5" /> : <Zap className="w-5 h-5 animate-pulse" />}
-                        {testResult.message}
-                     </div>
-                     {!testResult.success && testResult.message.includes('-2015') && (
-                        <div className="px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-[10px] text-slate-400 space-y-1">
-                           <p className="text-rose-400 font-bold">حلول مقترحة لخطأ API Key / IP:</p>
-                           <ul className="list-disc list-inside">
-                              <li>تأكد من تفعيل <span className="text-white italic">Enable Futures</span> في إعدادات API بايننس.</li>
-                              <li>إذا كنت تستخدم Railway، تأكد من تعطيل <span className="text-white italic">Unrestricted IP Access</span> أو إضافة الـ IP الصحيح.</li>
-                              {serverIp && (
-                                <li className="text-emerald-400 font-bold">
-                                  عنوان IP السيرفر الحالي: <span className="underline select-all">{serverIp}</span> (انسخه وضعه في بايننس)
-                                </li>
-                              )}
-                              <li>تأكد من شحن رصيد USDT في محفظة <span className="text-white italic">Futures</span> وليس Spot.</li>
-                           </ul>
-                        </div>
-                     )}
+                  <div className="space-y-3">
+                    <label className="text-slate-310 text-sm font-bold">Binance Secret Key</label>
+                    <input type="password" placeholder="لاستخدام .env اتركه فارغاً..." className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-emerald-400 font-mono focus:border-emerald-500 outline-none transition-all text-left" value={settings.binanceSecretKey || ''} onChange={e => setSettings({...settings, binanceSecretKey: e.target.value})} />
                   </div>
-               )}
-            </div>
-
-            {serverIp && !testResult && (
-              <div className="mt-4 px-4 py-2 bg-slate-800/30 border border-slate-800 rounded-xl inline-flex items-center gap-3 text-[10px] text-slate-400">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                عنوان IP السيرفر (للإضافة في بايننس): <span className="text-white font-mono font-bold select-all">{serverIp}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-4 border-t border-slate-800 pt-8 justify-end">
+                  {serverIp && <div className="text-[10px] text-slate-500 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">IP السيرفر: <span className="text-white font-mono select-all">{serverIp}</span></div>}
+                  <button type="button" onClick={handleTestConnection} disabled={testing} className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl text-sm font-black flex items-center gap-3 transition-all">
+                    {testing ? <RefreshCw className="animate-spin text-rose-400 w-5 h-5" /> : <Zap className="text-rose-400 w-5 h-5" />}
+                    فحص الاتصال المباشر
+                  </button>
+                  {testResult && (
+                    <div className={`px-6 py-4 rounded-2xl border text-sm font-bold flex items-center gap-3 ${testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'}`}>
+                      {testResult.success ? <ShieldCheck className="w-5 h-5" /> : <Skull className="w-5 h-5" />}
+                      {testResult.message}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-
-            {settings.tradingMode === 'LIVE' && (
-              <div className="mt-8 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-4 relative z-10">
-                 <Zap className="w-6 h-6 text-amber-400 shrink-0 mt-1" />
-                 <div className="space-y-2">
-                    <p className="text-xs text-amber-300 leading-relaxed font-bold">
-                       تنبيه: أنت في وضع التداول الحقيقي (LIVE). 
-                    </p>
-                    <ul className="text-[10px] text-amber-300/70 list-disc list-inside space-y-1">
-                       <li>تأكد من تفعيل صلاحيات Futures فقط في إعدادات API بايننس.</li>
-                       <li>لا تقم بتفعيل صلاحيات السحب (Withdrawal) لأي سبب.</li>
-                       <li>يفضل قصر الوصول على عنوان IP الخاص بالسيرفر لزيادة الأمان.</li>
-                    </ul>
-                 </div>
-              </div>
-            )}
-         </section>
          
          {/* 3. Layer 0: Core Risk Setup */}
          <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl">
@@ -296,425 +225,176 @@ export function SettingsView({
             </div>
          </section>
 
-          {/* 5. Quantum Core System */}
-          <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl relative overflow-hidden">
-             <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl -mr-32 -mt-32"></div>
-             <div className="flex items-center justify-between mb-10 border-b border-slate-800 pb-6 relative z-10">
-                <div className="flex items-center gap-4">
-                   <div className="p-3 bg-purple-500/20 rounded-2xl"><Cpu className="w-7 h-7 text-purple-400" /></div>
-                   <div>
-                      <h2 className="text-2xl font-black text-white">النظام الكمي الموحد (Quantum Core)</h2>
-                      <p className="text-slate-500 text-sm mt-1">محرك ذكاء اصطناعي موحد يدير الفريمات والسيولة والملاحقة.</p>
-                   </div>
-                </div>
-             </div>
-             
-             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 relative z-10">
-                
-                {/* 📊 Mode Selection */}
-                <div className="lg:col-span-3 bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 border-l-4 border-l-purple-500">
-                   <div className="space-y-1">
-                      <h4 className="font-black text-white text-lg">وضعية التشغيل (System Mode)</h4>
-                      <p className="text-xs text-slate-500">اختر بين الاسكالبنج السريع (1د) أو التداول المؤسساتي المستقر (15د/1س).</p>
-                   </div>
-                   <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 w-full md:w-auto">
-                      <button 
-                         type="button"
-                         onClick={() => setSettings({...settings, isLongTerm: false})}
-                         className={`flex-1 md:px-8 py-3 rounded-lg text-xs font-black transition-all ${!settings.isLongTerm ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                         اسكالبنج سريع (SCALP)
-                      </button>
-                      <button 
-                         type="button"
-                         onClick={() => setSettings({...settings, isLongTerm: true})}
-                         className={`flex-1 md:px-8 py-3 rounded-lg text-xs font-black transition-all ${settings.isLongTerm ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                         تداول مستقر (LONG)
-                      </button>
-                   </div>
+             {/* 3. Entry Engines */}
+            {activeTab === 'entry' && (
+              <div className="space-y-10 animate-in slide-in-from-left-4 duration-300 text-right">
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex items-center justify-between gap-6 border-r-4 border-r-purple-500">
+                  <div className="space-y-1">
+                    <h4 className="font-black text-white text-lg">وضعية التداول الموحدة</h4>
+                    <p className="text-xs text-slate-500">اختر بين الاسكالبنج السريع (1 دقيقة) أو التداول الاستراتيجي (15 دقيقة فما فوق).</p>
+                  </div>
+                  <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
+                    <button type="button" onClick={() => setSettings({...settings, isLongTerm: false})} className={`px-8 py-3 rounded-lg text-xs font-black transition-all ${!settings.isLongTerm ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>SCALP (1M)</button>
+                    <button type="button" onClick={() => setSettings({...settings, isLongTerm: true})} className={`px-8 py-3 rounded-lg text-xs font-black transition-all ${settings.isLongTerm ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>STRATEGIC (15M+)</button>
+                  </div>
                 </div>
 
-                {/* 🧠 Quantum Sensitivity */}
-                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6">
-                   <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4">
-                      <BrainCircuit className="w-5 h-5 text-purple-400" />
-                      <h4 className="font-black text-white text-sm uppercase">حساسية المحرك (Indicators)</h4>
-                   </div>
-                   <div className="space-y-4">
-                      <div className="space-y-1">
-                         <label className="text-[10px] font-bold text-slate-500 uppercase">مضاعف النطاق (BB Multiplier)</label>
-                         <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-purple-400 font-mono text-sm" value={settings.quantumBbMultiplier ?? 2.0} onChange={e => setSettings({...settings, quantumBbMultiplier: parseFloat(e.target.value)})} />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6">
+                    <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4">
+                      <Cpu className="w-5 h-5 text-purple-400" />
+                      <h4 className="font-black text-white text-sm uppercase">محرك الدقة الكمي (Quantum Core)</h4>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                        <span className="text-xs font-bold text-slate-300 tracking-wider">نظام الارتداد (Reversion)</span>
+                        <input type="checkbox" checked={settings.quantumUseReversion !== false} onChange={e => setSettings({...settings, quantumUseReversion: e.target.checked})} className="w-6 h-6 accent-emerald-500" />
                       </div>
-                      <div className="space-y-1">
-                         <label className="text-[10px] font-bold text-slate-500 uppercase">ضغط السيولة الارتدادي</label>
-                         <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-emerald-400 font-mono text-sm" value={settings.quantumVolThreshold ?? 1.02} onChange={e => setSettings({...settings, quantumVolThreshold: parseFloat(e.target.value)})} />
+                      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                        <span className="text-xs font-bold text-slate-300 tracking-wider">نظام الزخم (Momentum)</span>
+                        <input type="checkbox" checked={settings.quantumUseMomentum !== false} onChange={e => setSettings({...settings, quantumUseMomentum: e.target.checked})} className="w-6 h-6 accent-rose-500" />
                       </div>
-                   </div>
-                </div>
+                    </div>
+                  </div>
 
-                {/* 📉 Elastic Trailing */}
-                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6">
-                   <div className="flex items-center justify-between border-b border-slate-800/50 pb-4">
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6 overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-2 opacity-5"><Activity className="w-20 h-20 text-cyan-400 rotate-12" /></div>
+                    <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4 justify-between relative z-10">
                       <div className="flex items-center gap-3">
-                         <ArrowUpRight className="w-5 h-5 text-cyan-400" />
-                         <h4 className="font-black text-white text-sm uppercase">الملاحقة الحركية (Kinetic)</h4>
+                        <Waves className="w-5 h-5 text-cyan-400" />
+                        <h4 className="font-black text-white text-sm uppercase">المحرك الاندماجي (Fusion)</h4>
                       </div>
-                      <input type="checkbox" checked={settings.useKineticEngine} onChange={e => setSettings({...settings, useKineticEngine: e.target.checked})} className="w-5 h-5 accent-cyan-500" />
-                   </div>
-                   <div className={`space-y-4 transition-all ${!settings.useKineticEngine ? 'opacity-20 grayscale' : ''}`}>
+                      <input type="checkbox" checked={settings.useFusionEngine} onChange={e => setSettings({...settings, useFusionEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
+                    </div>
+                    <div className={`space-y-4 transition-all relative z-10 ${!settings.useFusionEngine ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
                       <div className="space-y-1">
-                         <label className="text-[10px] font-bold text-slate-500 uppercase">بدء التتبع (بعد ربح $)</label>
-                         <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-cyan-400 font-mono text-sm" value={settings.smartTrailingStartUsd ?? 0.4} onChange={e => setSettings({...settings, smartTrailingStartUsd: parseFloat(e.target.value)})} />
+                        <label className="text-[10px] text-slate-500 font-black uppercase">عتبة التنفيذ الدنيا: {settings.fusionMinScore ?? 70}%</label>
+                        <input type="range" min="30" max="95" className="w-full h-1 bg-slate-800 rounded-lg accent-cyan-500" value={settings.fusionMinScore ?? 70} onChange={e => setSettings({...settings, fusionMinScore: parseFloat(e.target.value)})} />
                       </div>
                       <div className="space-y-1">
-                         <label className="text-[10px] font-bold text-slate-500 uppercase">مرونة الظل (Rubber Band %)</label>
-                         <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-cyan-400 font-mono text-sm" value={settings.smartTrailingThresholdPerc ?? 0.3} onChange={e => setSettings({...settings, smartTrailingThresholdPerc: parseFloat(e.target.value)})} />
+                        <label className="text-[10px] text-slate-500 font-black uppercase">حساسية البيانات: {settings.fusionSensitivity ?? 1.0}</label>
+                        <input type="range" min="0.1" max="5" step="0.1" className="w-full h-1 bg-slate-800 rounded-lg accent-cyan-500" value={settings.fusionSensitivity ?? 1.0} onChange={e => setSettings({...settings, fusionSensitivity: parseFloat(e.target.value)})} />
                       </div>
-                   </div>
+                    </div>
+                  </div>
                 </div>
-
-                {/* 🔄 Inverse Protection */}
-                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-6">
-                   <div className="flex items-center justify-between border-b border-slate-800/50 pb-4">
-                      <div className="flex items-center gap-3">
-                         <RefreshCw className="w-5 h-5 text-rose-400" />
-                         <h4 className="font-black text-white text-sm uppercase">الحماية المعكوسة (Inverse)</h4>
-                      </div>
-                      <input type="checkbox" checked={settings.inverseTrailingEnabled} onChange={e => setSettings({...settings, inverseTrailingEnabled: e.target.checked})} className="w-5 h-5 accent-rose-500" />
-                   </div>
-                   <div className={`space-y-4 transition-all ${!settings.inverseTrailingEnabled ? 'opacity-20 grayscale' : ''}`}>
-                      <div className="space-y-1">
-                         <label className="text-[10px] font-bold text-slate-500 uppercase">حساسية الارتداد العكسي %</label>
-                         <input type="number" step="0.005" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono text-sm" value={settings.inverseTrailingSensitivity ?? 0.05} onChange={e => setSettings({...settings, inverseTrailingSensitivity: parseFloat(e.target.value)})} />
-                      </div>
-                      <div className="p-3 bg-rose-500/5 border border-rose-500/10 rounded-xl">
-                         <p className="text-[9px] text-slate-500 leading-tight">يهدف هذا النظام لتأمين الربح الحقيقي في محفظة بايننس بمجرد توقف الزخم.</p>
-                      </div>
-                   </div>
-                </div>
-
-             </div>
-          </section>
-
-          {/* 🌀 Quantum Fusion Engine (Advanced Aggregation) */}
-          <section className="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative">
-             <div className="absolute top-0 left-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl -ml-32 -mt-32"></div>
-             <button 
-                type="button"
-                onClick={() => setShowFusion(!showFusion)}
-                className="w-full p-8 flex items-center justify-between hover:bg-slate-800/30 transition-colors relative z-10"
-             >
-                <div className="flex items-center gap-4 text-right">
-                   <div className="p-3 bg-cyan-500/10 rounded-2xl border border-cyan-500/20"><Activity className="w-6 h-6 text-cyan-400" /></div>
-                   <div>
-                      <h2 className="text-xl font-black text-white">المحرك الاندماجي الكمي (Quantum Fusion Engine)</h2>
-                      <p className="text-slate-500 text-sm mt-1">دمج بيانات الفائدة المفتوحة، التمويل، والسيولة المؤسساتية في قرار واحد.</p>
-                   </div>
-                </div>
-                {showFusion ? <ChevronUp className="w-8 h-8 text-slate-500" /> : <ChevronDown className="w-8 h-8 text-cyan-400 animate-bounce" />}
-             </button>
-
-             {showFusion && (
-                <div className="p-8 md:p-10 border-t border-slate-800 bg-slate-950/20 space-y-10 animate-in fade-in slide-in-from-top-4 duration-500 relative z-10 text-right" dir="rtl">
-                   
-                   <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 border-r-4 border-r-cyan-500">
-                      <div className="space-y-1">
-                         <h4 className="font-black text-white text-lg">تفعيل الاندماج (Fusion Activation)</h4>
-                         <p className="text-xs text-slate-500">عند التفعيل، لن ينفذ البوت أي صفقة إلا إذا وافق "المحرك الاندماجي" على جودة البيانات الأساسية.</p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                         <span className={`text-xs font-bold ${settings.useFusionEngine ? 'text-cyan-400' : 'text-slate-600'}`}>{settings.useFusionEngine ? 'نظام الاندماج نَشِط' : 'نظام الاندماج متوقف'}</span>
-                         <input 
-                            type="checkbox" 
-                            checked={settings.useFusionEngine} 
-                            onChange={e => setSettings({...settings, useFusionEngine: e.target.checked})} 
-                            className="w-8 h-8 accent-cyan-500 cursor-pointer" 
-                         />
-                      </div>
-                   </div>
-
-                   <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 transition-all ${!settings.useFusionEngine ? 'opacity-20 grayscale' : ''}`}>
-                      <div className="space-y-6">
-                         <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4 justify-start">
-                            <Gauge className="w-5 h-5 text-cyan-400" />
-                            <h4 className="font-black text-white text-sm uppercase">معايير الدقة والحساسية</h4>
-                         </div>
-                         
-                         <div className="space-y-6">
-                            <div className="space-y-3">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-[10px] text-slate-400 font-bold uppercase">حساسية الاندماج (Sensitivity): {settings.fusionSensitivity ?? 1.0}</label>
-                               </div>
-                               <input type="range" min="0.1" max="5" step="0.1" className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500" value={settings.fusionSensitivity ?? 1.0} onChange={e => setSettings({...settings, fusionSensitivity: parseFloat(e.target.value)})} />
-                               <p className="text-[9px] text-slate-500">القيم الأعلى (مثلاً 3+) تجعل المحرك يطلب تقلبات سيولة وفائدة مفتوحة قوية جداً قبل الموافقة.</p>
-                            </div>
-
-                            <div className="space-y-3">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-[10px] text-slate-400 font-bold uppercase">عتبة التنفيذ (Min Fusion Score): {settings.fusionMinScore ?? 70}%</label>
-                               </div>
-                               <input type="range" min="30" max="95" step="1" className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500" value={settings.fusionMinScore ?? 70} onChange={e => setSettings({...settings, fusionMinScore: parseFloat(e.target.value)})} />
-                               <p className="text-[9px] text-slate-500">الحد الأدنى لدرجة توافق المؤشرات (OI, Funding, Vol) للسماح بالدخول.</p>
-                            </div>
-                         </div>
-                      </div>
-
-                      <div className="space-y-6">
-                         <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4 justify-start">
-                            <BarChart3 className="w-5 h-5 text-indigo-400" />
-                            <h4 className="font-black text-white text-sm uppercase">أوزان اتخاذ القرار (Weights)</h4>
-                         </div>
-
-                         <div className="grid grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                               <label className="text-[10px] text-slate-500 font-bold uppercase">الفائدة المفتوحة (OI)</label>
-                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightOi ?? 0.25} onChange={e => setSettings({...settings, fusionWeightOi: parseFloat(e.target.value)})} />
-                            </div>
-                            <div className="space-y-2">
-                               <label className="text-[10px] text-slate-500 font-bold uppercase">معدل التمويل (Funding)</label>
-                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightFunding ?? 0.25} onChange={e => setSettings({...settings, fusionWeightFunding: parseFloat(e.target.value)})} />
-                            </div>
-                            <div className="space-y-2">
-                               <label className="text-[10px] text-slate-500 font-bold uppercase">تدفق السيولة (Vol/RVOL)</label>
-                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightVol ?? 0.25} onChange={e => setSettings({...settings, fusionWeightVol: parseFloat(e.target.value)})} />
-                            </div>
-                            <div className="space-y-2">
-                               <label className="text-[10px] text-slate-500 font-bold uppercase">الضغط المؤسساتي (Inst)</label>
-                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightInst ?? 0.25} onChange={e => setSettings({...settings, fusionWeightInst: parseFloat(e.target.value)})} />
-                            </div>
-                         </div>
-                         <p className="text-[9px] text-slate-500 italic">مجموع الأوزان يجب أن يكون 1.0 (100%) للتوازن المثالي، وتوزيع الأوزان يحدد ما يركز عليه البوت.</p>
-                      </div>
-                   </div>
-
-                </div>
-             )}
-          </section>
-
-          {/* 6. Advanced Quantum Tuning (Full Control) */}
-          <section className="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl mb-20 transition-all duration-500">
-             <button 
-                type="button"
-                onClick={() => setShowAdvancedQuantum(!showAdvancedQuantum)}
-                className="w-full p-8 flex items-center justify-between hover:bg-slate-800/30 transition-colors"
-             >
-                <div className="flex items-center gap-4 text-right">
-                   <div className="p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20"><Gauge className="w-6 h-6 text-indigo-400" /></div>
-                   <div>
-                      <h2 className="text-xl font-black text-white">إعدادات المحرك الكمي المتقدمة (Advanced Control)</h2>
-                      <p className="text-slate-500 text-sm mt-1">التحكم الدقيق في عتبات التيكر، مقاييس الأهداف، ومفاتيح الاستراتيجيات.</p>
-                   </div>
-                </div>
-                {showAdvancedQuantum ? <ChevronUp className="w-8 h-8 text-slate-500" /> : <ChevronDown className="w-8 h-8 text-indigo-400 animate-bounce" />}
-             </button>
-
-             {showAdvancedQuantum && (
-                <div className="p-8 md:p-10 border-t border-slate-800 bg-slate-950/20 space-y-10 animate-in fade-in slide-in-from-top-4 duration-500">
-                   
-                   {/* Strategic Toggles */}
-                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                         <div className="flex items-center justify-between">
-                            <span className="text-sm font-bold text-white uppercase flex items-center gap-2">
-                               <History className="w-4 h-4 text-emerald-400" />
-                               نظام الارتداد (Reversion)
-                            </span>
-                            <input type="checkbox" checked={settings.quantumUseReversion !== false} onChange={e => setSettings({...settings, quantumUseReversion: e.target.checked})} className="w-5 h-5 accent-emerald-500" />
-                         </div>
-                         <p className="text-[10px] text-slate-500 leading-relaxed">السماح للمحرك بدخول صفقات الارتداد عند لمس حدود البولنجر مع سيولة عالية.</p>
-                      </div>
-
-                      <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 space-y-4">
-                         <div className="flex items-center justify-between">
-                            <span className="text-sm font-bold text-white uppercase flex items-center gap-2">
-                               <Activity className="w-4 h-4 text-rose-400" />
-                               نظام الزخم (Momentum)
-                            </span>
-                            <input type="checkbox" checked={settings.quantumUseMomentum !== false} onChange={e => setSettings({...settings, quantumUseMomentum: e.target.checked})} className="w-5 h-5 accent-rose-500" />
-                         </div>
-                         <p className="text-[10px] text-slate-500 leading-relaxed">السماح للمحرك بركوب موجات الانفجار السعري عند اختراق السيولة الفجائي.</p>
-                      </div>
-
-                      <div className="bg-slate-900/50 p-6 rounded-2xl border border-rose-500/20 space-y-4 relative overflow-hidden group">
-                         <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-30 transition-opacity">
-                            <Skull className="w-12 h-12 text-rose-500 rotate-12" />
-                         </div>
-                         <div className="flex items-center justify-between relative z-10">
-                            <span className="text-sm font-bold text-rose-400 uppercase flex items-center gap-2">
-                               <Flame className="w-4 h-4 text-rose-500 animate-pulse" />
-                               الوضع الوحش (Beast Mode)
-                            </span>
-                            <input type="checkbox" checked={settings.quantumBeastMode} onChange={e => setSettings({...settings, quantumBeastMode: e.target.checked})} className="w-5 h-5 accent-rose-600" />
-                         </div>
-                         <p className="text-[10px] text-rose-300/60 leading-relaxed relative z-10">تجاهل تأكيدات السيولة الضعيفة ورفع أهداف الربح للحد الأقصى (عدواني جداً).</p>
-                         
-                         {settings.quantumBeastMode && (
-                            <div className="space-y-2 pt-2 border-t border-rose-500/10 animate-in fade-in duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-[9px] text-rose-400 font-bold uppercase">شدة الهجوم: x{settings.quantumBeastAggression || 1.5}</label>
-                               </div>
-                               <input type="range" min="1" max="2.5" step="0.1" className="w-full h-1 bg-rose-950 rounded-lg appearance-none cursor-pointer accent-rose-500" value={settings.quantumBeastAggression || 1.5} onChange={e => setSettings({...settings, quantumBeastAggression: parseFloat(e.target.value)})} />
-                            </div>
-                         )}
-                      </div>
-
-                      <div className="bg-slate-900/50 p-6 rounded-2xl border border-indigo-500/20 space-y-4">
-                         <div className="flex items-center justify-between">
-                            <span className="text-sm font-bold text-indigo-400 uppercase flex items-center gap-2">
-                               <BrainCircuit className="w-4 h-4 text-indigo-400" />
-                               الخروج الذكي (Smart Exit)
-                            </span>
-                            <input type="checkbox" checked={settings.quantumSmartExit} onChange={e => setSettings({...settings, quantumSmartExit: e.target.checked})} className="w-5 h-5 accent-indigo-500" />
-                         </div>
-                         <p className="text-[10px] text-indigo-300/60 leading-relaxed">تعديل الأهداف ووقف الخسارة ديناميكياً لتأمين رأس المال بأسرع وقت.</p>
-
-                         {settings.quantumSmartExit && (
-                            <div className="space-y-2 pt-2 border-t border-indigo-500/10 animate-in fade-in duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-[9px] text-indigo-400 font-bold uppercase">سرعة الخروج: {Math.round((1 - (settings.quantumSmartExitAggression || 0.8)) * 100)}% أبكر</label>
-                               </div>
-                               <input type="range" min="0.5" max="0.95" step="0.05" className="w-full h-1 bg-indigo-950 rounded-lg appearance-none cursor-pointer accent-indigo-500" value={settings.quantumSmartExitAggression || 0.8} onChange={e => setSettings({...settings, quantumSmartExitAggression: parseFloat(e.target.value)})} />
-                            </div>
-                         )}
-                      </div>
-
-                      <div className="bg-slate-900/50 p-6 rounded-2xl border border-emerald-500/20 space-y-4">
-                         <div className="flex items-center justify-between">
-                            <span className="text-sm font-bold text-emerald-400 uppercase flex items-center gap-2">
-                               <Shield className="w-4 h-4 text-emerald-400" />
-                               الدخول الحكيم (Wise Entry)
-                            </span>
-                            <input type="checkbox" checked={settings.quantumWiseEntry} onChange={e => setSettings({...settings, quantumWiseEntry: e.target.checked})} className="w-5 h-5 accent-emerald-500" />
-                         </div>
-                         <p className="text-[10px] text-emerald-300/60 leading-relaxed">اشتراط ضغط شرائي/بيعي (Taker Ratio) عنيف جداً قبل فتح أي صفقة.</p>
-
-                         {settings.quantumWiseEntry && (
-                            <div className="space-y-2 pt-2 border-t border-emerald-500/10 animate-in fade-in duration-300">
-                               <div className="flex justify-between items-center">
-                                  <label className="text-[9px] text-emerald-400 font-bold uppercase">عتبة تيكر: {settings.quantumWiseEntryThreshold || 1.05}</label>
-                               </div>
-                               <input type="range" min="1.01" max="1.3" step="0.01" className="w-full h-1 bg-emerald-950 rounded-lg appearance-none cursor-pointer accent-emerald-500" value={settings.quantumWiseEntryThreshold || 1.05} onChange={e => setSettings({...settings, quantumWiseEntryThreshold: parseFloat(e.target.value)})} />
-                            </div>
-                         )}
-                      </div>
-                   </div>
-
-                   {/* Taker Sensitive Thresholds */}
-                   <div className="space-y-6">
-                      <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                         <BarChart3 className="w-4 h-4" />
-                         عتبات ضغط التيكر (Taker Ratio Thresholds)
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                         <div className="space-y-1">
-                            <label className="text-[10px] text-slate-500 font-bold uppercase">ارتداد LONG</label>
-                            <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-indigo-400 font-mono text-sm" value={settings.quantumTakerLongThresh ?? 1.01} onChange={e => setSettings({...settings, quantumTakerLongThresh: parseFloat(e.target.value)})} />
-                         </div>
-                         <div className="space-y-1">
-                            <label className="text-[10px] text-slate-500 font-bold uppercase">ارتداد SHORT</label>
-                            <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-indigo-400 font-mono text-sm" value={settings.quantumTakerShortThresh ?? 0.99} onChange={e => setSettings({...settings, quantumTakerShortThresh: parseFloat(e.target.value)})} />
-                         </div>
-                         <div className="space-y-1">
-                            <label className="text-[10px] text-slate-500 font-bold uppercase">زخم LONG</label>
-                            <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-sm" value={settings.quantumMomentumLongThresh ?? 1.15} onChange={e => setSettings({...settings, quantumMomentumLongThresh: parseFloat(e.target.value)})} />
-                         </div>
-                         <div className="space-y-1">
-                            <label className="text-[10px] text-slate-500 font-bold uppercase">زخم SHORT</label>
-                            <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-sm" value={settings.quantumMomentumShortThresh ?? 0.85} onChange={e => setSettings({...settings, quantumMomentumShortThresh: parseFloat(e.target.value)})} />
-                         </div>
-                      </div>
-                   </div>
-
-                   {/* Target Scaling */}
-                   <div className="space-y-6">
-                      <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                         <Zap className="w-4 h-4" />
-                         مقياس الأهداف الديناميكي (Target Scaling)
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                         <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                               <label className="text-[10px] text-slate-400 font-bold uppercase">مضاعف جني الأرباح (TP Scale): x{settings.quantumTpScale ?? 1.0}</label>
-                            </div>
-                            <input type="range" min="0.5" max="3" step="0.1" className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" value={settings.quantumTpScale ?? 1.0} onChange={e => setSettings({...settings, quantumTpScale: parseFloat(e.target.value)})} />
-                            <p className="text-[9px] text-slate-500 italic">تكبير الأهداف المقترحة من محرك الكوانتم.</p>
-                         </div>
-                         <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                               <label className="text-[10px] text-slate-400 font-bold uppercase">مضاعف وقف الخسارة (SL Scale): x{settings.quantumSlScale ?? 1.0}</label>
-                            </div>
-                            <input type="range" min="0.5" max="3" step="0.1" className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" value={settings.quantumSlScale ?? 1.0} onChange={e => setSettings({...settings, quantumSlScale: parseFloat(e.target.value)})} />
-                            <p className="text-[9px] text-slate-500 italic">توسيع أو تضييق وقف الخسارة مقارنة بالأهداف.</p>
-                         </div>
-                      </div>
-                   </div>
-
-                </div>
-             )}
-          </section>
-
-         {/* Final Action Bar */}
-         <div className="fixed bottom-0 left-0 right-0 p-6 border-t border-slate-800 bg-slate-950/90 backdrop-blur-xl z-50 flex justify-center items-center">
-            <button 
-              type="submit" 
-              disabled={savingSettings} 
-              className="w-full max-w-5xl py-5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 disabled:opacity-50 text-white font-black text-2xl rounded-3xl transition-all shadow-2xl hover:shadow-emerald-500/40 active:scale-95 flex items-center justify-center gap-4 group"
-            >
-               {savingSettings ? <RefreshCw className="w-8 h-8 animate-spin" /> : <Settings className="w-8 h-8 group-hover:rotate-90 transition-transform duration-500" />}
-               {savingSettings ? 'جاري توظيف الذكاء المدمج...' : 'تثبيت الإعدادات في قلب النظام الكمي'}
-            </button>
-         </div>
-
-          {/* Maintenance Section */}
-          <section className="bg-slate-900/50 border border-slate-800/50 rounded-3xl p-8 md:p-10 shadow-xl opacity-80 hover:opacity-100 transition-opacity mb-20">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-4">
-                 <div className="p-3 bg-rose-500/10 rounded-2xl border border-rose-500/20"><Trash2 className="w-6 h-6 text-rose-500" /></div>
-                 <div>
-                    <h2 className="text-xl font-black text-white">صيانة النظام (System Maintenance)</h2>
-                    <p className="text-slate-500 text-sm mt-1 text-right">إجراءات حساسة لمسح البيانات وإعادة الضبط.</p>
-                 </div>
               </div>
-            </div>
-            
-            <div className="bg-rose-500/5 border border-rose-500/20 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-               <div className="space-y-1 text-center md:text-right">
-                  <h4 className="font-bold text-rose-400">مسح تاريخ التداول (Clear Trading History)</h4>
-                  <p className="text-[11px] text-slate-400">سيتم مسح جميع الصفقات المفتوحة والمغلقة من قاعدة البيانات. لن يتم لمس الإعدادات.</p>
-               </div>
-               
-               {!showResetConfirm ? (
-                 <button 
-                   type="button"
-                   onClick={() => setShowResetConfirm(true)}
-                   className="px-8 py-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-sm font-black transition-all active:scale-95 flex items-center gap-2"
-                 >
-                    <Trash2 className="w-4 h-4" />
-                    مسح بيانات التداول
-                 </button>
-               ) : (
-                 <div className="flex items-center gap-3 animate-in zoom-in-95 duration-200">
-                    <button 
-                      type="button"
-                      onClick={() => setShowResetConfirm(false)}
-                      className="px-4 py-2 bg-slate-800 text-slate-400 rounded-lg text-xs font-bold"
-                    >
-                       إلغاء
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={handleResetDB}
-                      className="px-6 py-2 bg-rose-600 text-white rounded-lg text-xs font-black shadow-lg shadow-rose-900/40 flex items-center gap-2"
-                    >
-                       {resetting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                       تأكيد المسح النهائي
-                    </button>
-                 </div>
-               )}
-            </div>
-          </section>
+            )}
 
+            {/* 4. Exit Armor */}
+            {activeTab === 'exit' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-left-4 duration-300 text-right">
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6">
+                  <div className="flex items-center justify-between border-b border-slate-800/50 pb-4">
+                    <div className="flex items-center gap-3">
+                      <ArrowUpRight className="w-5 h-5 text-cyan-400" />
+                      <h4 className="font-black text-white text-sm uppercase">الملاحقة الحركية (Kinetic)</h4>
+                    </div>
+                    <input type="checkbox" checked={settings.useKineticEngine} onChange={e => setSettings({...settings, useKineticEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
+                  </div>
+                  <div className={`space-y-4 transition-all ${!settings.useKineticEngine ? 'opacity-20 grayscale-0 pointer-events-none' : ''}`}>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">بدء التتبع (بعد ربح $)</label>
+                      <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-cyan-400 font-mono text-sm text-left" value={settings.smartTrailingStartUsd ?? 0.4} onChange={e => setSettings({...settings, smartTrailingStartUsd: parseFloat(e.target.value)})} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">مرونة التتبع (Rubber Band %)</label>
+                      <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-cyan-400 font-mono text-sm text-left" value={settings.smartTrailingThresholdPerc ?? 0.3} onChange={e => setSettings({...settings, smartTrailingThresholdPerc: parseFloat(e.target.value)})} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6">
+                  <div className="flex items-center justify-between border-b border-slate-800/50 pb-4">
+                    <div className="flex items-center gap-3">
+                      <RefreshCw className="w-5 h-5 text-rose-400" />
+                      <h4 className="font-black text-white text-sm uppercase">الحماية المعكوسة (Inverse)</h4>
+                    </div>
+                    <input type="checkbox" checked={settings.inverseTrailingEnabled} onChange={e => setSettings({...settings, inverseTrailingEnabled: e.target.checked})} className="w-6 h-6 accent-rose-500" />
+                  </div>
+                  <div className={`space-y-4 transition-all ${!settings.inverseTrailingEnabled ? 'opacity-20 pointer-events-none' : ''}`}>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">حساسية الارتداد العكسي %</label>
+                      <input type="number" step="0.005" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono text-sm text-left" value={settings.inverseTrailingSensitivity ?? 0.05} onChange={e => setSettings({...settings, inverseTrailingSensitivity: parseFloat(e.target.value)})} />
+                    </div>
+                    <p className="text-[9px] text-slate-500 italic p-3 bg-rose-500/5 border border-rose-500/10 rounded-xl">يعمل هذا النظام كغطاء أمني لإغلاق الصفقة فور تغير الزخم المؤسساتي.</p>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6">
+                   <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4">
+                      <ShieldAlert className="w-5 h-5 text-indigo-400" />
+                      <h4 className="font-black text-white text-sm uppercase">درع الخروج الذكي (Smart Exit)</h4>
+                   </div>
+                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">مضاعف الربح (TP)</label>
+                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-emerald-400 font-mono text-sm text-left" value={settings.quantumTpScale ?? 1.5} onChange={e => setSettings({...settings, quantumTpScale: parseFloat(e.target.value)})} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">مضاعف الخسارة (SL)</label>
+                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-rose-400 font-mono text-sm text-left" value={settings.quantumSlScale ?? 1.0} onChange={e => setSettings({...settings, quantumSlScale: parseFloat(e.target.value)})} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">أدنى ربح للتأمين ($)</label>
+                        <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-blue-400 font-mono text-sm text-left" value={settings.smartTpUsd ?? 1.5} onChange={e => setSettings({...settings, smartTpUsd: parseFloat(e.target.value)})} />
+                      </div>
+                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* 5. Technical Tuning */}
+            {activeTab === 'tuning' && (
+              <div className="space-y-10 animate-in slide-in-from-left-4 duration-300 text-right">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <label className="text-[10px] text-slate-500 font-black uppercase">عتبة تيكر LONG</label>
+                    <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-emerald-400 font-mono text-left" value={settings.quantumTakerLongThresh ?? 1.05} onChange={e => setSettings({...settings, quantumTakerLongThresh: parseFloat(e.target.value)})} />
+                  </div>
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <label className="text-[10px] text-slate-500 font-black uppercase">عتبة تيكر SHORT</label>
+                    <input type="number" step="0.01" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-rose-400 font-mono text-left" value={settings.quantumTakerShortThresh ?? 0.95} onChange={e => setSettings({...settings, quantumTakerShortThresh: parseFloat(e.target.value)})} />
+                  </div>
+                  <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <label className="text-[10px] text-slate-500 font-black uppercase">مضاعف البولنجر (BB)</label>
+                    <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-purple-400 font-mono text-left" value={settings.quantumBbMultiplier ?? 2.0} onChange={e => setSettings({...settings, quantumBbMultiplier: parseFloat(e.target.value)})} />
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/50 border border-dashed border-slate-800 rounded-3xl p-10 flex flex-col items-center justify-center space-y-6">
+                   <div className="p-4 bg-amber-500/10 rounded-full"><AlertTriangle className="w-8 h-8 text-amber-500" /></div>
+                   <div className="text-center space-y-2">
+                      <h4 className="text-xl font-black text-white">منطقة الصيانة العميقة</h4>
+                      <p className="text-slate-500 text-sm">مسح البيانات التاريخية وإعادة ضبط محركات التداول.</p>
+                   </div>
+                   <div className="flex gap-4">
+                     {!showResetConfirm ? (
+                       <button type="button" onClick={() => setShowResetConfirm(true)} className="px-10 py-4 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/20 rounded-2xl font-black transition-all">مسح سجل التداول بالكامل</button>
+                     ) : (
+                       <div className="flex items-center gap-3 animate-in zoom-in-95">
+                         <button type="button" onClick={() => setShowResetConfirm(false)} className="px-6 py-3 bg-slate-800 text-slate-400 rounded-xl font-bold">إلغاء</button>
+                         <button type="button" onClick={handleResetDB} className="px-8 py-3 bg-rose-600 text-white rounded-xl font-black shadow-lg shadow-rose-900/40">تأكيد المسح النهائي</button>
+                       </div>
+                     )}
+                   </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Global Save Button */}
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-6">
+          <button
+            type="submit"
+            disabled={savingSettings}
+            className="w-full py-5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-3xl font-black text-xl shadow-[0_20px_50px_-15px_rgba(16,185,129,0.5)] flex items-center justify-center gap-4 transition-all active:scale-95 disabled:opacity-50"
+          >
+            {savingSettings ? <RefreshCw className="animate-spin w-6 h-6" /> : <ShieldCheck className="w-6 h-6" />}
+            حفظ وتطبيق الإعدادات الفورية
+          </button>
+        </div>
       </form>
     </div>
   );

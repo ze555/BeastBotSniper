@@ -4,20 +4,29 @@ import { TradePosition } from '../../types/trading.js';
 export class PositionManager {
   /**
    * إدارة الصفقة المفتوحة وتحديث الـ SL/TP
+   * يتم استدعاء هذا المحرك لاتخاذ قرار بشأن تحديث أو إغلاق الصفقة بناءً على القواعد الأساسية
    */
-  public manage(trade: TradePosition, currentPrice: number, breakevenThreshold: number = 0.5): { action: 'NONE' | 'CLOSE' | 'UPDATE'; reason?: string; updatedTrade?: TradePosition } {
+  public manage(
+    trade: TradePosition, 
+    currentPrice: number, 
+    settings: { 
+      strictFastBreakevenPerc?: number, 
+      tradingFeeRate?: number,
+      leverage?: number
+    }
+  ): { action: 'NONE' | 'CLOSE' | 'UPDATE'; reason?: string; updatedTrade?: TradePosition } {
     let updated = false;
     const newTrade = { ...trade };
 
-    // حساب الـ PnL الحالي
+    // 1. حساب الإحصائيات الأساسية (PnL, Price Change)
     const priceChangePerc = trade.type === 'LONG' 
         ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100 
         : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
     
-    const totalFeeRate = 0.001;
-    const leverage = trade.leverage || 10;
+    const totalFeeRate = settings.tradingFeeRate ?? 0.001;
+    const leverage = trade.leverage || settings.leverage || 10;
     
-    // ROE % = (PriceChange% - Fee%) * Leverage
+    // ROE % = (PriceChange% - Fee%) * Leverage (Binance Standard)
     const roePerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
     newTrade.pnlPerc = roePerc;
     
@@ -28,33 +37,43 @@ export class PositionManager {
     }
     newTrade.pnl = currentPnl;
 
-    // 1. Breakeven Logic (Pseudo: IF trade_profit > Threshold% Price Change: MOVE_SL_TO_ENTRY)
-    if (!trade.isBreakeven && priceChangePerc > breakevenThreshold) {
-      newTrade.sl = trade.entryPrice;
+    // 2. تحديثات تتبع السعر (Highest Price)
+    if (!newTrade.highestPrice || (trade.type === 'LONG' ? currentPrice > newTrade.highestPrice : currentPrice < newTrade.highestPrice)) {
+      newTrade.highestPrice = currentPrice;
+      updated = true;
+    }
+
+    // 3. تأمين نقطة الدخول (Breakeven Logic)
+    const beThreshold = settings.strictFastBreakevenPerc ?? 0.5;
+    if (!trade.isBreakeven && priceChangePerc >= beThreshold) {
+      // نقل الوقف لسعر الدخول + تغطية الرسوم (0.15% أمان إضافي)
+      const feeBuffer = 1.0015;
+      newTrade.sl = trade.type === 'LONG' ? trade.entryPrice * feeBuffer : trade.entryPrice * (2 - feeBuffer);
       newTrade.isBreakeven = true;
       updated = true;
     }
 
-    // 2. TP1 Hit (Partial Exit Logic)
+    // 4. فحص الأهداف (TP / SL)
+    
+    // Target 1: Partial Exit (Status Update)
     if (trade.status === 'OPEN') {
       const hitTp1 = trade.type === 'LONG' ? currentPrice >= trade.tp1 : currentPrice <= trade.tp1;
       if (hitTp1) {
         newTrade.status = 'TP1_HIT';
-        newTrade.sl = trade.entryPrice * (trade.type === 'LONG' ? 1.001 : 0.999); // تأمين بسيط
         updated = true;
       }
     }
 
-    // 3. TP2 Hit (Final Exit)
+    // Target 2: Final Exit (Hard TP)
     const hitTp2 = trade.type === 'LONG' ? currentPrice >= trade.tp2 : currentPrice <= trade.tp2;
     if (hitTp2) {
-      return { action: 'CLOSE', reason: 'TAKE_PROFIT_2_HIT' };
+      return { action: 'CLOSE', reason: 'TP2_HIT', updatedTrade: newTrade };
     }
 
-    // 4. SL Hit
+    // Stop Loss Hit
     const hitSl = trade.type === 'LONG' ? currentPrice <= trade.sl : currentPrice >= trade.sl;
     if (hitSl) {
-      return { action: 'CLOSE', reason: 'STOP_LOSS_HIT' };
+      return { action: 'CLOSE', reason: trade.isBreakeven ? 'BREAKEVEN_HIT' : 'STOP_LOSS_HIT', updatedTrade: newTrade };
     }
 
     if (updated) {
