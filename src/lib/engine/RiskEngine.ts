@@ -55,9 +55,23 @@ export class RiskEngine {
       positionSize = minPositionSize;
     }
 
-    // لا نتجاوز الحد الأقصى للقوة الشرائية المتاحة لكل صفقة
-    if (positionSize > maxBuyingPowerPerTrade) {
-      positionSize = maxBuyingPowerPerTrade;
+    // سقف القوة الشرائية المخصصة لكل صفقة (لتجنب استهلاك كامل الرصيد في صفقة واحدة)
+    // نسمح للحد الأدنى المطلوب بتجاوز التقسيم التلقائي طالما أنه ضمن الحدود القصوى للرافعة
+    let currentMaxCap = maxBuyingPowerPerTrade;
+    if (minPositionSize > maxBuyingPowerPerTrade) {
+      currentMaxCap = Math.max(maxBuyingPowerPerTrade, minPositionSize);
+    }
+
+    // الأمان النهائي: لا نتجاوز الرصيد الكلي * الرافعة المالية
+    const absoluteLimit = portfolioSize * leverage;
+    if (currentMaxCap > absoluteLimit) currentMaxCap = absoluteLimit;
+
+    if (positionSize > currentMaxCap) {
+      positionSize = currentMaxCap;
+    }
+
+    if (positionSize > 0) {
+       console.log(`[RISK] Size Calculation: Portfolio $${portfolioSize} | Risk-Based: $${((riskAmount / riskDistance) * entry).toFixed(2)} | MinReq: $${minPositionSize.toFixed(2)} | Final: $${positionSize.toFixed(2)}`);
     }
 
     return positionSize;

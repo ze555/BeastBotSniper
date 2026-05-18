@@ -240,6 +240,7 @@ export interface BotSettings {
   
   // Layer 6: Neural Confidence
   layerConfidenceEnabled: boolean;      // تفعيل بوابة اليقين الاصطناعي
+  layerRiskEnabled: boolean;            // تفعيل طبقة إدارة المخاطر المتقدمة
   
   // Binance API Settings
   binanceApiKey?: string;

@@ -168,6 +168,8 @@ export const initDB = () => {
         "quantumUseReversion INTEGER DEFAULT 1",
         "quantumUseMomentum INTEGER DEFAULT 1",
         "isLongTerm INTEGER DEFAULT 0",
+        "isNightmareMode INTEGER DEFAULT 0",
+        "marketPanicThreshold REAL DEFAULT 3.0",
         "quantumBeastMode INTEGER DEFAULT 0",
         "quantumSmartExit INTEGER DEFAULT 0",
         "quantumWiseEntry INTEGER DEFAULT 0",
@@ -277,9 +279,10 @@ export function saveSettingsToDB(settings: any) {
       quantumTpScale, quantumSlScale, quantumUseReversion, quantumUseMomentum,
       quantumBeastMode, quantumSmartExit, quantumWiseEntry,
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
-      inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc
+      inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc,
+      isNightmareMode, marketPanicThreshold
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -351,7 +354,9 @@ export function saveSettingsToDB(settings: any) {
       inverseTrailingEnabled=excluded.inverseTrailingEnabled,
       inverseTrailingSensitivity=excluded.inverseTrailingSensitivity,
       isLongTerm=excluded.isLongTerm,
-      minPositionSizePerc=excluded.minPositionSizePerc
+      minPositionSizePerc=excluded.minPositionSizePerc,
+      isNightmareMode=excluded.isNightmareMode,
+      marketPanicThreshold=excluded.marketPanicThreshold
   `;
 
   const values = [
@@ -376,7 +381,8 @@ export function saveSettingsToDB(settings: any) {
     settings.quantumBeastMode ? 1 : 0, settings.quantumSmartExit ? 1 : 0, settings.quantumWiseEntry ? 1 : 0,
     settings.quantumBeastAggression ?? 1.5, settings.quantumSmartExitAggression ?? 0.8, settings.quantumWiseEntryThreshold ?? 1.05,
     settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05,
-    settings.isLongTerm ? 1 : 0, settings.minPositionSizePerc ?? 20
+    settings.isLongTerm ? 1 : 0, settings.minPositionSizePerc ?? 20,
+    settings.isNightmareMode ? 1 : 0, settings.marketPanicThreshold ?? 3.0
   ];
 
   db.run(query, values, (err) => {
