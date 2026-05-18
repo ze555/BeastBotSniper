@@ -266,6 +266,17 @@ export function SettingsView({
 
                <div className="space-y-3">
                   <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
+                     الحد الأدنى لحجم الصفقة <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">Min Allocation %</span>
+                  </label>
+                  <div className="relative">
+                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold">%</span>
+                     <input type="number" step="1" required min="1" max="100" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-10 py-4 text-emerald-400 font-mono focus:border-emerald-500 outline-none transition-all text-left text-lg" dir="ltr" value={settings.minPositionSizePerc ?? 20} onChange={e => setSettings({...settings, minPositionSizePerc: parseFloat(e.target.value)})} />
+                  </div>
+                  <p className="text-[10px] text-slate-500 italic">يضمن ألا يقل حجم الصفقة عن هذه النسبة من رأس المال مهما كانت درجة المخاطرة.</p>
+               </div>
+
+               <div className="space-y-3">
+                  <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
                      رسوم التداول <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">Fees %</span>
                   </label>
                   <div className="relative">

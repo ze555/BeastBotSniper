@@ -100,7 +100,8 @@ export const initDB = () => {
           quantumWiseEntry INTEGER DEFAULT 0,
           quantumBeastAggression REAL DEFAULT 1.5,
           quantumSmartExitAggression REAL DEFAULT 0.8,
-          quantumWiseEntryThreshold REAL DEFAULT 1.05
+          quantumWiseEntryThreshold REAL DEFAULT 1.05,
+          minPositionSizePerc REAL DEFAULT 20
         )
       `);
       
@@ -172,7 +173,8 @@ export const initDB = () => {
         "quantumWiseEntry INTEGER DEFAULT 0",
         "quantumBeastAggression REAL DEFAULT 1.5",
         "quantumSmartExitAggression REAL DEFAULT 0.8",
-        "quantumWiseEntryThreshold REAL DEFAULT 1.05"
+        "quantumWiseEntryThreshold REAL DEFAULT 1.05",
+        "minPositionSizePerc REAL DEFAULT 20"
       ];
       
       let pending = newCols.length;
@@ -275,9 +277,9 @@ export function saveSettingsToDB(settings: any) {
       quantumTpScale, quantumSlScale, quantumUseReversion, quantumUseMomentum,
       quantumBeastMode, quantumSmartExit, quantumWiseEntry,
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
-      inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm
+      inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -348,7 +350,8 @@ export function saveSettingsToDB(settings: any) {
       quantumWiseEntryThreshold=excluded.quantumWiseEntryThreshold,
       inverseTrailingEnabled=excluded.inverseTrailingEnabled,
       inverseTrailingSensitivity=excluded.inverseTrailingSensitivity,
-      isLongTerm=excluded.isLongTerm
+      isLongTerm=excluded.isLongTerm,
+      minPositionSizePerc=excluded.minPositionSizePerc
   `;
 
   const values = [
@@ -373,7 +376,7 @@ export function saveSettingsToDB(settings: any) {
     settings.quantumBeastMode ? 1 : 0, settings.quantumSmartExit ? 1 : 0, settings.quantumWiseEntry ? 1 : 0,
     settings.quantumBeastAggression ?? 1.5, settings.quantumSmartExitAggression ?? 0.8, settings.quantumWiseEntryThreshold ?? 1.05,
     settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05,
-    settings.isLongTerm ? 1 : 0
+    settings.isLongTerm ? 1 : 0, settings.minPositionSizePerc ?? 20
   ];
 
   db.run(query, values, (err) => {

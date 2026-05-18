@@ -31,6 +31,7 @@ export default function App() {
     quantumBbMultiplier: 1.8,
     quantumVolThreshold: 1.02,
     quantumMomentumVol: 1.5,
+    minPositionSizePerc: 20,
   });
   const [savingSettings, setSavingSettings] = useState(false);
 

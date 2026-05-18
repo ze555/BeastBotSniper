@@ -272,4 +272,5 @@ export interface BotSettings {
   inverseTrailingEnabled?: boolean;
   inverseTrailingSensitivity?: number; // % reversal to trigger exit
   isLongTerm?: boolean;                 // 📊 الخيار الطويل: تداول على فريمات زمنية أكبر (15م، 1س، 4س)
+  minPositionSizePerc?: number;         // 💰 Minimum capital allocation per trade (e.g. 20%)
 }
