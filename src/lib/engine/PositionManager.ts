@@ -5,7 +5,7 @@ export class PositionManager {
   /**
    * إدارة الصفقة المفتوحة وتحديث الـ SL/TP
    */
-  public manage(trade: TradePosition, currentPrice: number): { action: 'NONE' | 'CLOSE' | 'UPDATE'; reason?: string; updatedTrade?: TradePosition } {
+  public manage(trade: TradePosition, currentPrice: number, breakevenThreshold: number = 0.5): { action: 'NONE' | 'CLOSE' | 'UPDATE'; reason?: string; updatedTrade?: TradePosition } {
     let updated = false;
     const newTrade = { ...trade };
 
@@ -28,8 +28,8 @@ export class PositionManager {
     }
     newTrade.pnl = currentPnl;
 
-    // 1. Breakeven Logic (Pseudo: IF trade_profit > 0.5% Price Change: MOVE_SL_TO_ENTRY)
-    if (!trade.isBreakeven && priceChangePerc > 0.5) {
+    // 1. Breakeven Logic (Pseudo: IF trade_profit > Threshold% Price Change: MOVE_SL_TO_ENTRY)
+    if (!trade.isBreakeven && priceChangePerc > breakevenThreshold) {
       newTrade.sl = trade.entryPrice;
       newTrade.isBreakeven = true;
       updated = true;

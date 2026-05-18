@@ -93,15 +93,42 @@ export const initDB = () => {
           quantumBbMultiplier REAL DEFAULT 1.8,
           quantumVolThreshold REAL DEFAULT 1.02,
           quantumMomentumVol REAL DEFAULT 1.5,
+          quantumTakerLongThresh REAL DEFAULT 1.01,
+          quantumTakerShortThresh REAL DEFAULT 0.99,
+          quantumMomentumLongThresh REAL DEFAULT 1.15,
+          quantumMomentumShortThresh REAL DEFAULT 0.85,
+          quantumTpScale REAL DEFAULT 1.0,
+          quantumSlScale REAL DEFAULT 1.0,
+          quantumUseReversion INTEGER DEFAULT 1,
+          quantumUseMomentum INTEGER DEFAULT 1,
           inverseTrailingEnabled INTEGER DEFAULT 0,
           inverseTrailingSensitivity REAL DEFAULT 0.05,
+          isLongTerm INTEGER DEFAULT 0,
           quantumBeastMode INTEGER DEFAULT 0,
           quantumSmartExit INTEGER DEFAULT 0,
           quantumWiseEntry INTEGER DEFAULT 0,
           quantumBeastAggression REAL DEFAULT 1.5,
           quantumSmartExitAggression REAL DEFAULT 0.8,
           quantumWiseEntryThreshold REAL DEFAULT 1.05,
-          minPositionSizePerc REAL DEFAULT 20
+          minPositionSizePerc REAL DEFAULT 20,
+          isNightmareMode INTEGER DEFAULT 0,
+          marketPanicThreshold REAL DEFAULT 3.0,
+          useWiseExit INTEGER DEFAULT 0,
+          useWiseEntry INTEGER DEFAULT 0,
+          useSlyFox INTEGER DEFAULT 0,
+          beastConfirmWithSMC INTEGER DEFAULT 0,
+          beastConfirmWithVolume INTEGER DEFAULT 0,
+          beastMinRvol REAL DEFAULT 1.2,
+          beastInstitutionalStrength REAL DEFAULT 0.4,
+          fastExitEnabled INTEGER DEFAULT 0,
+          fastExitPerc REAL DEFAULT 0.5,
+          useFusionEngine INTEGER DEFAULT 0,
+          fusionSensitivity REAL DEFAULT 1.0,
+          fusionWeightOi REAL DEFAULT 0.25,
+          fusionWeightFunding REAL DEFAULT 0.25,
+          fusionWeightVol REAL DEFAULT 0.25,
+          fusionWeightInst REAL DEFAULT 0.25,
+          fusionMinScore REAL DEFAULT 70
         )
       `);
       
@@ -176,7 +203,23 @@ export const initDB = () => {
         "quantumBeastAggression REAL DEFAULT 1.5",
         "quantumSmartExitAggression REAL DEFAULT 0.8",
         "quantumWiseEntryThreshold REAL DEFAULT 1.05",
-        "minPositionSizePerc REAL DEFAULT 20"
+        "minPositionSizePerc REAL DEFAULT 20",
+        "useWiseExit INTEGER DEFAULT 0",
+        "useWiseEntry INTEGER DEFAULT 0",
+        "useSlyFox INTEGER DEFAULT 0",
+        "beastConfirmWithSMC INTEGER DEFAULT 0",
+        "beastConfirmWithVolume INTEGER DEFAULT 0",
+        "beastMinRvol REAL DEFAULT 1.2",
+        "beastInstitutionalStrength REAL DEFAULT 0.4",
+        "fastExitEnabled INTEGER DEFAULT 0",
+        "fastExitPerc REAL DEFAULT 0.5",
+        "useFusionEngine INTEGER DEFAULT 0",
+        "fusionSensitivity REAL DEFAULT 1.0",
+        "fusionWeightOi REAL DEFAULT 0.25",
+        "fusionWeightFunding REAL DEFAULT 0.25",
+        "fusionWeightVol REAL DEFAULT 0.25",
+        "fusionWeightInst REAL DEFAULT 0.25",
+        "fusionMinScore REAL DEFAULT 70"
       ];
       
       let pending = newCols.length;
@@ -264,10 +307,11 @@ export function saveSettingsToDB(settings: any) {
       strictMinVolume, strictMinRvol, strictMaxRisk, strictMinScore,
       strictBtcAlignment, strictRsiFilter, strictRetest, strictFastBreakevenPerc,
       strictRsiHigh, strictRsiLow, strictRetestPullbackPerc, strictBreakoutDistancePerc,
-      useSmartExit, useSmartControl, smartTpUsd, smartTrailingStartUsd, smartTimeDecayMinutes, 
+      useSmartExit, useWiseExit, useWiseEntry, useSlyFox, useSmartControl, smartTpUsd, smartTrailingStartUsd, smartTimeDecayMinutes, 
       smartTrailingThresholdPerc, smartMomentumStallMinutes,
       useKineticEngine, kineticUseOpenInterest, kineticUseVolume, kineticSensitivty, 
-      beastMode,
+      beastMode, beastConfirmWithSMC, beastConfirmWithVolume, beastMinRvol, beastInstitutionalStrength,
+      fastExitEnabled, fastExitPerc,
       strategyAdxThreshold, strategyAtrMultiplier, strategyMinConfidence, strategyRvolThreshold,
       useStrategyTrendFilter, useStrategyVolatilityRule, useStrategyConfidenceGate, useStrategyMomentumRule,
       dynamicSafetyExit,
@@ -280,9 +324,10 @@ export function saveSettingsToDB(settings: any) {
       quantumBeastMode, quantumSmartExit, quantumWiseEntry,
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
       inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc,
-      isNightmareMode, marketPanicThreshold
+      isNightmareMode, marketPanicThreshold,
+      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -303,6 +348,9 @@ export function saveSettingsToDB(settings: any) {
       strictRetestPullbackPerc=excluded.strictRetestPullbackPerc,
       strictBreakoutDistancePerc=excluded.strictBreakoutDistancePerc,
       useSmartExit=excluded.useSmartExit,
+      useWiseExit=excluded.useWiseExit,
+      useWiseEntry=excluded.useWiseEntry,
+      useSlyFox=excluded.useSlyFox,
       useSmartControl=excluded.useSmartControl,
       smartTpUsd=excluded.smartTpUsd,
       smartTrailingStartUsd=excluded.smartTrailingStartUsd,
@@ -314,6 +362,12 @@ export function saveSettingsToDB(settings: any) {
       kineticUseVolume=excluded.kineticUseVolume,
       kineticSensitivty=excluded.kineticSensitivty,
       beastMode=excluded.beastMode,
+      beastConfirmWithSMC=excluded.beastConfirmWithSMC,
+      beastConfirmWithVolume=excluded.beastConfirmWithVolume,
+      beastMinRvol=excluded.beastMinRvol,
+      beastInstitutionalStrength=excluded.beastInstitutionalStrength,
+      fastExitEnabled=excluded.fastExitEnabled,
+      fastExitPerc=excluded.fastExitPerc,
       strategyAdxThreshold=excluded.strategyAdxThreshold,
       strategyAtrMultiplier=excluded.strategyAtrMultiplier,
       strategyMinConfidence=excluded.strategyMinConfidence,
@@ -356,7 +410,14 @@ export function saveSettingsToDB(settings: any) {
       isLongTerm=excluded.isLongTerm,
       minPositionSizePerc=excluded.minPositionSizePerc,
       isNightmareMode=excluded.isNightmareMode,
-      marketPanicThreshold=excluded.marketPanicThreshold
+      marketPanicThreshold=excluded.marketPanicThreshold,
+      useFusionEngine=excluded.useFusionEngine,
+      fusionSensitivity=excluded.fusionSensitivity,
+      fusionWeightOi=excluded.fusionWeightOi,
+      fusionWeightFunding=excluded.fusionWeightFunding,
+      fusionWeightVol=excluded.fusionWeightVol,
+      fusionWeightInst=excluded.fusionWeightInst,
+      fusionMinScore=excluded.fusionMinScore
   `;
 
   const values = [
@@ -364,14 +425,15 @@ export function saveSettingsToDB(settings: any) {
     settings.strictMinVolume ?? 5000000, settings.strictMinRvol ?? 3.0, settings.strictMaxRisk ?? 1.0, settings.strictMinScore ?? 6,
     settings.strictBtcAlignment ? 1 : 0, settings.strictRsiFilter ? 1 : 0, settings.strictRetest ? 1 : 0, settings.strictFastBreakevenPerc ?? 0.75,
     settings.strictRsiHigh ?? 75, settings.strictRsiLow ?? 25, settings.strictRetestPullbackPerc ?? 3.0, settings.strictBreakoutDistancePerc ?? 0.5,
-    settings.useSmartExit ? 1 : 0, settings.useSmartControl ? 1 : 0, settings.smartTpUsd ?? 1.0, settings.smartTrailingStartUsd ?? 0.4, settings.smartTimeDecayMinutes ?? 5,
+    settings.useSmartExit ? 1 : 0, settings.useWiseExit ? 1 : 0, settings.useWiseEntry ? 1 : 0, settings.useSlyFox ? 1 : 0, settings.useSmartControl ? 1 : 0, settings.smartTpUsd ?? 1.0, settings.smartTrailingStartUsd ?? 0.4, settings.smartTimeDecayMinutes ?? 5, 
     settings.smartTrailingThresholdPerc ?? 0.3, settings.smartMomentumStallMinutes ?? 2.5,
-    settings.useKineticEngine ? 1 : 0, settings.kineticUseOpenInterest ? 1 : 0, settings.kineticUseVolume ? 1 : 0, settings.kineticSensitivty ?? 1.0,
-    settings.beastMode ? 1 : 0,
+    settings.useKineticEngine ? 1 : 0, settings.kineticUseOpenInterest ? 1 : 0, settings.kineticUseVolume ? 1 : 0, settings.kineticSensitivty ?? 1.0, 
+    settings.beastMode ? 1 : 0, settings.beastConfirmWithSMC ? 1 : 0, settings.beastConfirmWithVolume ? 1 : 0, settings.beastMinRvol ?? 1.2, settings.beastInstitutionalStrength ?? 0.4,
+    settings.fastExitEnabled ? 1 : 0, settings.fastExitPerc ?? 0.5,
     settings.strategyAdxThreshold ?? 25, settings.strategyAtrMultiplier ?? 1.5, settings.strategyMinConfidence ?? 0.6, settings.strategyRvolThreshold ?? 1.5,
     settings.useStrategyTrendFilter ? 1 : 0, settings.useStrategyVolatilityRule ? 1 : 0, settings.useStrategyConfidenceGate ? 1 : 0, settings.useStrategyMomentumRule ? 1 : 0,
     settings.dynamicSafetyExit ? 1 : 0,
-    settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0,
+    settings.layerGlobalContextEnabled ? 1 : 0, settings.layerRegimeEnabled ? 1 : 0, settings.layerBiasEnabled ? 1 : 0, 
     settings.layerLiquidityEnabled ? 1 : 0, settings.layerMomentumEnabled ? 1 : 0, settings.layerConfidenceEnabled ? 1 : 0, settings.layerRiskEnabled ? 1 : 0,
     settings.binanceApiKey ?? null, settings.binanceSecretKey ?? null, settings.tradingMode ?? 'PAPER',
     settings.quantumBbPeriod ?? 20, settings.quantumBbMultiplier ?? 2.0, settings.quantumVolThreshold ?? 1.02, settings.quantumMomentumVol ?? 1.5,
@@ -382,7 +444,11 @@ export function saveSettingsToDB(settings: any) {
     settings.quantumBeastAggression ?? 1.5, settings.quantumSmartExitAggression ?? 0.8, settings.quantumWiseEntryThreshold ?? 1.05,
     settings.inverseTrailingEnabled ? 1 : 0, settings.inverseTrailingSensitivity ?? 0.05,
     settings.isLongTerm ? 1 : 0, settings.minPositionSizePerc ?? 20,
-    settings.isNightmareMode ? 1 : 0, settings.marketPanicThreshold ?? 3.0
+    settings.isNightmareMode ? 1 : 0, settings.marketPanicThreshold ?? 3.0,
+    settings.useFusionEngine ? 1 : 0, settings.fusionSensitivity ?? 1.0,
+    settings.fusionWeightOi ?? 0.25, settings.fusionWeightFunding ?? 0.25,
+    settings.fusionWeightVol ?? 0.25, settings.fusionWeightInst ?? 0.25,
+    settings.fusionMinScore ?? 70
   ];
 
   db.run(query, values, (err) => {
@@ -427,6 +493,13 @@ export function loadSettingsFromDB(): Promise<any> {
         row.quantumBeastMode = row.quantumBeastMode === 1;
         row.quantumSmartExit = row.quantumSmartExit === 1;
         row.quantumWiseEntry = row.quantumWiseEntry === 1;
+        row.useWiseExit = row.useWiseExit === 1;
+        row.useWiseEntry = row.useWiseEntry === 1;
+        row.useSlyFox = row.useSlyFox === 1;
+        row.beastConfirmWithSMC = row.beastConfirmWithSMC === 1;
+        row.beastConfirmWithVolume = row.beastConfirmWithVolume === 1;
+        row.fastExitEnabled = row.fastExitEnabled === 1;
+        row.useFusionEngine = row.useFusionEngine === 1;
         resolve(row);
       }
     });

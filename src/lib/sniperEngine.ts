@@ -13,6 +13,7 @@ import { CoreEngine } from "./engine/CoreEngine.js";
 import { RiskEngine } from "./engine/RiskEngine.js";
 import { PositionManager } from "./engine/PositionManager.js";
 import { WiseExitEngine } from "./engine/WiseExitEngine.js";
+import { FusionEngine } from "./engine/FusionEngine.js";
 import {
   MarketMetrics,
   MarketRegime,
@@ -284,6 +285,13 @@ export class SniperEngine {
             minPositionSizePerc: dbSettings.minPositionSizePerc ?? 20,
             isNightmareMode: dbSettings.isNightmareMode === 1,
             marketPanicThreshold: dbSettings.marketPanicThreshold ?? 3.0,
+            useFusionEngine: dbSettings.useFusionEngine === 1,
+            fusionSensitivity: dbSettings.fusionSensitivity ?? 1.0,
+            fusionWeightOi: dbSettings.fusionWeightOi ?? 0.25,
+            fusionWeightFunding: dbSettings.fusionWeightFunding ?? 0.25,
+            fusionWeightVol: dbSettings.fusionWeightVol ?? 0.25,
+            fusionWeightInst: dbSettings.fusionWeightInst ?? 0.25,
+            fusionMinScore: dbSettings.fusionMinScore ?? 70,
           };
         }
         console.log("[SNIPER] Loaded settings from database", this.settings);
@@ -407,6 +415,17 @@ export class SniperEngine {
       sourceLabel = "WAIT_ENGINE_PROTECTED";
     } else {
       sourceLabel = this.settings.beastMode ? "DIRECT_ENTRY" : "WAIT_PROTECTED";
+    }
+
+    // 5. Quantum Fusion Check (Final Valve)
+    if (this.settings.useFusionEngine) {
+      const fusion = FusionEngine.calculateFusionScore(metrics, this.settings);
+      if (fusion.score < (this.settings.fusionMinScore ?? 70)) {
+        console.log(`[FUSION] 🛡️ Entry Blocked: ${condition.symbol} | Score: ${fusion.score.toFixed(1)} < ${this.settings.fusionMinScore ?? 70}% | ${fusion.reason}`);
+        return;
+      }
+      console.log(`[FUSION] ✅ Core Validated: ${condition.symbol} | Score: ${fusion.score.toFixed(1)}% | ${fusion.reason}`);
+      sourceLabel = `FUSION_${sourceLabel}`;
     }
 
     await this.executeTrade(condition, sourceLabel);
@@ -802,7 +821,7 @@ export class SniperEngine {
     trade.pnl = currentPnl;
 
     // 1. Layered Position Management Verdict
-    const verdict = this.manager.manage(trade as any, currentPrice);
+    const verdict = this.manager.manage(trade as any, currentPrice, this.settings.strictFastBreakevenPerc);
     if (verdict.action === "CLOSE") {
       await this.closeTrade(
         trade,
@@ -905,7 +924,6 @@ export class SniperEngine {
       const ltMultiplier = isLongTerm ? 10 : 1; 
 
       const benchmarkTp = (isTpDisabled ? 1.5 : rawTpInput) * ltMultiplier;
-      const baseTrailStart = (this.settings.smartTrailingStartUsd ?? 0.4) * ltMultiplier;
       const minutesOpen = (Date.now() - trade.entryTime) / 60000;
       let liveVolatilityPerc = 0;
 
@@ -1090,55 +1108,31 @@ export class SniperEngine {
       // --- 1. Tactical Profit / Split Taker (اغلاق كلي أو خطف تكتيكي) ---
       if (!isTpDisabled && trade.pnl >= benchmarkTp) {
         if (minutesOpen < 1.5 && !trade.isPartialProfitTaken) {
-          // Tactical Split: Extreme velocity detected, secure 50% and leave rest risk-free
+          // Tactical Split
           trade.isPartialProfitTaken = true;
-          trade.realizedPnl = trade.pnl / 2; // Realize half PnL
-          trade.amount = trade.amount / 2; // Halve position
+          trade.realizedPnl = trade.pnl / 2;
+          trade.amount = trade.amount / 2;
           trade.isBreakeven = true;
           trade.sl =
             trade.type === "LONG"
               ? trade.entryPrice * 1.002
               : trade.entryPrice * 0.998;
-          console.log(
-            `[SNIPER] ⚡ KINETIC SPLIT: High Velocity! Secured 50% profit (+$${trade.realizedPnl.toFixed(2)}) for ${trade.symbol}.`,
-          );
           updated = true;
         } else if (
           trade.isPartialProfitTaken &&
           trade.pnl >= benchmarkTp * 1.5
         ) {
-          // Second target hit (Riding the runners)
-          console.log(
-            `[SNIPER] 🚀 KINETIC ENGINE: Final Target Hit for ${trade.symbol} at +$${trade.pnl.toFixed(2)}`,
-          );
           await this.closeTrade(trade, currentPrice, "🚀 KINETIC_PROFIT_MAX");
           return;
         } else if (!trade.isPartialProfitTaken) {
-          // Standard Target Hit
-          console.log(
-            `[SNIPER] 🚀 KINETIC ENGINE: Target Hit for ${trade.symbol} at +$${trade.pnl.toFixed(2)}`,
-          );
           await this.closeTrade(trade, currentPrice, "🚀 KINETIC_PROFIT");
           return;
         }
       }
 
-      // --- 2. Trailing Breakeven (تأمين نقطة الدخول والملاحقة) ---
-      if (!trade.isBreakeven && trade.pnl >= baseTrailStart) {
-        trade.sl =
-          trade.type === "LONG"
-            ? trade.entryPrice * 1.0015
-            : trade.entryPrice * 0.9985;
-        trade.isBreakeven = true;
-        updated = true;
-        console.log(
-          `[SNIPER] 🛡️ KINETIC ENGINE: SL moved to Entry+Fees for ${trade.symbol} at +$${trade.pnl.toFixed(2)} PnL!`,
-        );
-      }
-
-      // --- 3. Dynamic Elastic Trailing (الملاحقة المطاطية من أعلى قمة) ---
+      // --- 2. Dynamic Elastic Trailing (الملاحقة المطاطية من أعلى قمة) ---
       if (
-        trade.pnl > Math.max(0.1, baseTrailStart * 0.5) &&
+        trade.pnl > 0.1 &&
         trade.highestPrice
       ) {
         const dropFromHighPerc =
@@ -1267,84 +1261,6 @@ export class SniperEngine {
       }
     }
 
-    // Filter 4: Aggressive Trade Management (Fast Breakeven)
-    if (this.settings.strictMode && !trade.isBreakeven) {
-      const triggerPerc = this.settings.strictFastBreakevenPerc ?? 0.4; // Lowered to 0.4% from 0.75%
-      if (
-        triggerPerc > 0 &&
-        ((trade.type === "LONG" && priceChangePerc >= triggerPerc) ||
-          (trade.type === "SHORT" && priceChangePerc >= triggerPerc))
-      ) {
-        trade.sl =
-          trade.type === "LONG"
-            ? trade.entryPrice * 1.001
-            : trade.entryPrice * 0.999;
-        trade.isBreakeven = true;
-        updated = true;
-        console.log(
-          `[SNIPER] 🛡️ STRICT MODE: Fast Breakeven triggered for ${trade.symbol} at +${triggerPerc}% PnL!`,
-        );
-      }
-    }
-
-    if (trade.type === "LONG") {
-      // Hit TP1 (+1R)
-      if (trade.status === "OPEN" && currentPrice >= trade.tp1) {
-        trade.status = "TP1_HIT";
-        trade.sl = trade.entryPrice; // Move SL to breakeven
-        trade.isBreakeven = true;
-        updated = true;
-        console.log(
-          `[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven (${trade.sl}).`,
-        );
-      }
-
-      // Hit TP2 (+2R)
-      if (currentPrice >= trade.tp2) {
-        await this.closeTrade(trade, currentPrice, "🎯 TP2_HIT");
-        return;
-      }
-
-      // Hit SL
-      if (currentPrice <= trade.sl) {
-        await this.closeTrade(
-          trade,
-          currentPrice,
-          trade.isBreakeven ? "🛡️ BREAKEVEN" : "🛑 STOP_LOSS",
-        );
-        return;
-      }
-    } else {
-      // SHORT
-      // Hit TP1 (+1R)
-      if (trade.status === "OPEN" && currentPrice <= trade.tp1) {
-        trade.status = "TP1_HIT";
-        trade.sl = trade.entryPrice; // Move SL to breakeven
-        trade.isBreakeven = true;
-        updated = true;
-        console.log(
-          `[SNIPER] 🎯 TP1 Hit for ${trade.symbol}! SL moved to Breakeven (${trade.sl}).`,
-        );
-      }
-
-      // Hit TP2 (+2R)
-      if (currentPrice <= trade.tp2) {
-        await this.closeTrade(trade, currentPrice, "🎯 TP2_HIT");
-        return;
-      }
-
-      // Hit SL
-      if (currentPrice >= trade.sl) {
-        await this.closeTrade(
-          trade,
-          currentPrice,
-          trade.isBreakeven ? "🛡️ BREAKEVEN" : "🛑 STOP_LOSS",
-        );
-        return;
-      }
-    }
-
-    // Sync live PNL periodically, but let's just do it directly on update for SL moves
     if (updated) {
       saveTrade(trade);
     }

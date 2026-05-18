@@ -49,6 +49,7 @@ export function SettingsView({
   const [resetting, setResetting] = React.useState(false);
   const [showResetConfirm, setShowResetConfirm] = React.useState(false);
   const [showAdvancedQuantum, setShowAdvancedQuantum] = React.useState(false);
+  const [showFusion, setShowFusion] = React.useState(false);
 
   const handleResetDB = async () => {
     setResetting(true);
@@ -284,6 +285,14 @@ export function SettingsView({
                      <input type="number" step="0.01" required min="0" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-10 py-4 text-rose-400 font-mono focus:border-rose-500 outline-none transition-all text-left text-lg" dir="ltr" value={((settings.tradingFeeRate || 0.001) * 100).toFixed(2)} onChange={e => setSettings({...settings, tradingFeeRate: parseFloat(e.target.value) / 100})} />
                   </div>
                </div>
+
+               <div className="space-y-3">
+                  <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
+                     تأمين الدخول السريع (Breakeven %)
+                  </label>
+                  <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-blue-400 font-mono focus:border-blue-500 outline-none transition-all text-left text-lg" dir="ltr" value={settings.strictFastBreakevenPerc ?? 0.5} onChange={e => setSettings({...settings, strictFastBreakevenPerc: parseFloat(e.target.value)})} />
+                  <p className="text-[9px] text-slate-500 italic">نقل الوقف لسعر الدخول بمجرد وصول الربح السعري لهذه النسبة.</p>
+               </div>
             </div>
          </section>
 
@@ -386,6 +395,101 @@ export function SettingsView({
                 </div>
 
              </div>
+          </section>
+
+          {/* 🌀 Quantum Fusion Engine (Advanced Aggregation) */}
+          <section className="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative">
+             <div className="absolute top-0 left-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl -ml-32 -mt-32"></div>
+             <button 
+                type="button"
+                onClick={() => setShowFusion(!showFusion)}
+                className="w-full p-8 flex items-center justify-between hover:bg-slate-800/30 transition-colors relative z-10"
+             >
+                <div className="flex items-center gap-4 text-right">
+                   <div className="p-3 bg-cyan-500/10 rounded-2xl border border-cyan-500/20"><Activity className="w-6 h-6 text-cyan-400" /></div>
+                   <div>
+                      <h2 className="text-xl font-black text-white">المحرك الاندماجي الكمي (Quantum Fusion Engine)</h2>
+                      <p className="text-slate-500 text-sm mt-1">دمج بيانات الفائدة المفتوحة، التمويل، والسيولة المؤسساتية في قرار واحد.</p>
+                   </div>
+                </div>
+                {showFusion ? <ChevronUp className="w-8 h-8 text-slate-500" /> : <ChevronDown className="w-8 h-8 text-cyan-400 animate-bounce" />}
+             </button>
+
+             {showFusion && (
+                <div className="p-8 md:p-10 border-t border-slate-800 bg-slate-950/20 space-y-10 animate-in fade-in slide-in-from-top-4 duration-500 relative z-10 text-right" dir="rtl">
+                   
+                   <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 border-r-4 border-r-cyan-500">
+                      <div className="space-y-1">
+                         <h4 className="font-black text-white text-lg">تفعيل الاندماج (Fusion Activation)</h4>
+                         <p className="text-xs text-slate-500">عند التفعيل، لن ينفذ البوت أي صفقة إلا إذا وافق "المحرك الاندماجي" على جودة البيانات الأساسية.</p>
+                      </div>
+                      <div className="flex items-center gap-4">
+                         <span className={`text-xs font-bold ${settings.useFusionEngine ? 'text-cyan-400' : 'text-slate-600'}`}>{settings.useFusionEngine ? 'نظام الاندماج نَشِط' : 'نظام الاندماج متوقف'}</span>
+                         <input 
+                            type="checkbox" 
+                            checked={settings.useFusionEngine} 
+                            onChange={e => setSettings({...settings, useFusionEngine: e.target.checked})} 
+                            className="w-8 h-8 accent-cyan-500 cursor-pointer" 
+                         />
+                      </div>
+                   </div>
+
+                   <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 transition-all ${!settings.useFusionEngine ? 'opacity-20 grayscale' : ''}`}>
+                      <div className="space-y-6">
+                         <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4 justify-start">
+                            <Gauge className="w-5 h-5 text-cyan-400" />
+                            <h4 className="font-black text-white text-sm uppercase">معايير الدقة والحساسية</h4>
+                         </div>
+                         
+                         <div className="space-y-6">
+                            <div className="space-y-3">
+                               <div className="flex justify-between items-center">
+                                  <label className="text-[10px] text-slate-400 font-bold uppercase">حساسية الاندماج (Sensitivity): {settings.fusionSensitivity ?? 1.0}</label>
+                               </div>
+                               <input type="range" min="0.1" max="5" step="0.1" className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500" value={settings.fusionSensitivity ?? 1.0} onChange={e => setSettings({...settings, fusionSensitivity: parseFloat(e.target.value)})} />
+                               <p className="text-[9px] text-slate-500">القيم الأعلى (مثلاً 3+) تجعل المحرك يطلب تقلبات سيولة وفائدة مفتوحة قوية جداً قبل الموافقة.</p>
+                            </div>
+
+                            <div className="space-y-3">
+                               <div className="flex justify-between items-center">
+                                  <label className="text-[10px] text-slate-400 font-bold uppercase">عتبة التنفيذ (Min Fusion Score): {settings.fusionMinScore ?? 70}%</label>
+                               </div>
+                               <input type="range" min="30" max="95" step="1" className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500" value={settings.fusionMinScore ?? 70} onChange={e => setSettings({...settings, fusionMinScore: parseFloat(e.target.value)})} />
+                               <p className="text-[9px] text-slate-500">الحد الأدنى لدرجة توافق المؤشرات (OI, Funding, Vol) للسماح بالدخول.</p>
+                            </div>
+                         </div>
+                      </div>
+
+                      <div className="space-y-6">
+                         <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4 justify-start">
+                            <BarChart3 className="w-5 h-5 text-indigo-400" />
+                            <h4 className="font-black text-white text-sm uppercase">أوزان اتخاذ القرار (Weights)</h4>
+                         </div>
+
+                         <div className="grid grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                               <label className="text-[10px] text-slate-500 font-bold uppercase">الفائدة المفتوحة (OI)</label>
+                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightOi ?? 0.25} onChange={e => setSettings({...settings, fusionWeightOi: parseFloat(e.target.value)})} />
+                            </div>
+                            <div className="space-y-2">
+                               <label className="text-[10px] text-slate-500 font-bold uppercase">معدل التمويل (Funding)</label>
+                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightFunding ?? 0.25} onChange={e => setSettings({...settings, fusionWeightFunding: parseFloat(e.target.value)})} />
+                            </div>
+                            <div className="space-y-2">
+                               <label className="text-[10px] text-slate-500 font-bold uppercase">تدفق السيولة (Vol/RVOL)</label>
+                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightVol ?? 0.25} onChange={e => setSettings({...settings, fusionWeightVol: parseFloat(e.target.value)})} />
+                            </div>
+                            <div className="space-y-2">
+                               <label className="text-[10px] text-slate-500 font-bold uppercase">الضغط المؤسساتي (Inst)</label>
+                               <input type="number" step="0.05" min="0" max="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white font-mono text-xs text-left" value={settings.fusionWeightInst ?? 0.25} onChange={e => setSettings({...settings, fusionWeightInst: parseFloat(e.target.value)})} />
+                            </div>
+                         </div>
+                         <p className="text-[9px] text-slate-500 italic">مجموع الأوزان يجب أن يكون 1.0 (100%) للتوازن المثالي، وتوزيع الأوزان يحدد ما يركز عليه البوت.</p>
+                      </div>
+                   </div>
+
+                </div>
+             )}
           </section>
 
           {/* 6. Advanced Quantum Tuning (Full Control) */}
