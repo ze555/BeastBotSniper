@@ -726,7 +726,6 @@ export class SniperEngine {
     }
 
     // --- 1. CORE POSITION UPDATE (Standard PnL & Stats) ---
-    // This provides a base verdict for SL/TP/Breakeven
     const managerVerdict = this.manager.manage(trade as any, currentPrice, {
       strictFastBreakevenPerc: this.settings.strictFastBreakevenPerc,
       tradingFeeRate: this.settings.tradingFeeRate,
@@ -734,20 +733,25 @@ export class SniperEngine {
     });
 
     if (managerVerdict.action === "CLOSE") {
-      // 🛡️ ADAPTIVE CASCADE CHECK before closing for profit
-      if (managerVerdict.reason && (managerVerdict.reason.includes("TP") || managerVerdict.reason.includes("TRAILING"))) {
+      // 🛡️ ADAPTIVE CASCADE CHECK before closing
+      const shouldCheckAdaptive = this.settings.overrideAllWithAdaptive || 
+                                (managerVerdict.reason && (managerVerdict.reason.includes("TP") || managerVerdict.reason.includes("TRAILING")));
+
+      if (shouldCheckAdaptive) {
         const adaptive = this.evaluateAdaptiveExit(trade, currentPrice, currentOI, currentVol, currentTakerRatio, klines, rsi, adx);
+        
         if (adaptive.decision === ExitDecision.HOLD_FOR_MOON || adaptive.decision === ExitDecision.CONTINUE) {
-           console.log(`[ADAPTIVE CASCADE] 🛡️ Exit Overridden: Staying in ${symbol} | Decision: ${adaptive.decision} | Reason: ${adaptive.reason}`);
-           addLog(`Adaptive Exit: Staying in ${symbol} (Market Strong)`, 'success');
-           return; // Override exit!
+           console.log(`[ADAPTIVE CASCADE] 🛡️ Exit Overridden: Staying in ${symbol} | Reason: ${managerVerdict.reason} -> ${adaptive.reason}`);
+           addLog(`Adaptive Hold: Order to close (${managerVerdict.reason}) OVERRIDDEN by Market Strength`, 'success');
+           return; 
         }
-           if (adaptive.decision === ExitDecision.TRAIL_TIGHT) {
-              // Option to tighten SL instead of closing
-              console.log(`[ADAPTIVE CASCADE] ⚠️ Tightening Trailing Stop for ${symbol} instead of closing.`);
-              trade.sl = trade.type === "LONG" ? currentPrice * 0.998 : currentPrice * 1.002;
-              updated = true;
-           }
+        
+        if (adaptive.decision === ExitDecision.TRAIL_TIGHT) {
+           console.log(`[ADAPTIVE CASCADE] ⚠️ Tightening Trailing Stop for ${symbol} instead of closing.`);
+           trade.sl = trade.type === "LONG" ? currentPrice * 0.998 : currentPrice * 1.002;
+           updated = true;
+           return; 
+        }
       }
       
       await this.closeTrade(trade, currentPrice, managerVerdict.reason || "CORE_MANAGER_EXIT");

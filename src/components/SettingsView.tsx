@@ -377,6 +377,24 @@ export function SettingsView({
                       />
                    </div>
 
+                   <div className="flex items-center justify-between p-5 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl animate-pulse shadow-lg shadow-indigo-500/5">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-black text-indigo-400 uppercase">الهيمنة التكيفية (Adaptive Dominance)</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed max-w-sm">
+                          عند التفعيل، سيتم منح محرك الاندماج والزخم الصلاحية الكاملة لتجاوز الستوب لوس التقليدي (SL) والأهداف (TP) إذا كان الزخم المؤسساتي لا يزال قوياً.
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          checked={settings.overrideAllWithAdaptive} 
+                          onChange={e => setSettings({...settings, overrideAllWithAdaptive: e.target.checked})} 
+                          className="w-10 h-10 accent-indigo-600 cursor-pointer" 
+                        />
+                        <span className="text-[8px] font-black text-indigo-500">{settings.overrideAllWithAdaptive ? 'نظام مُهيمن نَشِط' : 'نظام تابع'}</span>
+                      </div>
+                   </div>
+
                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 border-t border-slate-800/50">
                       <div className="space-y-1">
                         <label className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">مضاعف الربح (TP)</label>

@@ -288,4 +288,5 @@ export interface BotSettings {
   exitUseFusionCheck?: boolean;        // فحص تدفق السيولة الحقيقي
   exitUseMomentumCheck?: boolean;      // فحص التحول الزخمي
   exitAdaptiveAggression?: number;     // عدوانية الخروج التكيفي (0.1 - 1.0)
+  overrideAllWithAdaptive?: boolean;   // السماح للنظام التكيفي بتجاوز جميع قرارات الخروج الأخرى
 }
