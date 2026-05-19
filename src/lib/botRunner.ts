@@ -58,39 +58,40 @@ export async function runTradeLoop() {
       const activeTrades = sniper.getActiveTrades();
       const settings = sniper.getSettings();
 
-      // 1. GLOBAL PANIC DETECTION & CONTEXT (The Cloud Layer)
+      // 1. GLOBAL PANIC DETECTION & CONTEXT (Every ~60 seconds to save weight)
       let isGlobalPanic = false;
-      try {
-        const tickersRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
-        const tickers = tickersRes.data as any[];
-        const sorted = tickers.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-        const top20 = sorted.slice(0, 20);
-        
-        const avgChange = top20.reduce((acc, t) => acc + parseFloat(t.priceChangePercent), 0) / 20;
-        const totalVol = tickers.reduce((acc, t) => acc + parseFloat(t.quoteVolume), 0);
-        const bullishCount = top20.filter(t => parseFloat(t.priceChangePercent) > 0).length;
+      const lastContextUpdate = (globalContext as any).lastUpdate || 0;
+      if (Date.now() - lastContextUpdate > 60000) {
+        try {
+          const tickersRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 5000 });
+          const tickers = tickersRes.data as any[];
+          const sorted = tickers.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+          const top20 = sorted.slice(0, 20);
+          
+          const avgChange = top20.reduce((acc, t) => acc + parseFloat(t.priceChangePercent), 0) / 20;
+          const totalVol = tickers.reduce((acc, t) => acc + parseFloat(t.quoteVolume), 0);
+          const bullishCount = top20.filter(t => parseFloat(t.priceChangePercent) > 0).length;
 
-        globalContext = {
-            avgAdx: 25,
-            avgAtrPerc: 1.5,
-            bullishRatio: bullishCount / 20,
-            totalVolume24h: totalVol,
-            marketSentiment: avgChange > 2.5 ? 'EXTREME_GREED' : 
-                            avgChange > 0.5 ? 'GREED' : 
-                            avgChange > -0.5 ? 'NEUTRAL' : 
-                            avgChange > -3 ? 'FEAR' : 'EXTREME_FEAR'
-        };
-
-        if (settings.isNightmareMode && settings.marketPanicThreshold) {
-            const drops = tickers.filter(t => parseFloat(t.priceChangePercent) < -settings.marketPanicThreshold!).length;
-            if (drops > 80) { // Slightly more sensitive
-                isGlobalPanic = true;
-                addLog(`MARKET PANIC: ${drops} coins dropping!`, 'warn');
-                console.warn(`[NIGHTMARE 💀] MARKET PANIC DETECTED! ${drops} symbols in freefall.`);
-            }
+          globalContext = {
+              avgAdx: 25,
+              avgAtrPerc: 1.5,
+              bullishRatio: bullishCount / 20,
+              totalVolume24h: totalVol,
+              marketSentiment: avgChange > 2.5 ? 'EXTREME_GREED' : 
+                              avgChange > 0.5 ? 'GREED' : 
+                              avgChange > -0.5 ? 'NEUTRAL' : 
+                              avgChange > -3 ? 'FEAR' : 'EXTREME_FEAR'
+          };
+          (globalContext as any).lastUpdate = Date.now();
+        } catch (e) {
+           addLog(`Global Context Refresh Error: ${e.message}`, 'error');
         }
-      } catch (e) {
-         addLog(`Global Context Error: ${e.message}`, 'error');
+      }
+
+      // Nightmare mode check (Fast path)
+      if (settings.isNightmareMode && globalContext.marketSentiment === 'EXTREME_FEAR') {
+          isGlobalPanic = true;
+          addLog(`GENERAL MARKET CAUTION: Extreme Fear detected.`, 'warn');
       }
 
       // ALWAYS manage open trades (TP/SL/Trailing), even if hunting is paused!
@@ -222,8 +223,8 @@ export async function runTradeLoop() {
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
       if (activeTrades.length < maxTrades && watchlist.length > 0) {
-        // High Intensity Scanning for Quick Scalping
-        const scanCount = 40; 
+        // Optimized Scanning: Lower count and add spacing to prevent 429
+        const scanCount = 15; 
         const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
         let rejectedCount = 0;
@@ -236,7 +237,13 @@ export async function runTradeLoop() {
             const quantum = new QuantumEngine();
 
             for (const coin of targetsToCheck) {
+                // If we found a signal and filled our slots, stop scanning
+                if (sniper.getActiveTrades().length >= maxTrades) break;
                 if (activeTrades.find(t => t.symbol === coin.symbol)) continue;
+
+                // 🛑 RATE LIMIT PROTECTION: Add a small gap between scanning new symbols
+                // This doesn't affect active trade updates which run in parallel above
+                await sleep(200); 
 
                 const tfs = getTimeframes(!!settings.isLongTerm);
                 try {
