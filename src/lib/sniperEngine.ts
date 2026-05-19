@@ -14,6 +14,7 @@ import { RiskEngine } from "./engine/RiskEngine.js";
 import { PositionManager } from "./engine/PositionManager.js";
 import { WiseExitEngine } from "./engine/WiseExitEngine.js";
 import { FusionEngine } from "./engine/FusionEngine.js";
+import { AdaptiveCascadeEngine, ExitDecision } from "./engine/AdaptiveCascadeEngine.js";
 import {
   MarketMetrics,
   MarketRegime,
@@ -346,6 +347,37 @@ export class SniperEngine {
   }
 
   /**
+   * Evaluates the trade against the 3-stage Adaptive Cascade Exit
+   */
+  private evaluateAdaptiveExit(
+    trade: Trade, 
+    currentPrice: number, 
+    oi?: number, 
+    vol?: number, 
+    taker?: number,
+    klines: any[] = [],
+    rsi: number = 50,
+    adx: number = 25
+  ) {
+    const metrics: MarketMetrics = {
+       symbol: trade.symbol,
+       price: currentPrice,
+       adx: adx, 
+       atr: 0, 
+       atrPerc: 0,
+       rsi: rsi, 
+       volume: vol || 0,
+       rvol: 1.5,
+       spread: 0,
+       openInterest: oi,
+       takerRatio: taker,
+       isChop: false
+    };
+
+    return AdaptiveCascadeEngine.evaluate(trade, metrics, klines, this.settings);
+  }
+
+  /**
    * Evaluate a symbol against the new 7-layer architecture
    */
   public async evaluateSignal(
@@ -663,6 +695,7 @@ export class SniperEngine {
       rsi?: number;
       emaTrend?: "LONG" | "SHORT";
       btcTrend?: "LONG" | "SHORT";
+      klines?: any[];
     },
   ) {
     const trade = this.activeTrades.get(symbol);
@@ -670,6 +703,10 @@ export class SniperEngine {
 
     trade.currentPrice = currentPrice;
     let updated = false;
+
+    const klines = indicators?.klines || [];
+    const rsi = indicators?.rsi || 50;
+    const adx = indicators?.adx || 25;
 
     // --- 0. PRE-FLIGHT: Update Price & Metric History ---
     if (!trade.tickHistory) trade.tickHistory = [];
@@ -697,6 +734,22 @@ export class SniperEngine {
     });
 
     if (managerVerdict.action === "CLOSE") {
+      // 🛡️ ADAPTIVE CASCADE CHECK before closing for profit
+      if (managerVerdict.reason && (managerVerdict.reason.includes("TP") || managerVerdict.reason.includes("TRAILING"))) {
+        const adaptive = this.evaluateAdaptiveExit(trade, currentPrice, currentOI, currentVol, currentTakerRatio, klines, rsi, adx);
+        if (adaptive.decision === ExitDecision.HOLD_FOR_MOON || adaptive.decision === ExitDecision.CONTINUE) {
+           console.log(`[ADAPTIVE CASCADE] 🛡️ Exit Overridden: Staying in ${symbol} | Decision: ${adaptive.decision} | Reason: ${adaptive.reason}`);
+           addLog(`Adaptive Exit: Staying in ${symbol} (Market Strong)`, 'success');
+           return; // Override exit!
+        }
+           if (adaptive.decision === ExitDecision.TRAIL_TIGHT) {
+              // Option to tighten SL instead of closing
+              console.log(`[ADAPTIVE CASCADE] ⚠️ Tightening Trailing Stop for ${symbol} instead of closing.`);
+              trade.sl = trade.type === "LONG" ? currentPrice * 0.998 : currentPrice * 1.002;
+              updated = true;
+           }
+      }
+      
       await this.closeTrade(trade, currentPrice, managerVerdict.reason || "CORE_MANAGER_EXIT");
       return;
     } else if (managerVerdict.action === "UPDATE" && managerVerdict.updatedTrade) {

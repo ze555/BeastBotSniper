@@ -282,5 +282,10 @@ export interface BotSettings {
   fusionWeightFunding?: number;        // وزن معدل التمويل (Funding Rate)
   fusionWeightVol?: number;            // وزن تدفق السيولة (RVOL/Volume)
   fusionWeightInst?: number;           // وزن الضغط المؤسساتي (Taker Ratio)
-  fusionMinScore?: number;             // الحد الأدنى لدرجة الاندماج للتنفيذ (مثال 75%)
+  // 🛡️ Adaptive Exit Cascade (نظام الخروج التكيفي المتسلسل)
+  exitValidationMode?: 'QUANTUM_ONLY' | 'FUSION_PRIORITY' | 'MOMENTUM_ASSISTED' | 'FULL_CONSENSUS' | 'ADAPTIVE_CASCADE';
+  exitUseQuantumCheck?: boolean;       // فحص صلاحية الانعكاس الأصلي
+  exitUseFusionCheck?: boolean;        // فحص تدفق السيولة الحقيقي
+  exitUseMomentumCheck?: boolean;      // فحص التحول الزخمي
+  exitAdaptiveAggression?: number;     // عدوانية الخروج التكيفي (0.1 - 1.0)
 }

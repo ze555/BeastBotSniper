@@ -321,12 +321,63 @@ export function SettingsView({
                   </div>
                 </div>
 
-                <div className="md:col-span-2 bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6">
-                   <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4">
-                      <ShieldAlert className="w-5 h-5 text-indigo-400" />
-                      <h4 className="font-black text-white text-sm uppercase">درع الخروج الذكي (Smart Exit)</h4>
+                <div className="md:col-span-2 bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-8">
+                   <div className="flex items-center justify-between border-b border-slate-800/50 pb-4">
+                      <div className="flex items-center gap-3">
+                         <ShieldAlert className="w-5 h-5 text-indigo-400" />
+                         <h4 className="font-black text-white text-sm uppercase">نظام الخروج التكيفي (Adaptive Exit Cascade)</h4>
+                      </div>
+                      <select 
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs font-black text-indigo-400 outline-none focus:border-indigo-500"
+                        value={settings.exitValidationMode ?? 'ADAPTIVE_CASCADE'}
+                        onChange={e => setSettings({...settings, exitValidationMode: e.target.value})}
+                      >
+                        <option value="QUANTUM_ONLY">Quantum Only (ارتداد فقط)</option>
+                        <option value="FUSION_PRIORITY">Fusion Priority (أولوية السيولة)</option>
+                        <option value="MOMENTUM_ASSISTED">Momentum Assisted (دعم الزخم)</option>
+                        <option value="FULL_CONSENSUS">Full Consensus (إجماع كامل)</option>
+                        <option value="ADAPTIVE_CASCADE">Adaptive Cascade (التسلسل التكيفي - الأفضل)</option>
+                      </select>
                    </div>
-                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+
+                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-black text-slate-400 uppercase">1. فحص الانعكاس</span>
+                          <p className="text-[8px] text-slate-500">Quantum Reversion</p>
+                        </div>
+                        <input type="checkbox" checked={settings.exitUseQuantumCheck !== false} onChange={e => setSettings({...settings, exitUseQuantumCheck: e.target.checked})} className="w-5 h-5 accent-emerald-500" />
+                      </div>
+                      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-black text-slate-400 uppercase">2. فحص السيولة</span>
+                          <p className="text-[8px] text-slate-500">Fusion Engine</p>
+                        </div>
+                        <input type="checkbox" checked={settings.exitUseFusionCheck !== false} onChange={e => setSettings({...settings, exitUseFusionCheck: e.target.checked})} className="w-5 h-5 accent-cyan-500" />
+                      </div>
+                      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-black text-slate-400 uppercase">3. فحص الزخم</span>
+                          <p className="text-[8px] text-slate-500">Momentum Node</p>
+                        </div>
+                        <input type="checkbox" checked={settings.exitUseMomentumCheck !== false} onChange={e => setSettings({...settings, exitUseMomentumCheck: e.target.checked})} className="w-5 h-5 accent-rose-500" />
+                      </div>
+                   </div>
+
+                   <div className="space-y-3 pt-4 border-t border-slate-800/50">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] text-slate-400 font-black uppercase">حساسية الخروج التكيفي (Aggression): {settings.exitAdaptiveAggression ?? 0.8}</label>
+                        <span className="text-[9px] text-slate-600 bg-slate-950 px-2 py-0.5 rounded italic">كلما زادت القيمة، زادت احتمالية "الاستمرار" في الصفقة</span>
+                      </div>
+                      <input 
+                        type="range" min="0.1" max="1" step="0.05" 
+                        className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" 
+                        value={settings.exitAdaptiveAggression ?? 0.8} 
+                        onChange={e => setSettings({...settings, exitAdaptiveAggression: parseFloat(e.target.value)})} 
+                      />
+                   </div>
+
+                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 border-t border-slate-800/50">
                       <div className="space-y-1">
                         <label className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">مضاعف الربح (TP)</label>
                         <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-emerald-400 font-mono text-sm text-left" value={settings.quantumTpScale ?? 1.5} onChange={e => setSettings({...settings, quantumTpScale: parseFloat(e.target.value)})} />
