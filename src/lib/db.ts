@@ -233,14 +233,15 @@ export const initDB = () => {
       });
       db.run(`ALTER TABLE trades ADD COLUMN leverage REAL DEFAULT 10`, () => {});
       db.run(`ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'CORE'`, () => {});
+      db.run(`ALTER TABLE trades ADD COLUMN adaptiveHistory TEXT`, () => {});
     });
   });
 };
 
 export function saveTrade(t: Trade) {
   const query = `
-    INSERT INTO trades (id, symbol, type, mode, entryPrice, entryTime, amount, leverage, sl, initialSl, tp1, tp2, status, exitPrice, exitTime, pnl, pnlPerc, score, isBreakeven, source) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (id, symbol, type, mode, entryPrice, entryTime, amount, leverage, sl, initialSl, tp1, tp2, status, exitPrice, exitTime, pnl, pnlPerc, score, isBreakeven, source, adaptiveHistory) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET 
       sl=excluded.sl, 
       status=excluded.status, 
@@ -249,13 +250,16 @@ export function saveTrade(t: Trade) {
       pnl=excluded.pnl, 
       pnlPerc=excluded.pnlPerc, 
       isBreakeven=excluded.isBreakeven,
-      source=excluded.source
+      source=excluded.source,
+      adaptiveHistory=excluded.adaptiveHistory
   `;
+  
+  const adaptiveHistoryStr = JSON.stringify(t.adaptiveHistoryLogs || []);
   
   db.serialize(() => {
     db.run(query, [
       t.id, t.symbol, t.type, t.mode, t.entryPrice, t.entryTime, t.amount, t.leverage || 10, t.sl, t.initialSl, t.tp1, t.tp2, t.status, 
-      t.exitPrice || null, t.exitTime || null, t.pnl || 0, t.pnlPerc || 0, t.score, t.isBreakeven ? 1 : 0, t.source || 'CORE'
+      t.exitPrice || null, t.exitTime || null, t.pnl || 0, t.pnlPerc || 0, t.score, t.isBreakeven ? 1 : 0, t.source || 'CORE', adaptiveHistoryStr
     ], (err) => {
       if (err) console.error('[DB ERROR] Failed to save trade:', err.message);
     });
@@ -270,12 +274,21 @@ export function loadClosedTrades(): Promise<Trade[]> {
            console.error('[DB ERROR]', err);
            resolve([]);
         } else {
-           const trades: Trade[] = rows.map((r: any) => ({
-             ...r,
-             isBreakeven: r.isBreakeven === 1
-           }));
+           const trades: Trade[] = rows.map((r: any) => {
+             let adaptiveHistoryLogs: any[] = [];
+             try {
+               adaptiveHistoryLogs = r.adaptiveHistory ? JSON.parse(r.adaptiveHistory) : [];
+             } catch (e) {
+               console.error('[DB ERROR] Failed to parse adaptivehistory for closed trade:', r.id, e);
+             }
+             return {
+               ...r,
+               isBreakeven: r.isBreakeven === 1,
+               adaptiveHistoryLogs
+             };
+           });
            resolve(trades);
-        }
+         }
       });
     });
   });
@@ -289,12 +302,21 @@ export function loadActiveTrades(): Promise<Trade[]> {
            console.error('[DB ERROR]', err);
            resolve([]);
         } else {
-           const trades: Trade[] = rows.map((r: any) => ({
-             ...r,
-             isBreakeven: r.isBreakeven === 1
-           }));
+           const trades: Trade[] = rows.map((r: any) => {
+             let adaptiveHistoryLogs: any[] = [];
+             try {
+               adaptiveHistoryLogs = r.adaptiveHistory ? JSON.parse(r.adaptiveHistory) : [];
+             } catch (e) {
+               console.error('[DB ERROR] Failed to parse adaptivehistory for active trade:', r.id, e);
+             }
+             return {
+               ...r,
+               isBreakeven: r.isBreakeven === 1,
+               adaptiveHistoryLogs
+             };
+           });
            resolve(trades);
-        }
+         }
       });
     });
   });

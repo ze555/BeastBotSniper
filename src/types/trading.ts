@@ -81,6 +81,7 @@ export interface Trade {
       takerTrend?: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
     }
   };
+  adaptiveHistoryLogs?: any[];
 }
 
 export interface MarketCondition {

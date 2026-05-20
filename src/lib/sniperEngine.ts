@@ -796,31 +796,40 @@ export class SniperEngine {
                            (Date.now() - lastLog.time > 30000) || 
                            adaptiveEval.decision !== "CONTINUE";
 
-    if (shouldWriteLog) {
-      this.adaptiveCascadeLogs.push({
-        id: `${symbol}-${Date.now()}`,
-        symbol,
-        type: trade.type,
-        entryPrice: trade.entryPrice,
-        currentPrice,
-        decision: adaptiveEval.decision,
-        reason: adaptiveEval.reason,
-        score: adaptiveEval.score,
-        time: Date.now(),
-        metrics: {
-          rsi,
-          openInterest: currentOI,
-          volume: currentVol,
-          takerRatio: currentTakerRatio,
-          fundingRate: fundingRate !== undefined ? fundingRate : trade.fundingRate,
-          oiTrend,
-          volTrend,
-          takerTrend
-        }
-      });
+    const logEntry = {
+      id: `${symbol}-${Date.now()}`,
+      symbol,
+      type: trade.type,
+      entryPrice: trade.entryPrice,
+      currentPrice,
+      decision: adaptiveEval.decision,
+      reason: adaptiveEval.reason,
+      score: adaptiveEval.score,
+      time: Date.now(),
+      metrics: {
+        rsi,
+        openInterest: currentOI,
+        volume: currentVol,
+        takerRatio: currentTakerRatio,
+        fundingRate: fundingRate !== undefined ? fundingRate : trade.fundingRate,
+        oiTrend,
+        volTrend,
+        takerTrend
+      }
+    };
 
+    if (shouldWriteLog) {
+      this.adaptiveCascadeLogs.push(logEntry);
       if (this.adaptiveCascadeLogs.length > 200) {
         this.adaptiveCascadeLogs.shift();
+      }
+
+      if (!trade.adaptiveHistoryLogs) {
+        trade.adaptiveHistoryLogs = [];
+      }
+      trade.adaptiveHistoryLogs.push(logEntry);
+      if (trade.adaptiveHistoryLogs.length > 50) {
+        trade.adaptiveHistoryLogs.shift();
       }
     }
 

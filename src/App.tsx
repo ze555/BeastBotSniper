@@ -8,6 +8,7 @@ export default function App() {
   const [watchlist, setWatchlist] = useState<any[]>([]);
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
   const [historyTrades, setHistoryTrades] = useState<any[]>([]);
+  const [selectedTradeForCascade, setSelectedTradeForCascade] = useState<any | null>(null);
   const [stats, setStats] = useState({ totalPnl: 0, winRate: 0, openCount: 0, totalTrades: 0 });
   const [marketContext, setMarketContext] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
@@ -820,12 +821,13 @@ export default function App() {
                         <SortableHeader label="PnL %" field="pnlPerc" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الربح ($)" field="pnl" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الحالة" field="exitReason" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <th className="px-5 py-3 font-semibold text-slate-300 text-right">تقرير كاسكيد</th>
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
                         {paginatedHistory.length === 0 ? (
                            <tr>
-                             <td colSpan={9} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد أو لا توجد صفقات مطابقة.</td>
+                             <td colSpan={10} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد أو لا توجد صفقات مطابقة.</td>
                            </tr>
                         ) : paginatedHistory.map((t, i) => (
                            <tr key={i} className="hover:bg-slate-700/20 transition-colors">
@@ -865,6 +867,15 @@ export default function App() {
                                 <span className={`px-2 py-1 text-[10px] rounded ${getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
                                   {getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
                                 </span>
+                              </td>
+                              <td className="px-5 py-4">
+                                <button
+                                  onClick={() => setSelectedTradeForCascade(t)}
+                                  className="text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg border border-emerald-500/30 font-bold transition-all flex items-center justify-center gap-1 hover:scale-105 active:scale-95 cursor-pointer"
+                                >
+                                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                                  الفحوصات 📊
+                                </button>
                               </td>
                            </tr>
                         ))}
@@ -1005,6 +1016,171 @@ export default function App() {
 
         </div>
       </main>
+
+      {/* Floating Modal for Cascade Diagnostics */}
+      {selectedTradeForCascade && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md transition-all">
+           <div className="w-full max-w-3xl bg-slate-900 border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/80 overflow-hidden flex flex-col max-h-[85vh]">
+              {/* Header */}
+              <div className="p-5 border-b border-slate-700/50 bg-slate-800/85 flex justify-between items-center text-right">
+                 <button 
+                    onClick={() => setSelectedTradeForCascade(null)}
+                    className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700 cursor-pointer font-bold transition-all mr-auto"
+                 >
+                    إغلاق ✕
+                 </button>
+                 <div className="flex items-center gap-3">
+                    <div className="text-right">
+                       <h3 className="text-lg font-black text-white flex items-center gap-2 justify-end">
+                          سجل فحص كاسكيد: <span className="font-mono text-emerald-400">{selectedTradeForCascade.symbol}</span>
+                       </h3>
+                       <p className="text-[11px] text-slate-400">تتبع التدفق الزمني لقرارات حماية الأرباح وتأمين الصفقة من الأحدث للأقدم</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                       <Activity className="w-5 h-5 text-white animate-pulse" />
+                    </div>
+                 </div>
+              </div>
+
+              {/* Summary row */}
+              <div className="px-6 py-4 bg-slate-950/40 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-sans text-right" dir="rtl">
+                 <div className="space-y-1">
+                    <span className="text-slate-500 block">نوع الصفقة:</span>
+                    <div className="font-bold">
+                       {selectedTradeForCascade.type === 'LONG' ? (
+                          <span className="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LONG 📈</span>
+                       ) : (
+                          <span className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">SHORT 📉</span>
+                       )}
+                    </div>
+                 </div>
+                 <div className="space-y-1">
+                    <span className="text-slate-500 block">سعر الدخول / الخروج:</span>
+                    <div className="font-mono text-slate-200 font-bold" dir="ltr">
+                       {parseFloat(selectedTradeForCascade.entryPrice).toFixed(4)} → {parseFloat(selectedTradeForCascade.exitPrice).toFixed(4)}
+                    </div>
+                 </div>
+                 <div className="space-y-1">
+                    <span className="text-slate-500 block">الربح الصافي / النسبة:</span>
+                    <div className={`font-mono font-black ${selectedTradeForCascade.pnl > 0 ? 'text-emerald-400' : selectedTradeForCascade.pnl === 0 ? 'text-slate-300' : 'text-rose-400'}`} dir="ltr">
+                       {selectedTradeForCascade.pnl > 0 ? '+' : ''}${selectedTradeForCascade.pnl?.toFixed(2)} ({selectedTradeForCascade.pnlPerc?.toFixed(2)}%)
+                    </div>
+                 </div>
+                 <div className="space-y-1">
+                    <span className="text-slate-500 block">آلية الخروج النهائية:</span>
+                    <div className="font-semibold text-amber-400 truncate" title={selectedTradeForCascade.exitReason}>
+                       {selectedTradeForCascade.exitReason || "غير محدد"}
+                    </div>
+                 </div>
+              </div>
+
+              {/* Body Content */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-900" dir="rtl">
+                 {!selectedTradeForCascade.adaptiveHistoryLogs || selectedTradeForCascade.adaptiveHistoryLogs.length === 0 ? (
+                    <div className="py-12 text-center space-y-3">
+                       <ShieldCheck className="w-12 h-12 text-slate-600 mx-auto" />
+                       <h4 className="text-slate-400 font-bold">لا يوجد سجل تاريخي لكاسكيد لهذه الصفقة</h4>
+                       <p className="text-slate-500 text-xs max-w-sm mx-auto leading-relaxed">تم إغلاق الصفقة سريعاً أو لم يتثنى للمحرك تسجيل فحوصات تشخيصية ضمن دورتها الحالية.</p>
+                    </div>
+                 ) : (
+                    <div className="relative border-r border-slate-750 pr-4 mr-2 space-y-6 text-right">
+                       {selectedTradeForCascade.adaptiveHistoryLogs.slice().reverse().map((log: any, idx: number) => {
+                          const isContinue = log.decision === 'CONTINUE' || log.decision?.includes('STAY');
+                          const isTrail = log.decision === 'SL_TRAIL' || log.decision?.includes('TRAIL');
+                          const isExit = log.decision === 'EXIT_NOW' || log.decision?.includes('EXIT');
+
+                          return (
+                             <div key={log.id || idx} className="relative group">
+                                {/* Circle node on timeline */}
+                                <span className={`absolute -right-[21.5px] top-1.5 w-3 h-3 rounded-full border-2 ${
+                                   isContinue ? 'bg-emerald-500 border-slate-900 ring-4 ring-emerald-500/10' :
+                                   isTrail ? 'bg-amber-500 border-slate-900 ring-4 ring-amber-500/10' :
+                                   'bg-rose-500 border-slate-900 ring-4 ring-rose-500/10'
+                                }`}></span>
+
+                                {/* Card */}
+                                <div className="bg-slate-800/45 border border-slate-700/40 rounded-xl p-4 space-y-3 hover:border-slate-600/60 transition-all text-right">
+                                   <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-750/50 pb-2">
+                                      <div className="flex items-center gap-2">
+                                         <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                                            isContinue ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                            isTrail ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse' :
+                                            'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                         }`}>
+                                            {log.decision === 'CONTINUE' && 'استمرار بالصفقة 💎'}
+                                            {log.decision === 'SL_TRAIL' && 'تأمين وزحف الوقف 🛡️'}
+                                            {log.decision === 'EXIT_NOW' && 'خروج فوري وتصفية 🚨'}
+                                            {!['CONTINUE', 'SL_TRAIL', 'EXIT_NOW'].includes(log.decision || '') && log.decision}
+                                         </span>
+
+                                         <span className="text-[10px] bg-slate-900 text-slate-400 px-2 py-0.5 rounded font-mono">
+                                            قيمة الكاسكيد: {log.score ?? 0}/5
+                                         </span>
+                                      </div>
+                                      
+                                      <span className="text-[11px] text-slate-500 font-mono" dir="ltr">
+                                         {new Date(log.time).toLocaleTimeString('ar-SA')} - {new Date(log.time).toLocaleDateString('ar-SA')}
+                                      </span>
+                                   </div>
+
+                                   {/* Reason / Narrative */}
+                                   <div className="text-xs text-slate-300 leading-relaxed font-sans text-right">
+                                      <span className="text-slate-500 block text-[10px] mb-0.5 font-bold uppercase">السبب والتحليل المبرر للقرار:</span>
+                                      <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-800 text-slate-300 font-bold leading-normal">
+                                         {log.reason || "لا يوجد توصيف متاح."}
+                                      </div>
+                                   </div>
+
+                                   {/* Indicators Grid */}
+                                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2 border-t border-slate-750/30 font-mono text-[10px] text-right" dir="rtl">
+                                      <div className="p-2 bg-slate-950/20 rounded border border-slate-800 space-y-0.5">
+                                         <span className="text-slate-500 text-[9px] block">السيولة (Open Interest)</span>
+                                         <div className="flex items-center gap-1.5 justify-start text-xs font-bold text-slate-200" dir="ltr">
+                                            <span>{log.metrics?.openInterest ? log.metrics.openInterest.toLocaleString() : 'N/A'}</span>
+                                            {log.metrics?.oiTrend === 'UP' && <span className="text-emerald-400 font-bold">▲ UP</span>}
+                                            {log.metrics?.oiTrend === 'DOWN' && <span className="text-rose-400 font-bold">▼ DOWN</span>}
+                                            {log.metrics?.oiTrend === 'FLAT' && <span className="text-slate-400">■ FLAT</span>}
+                                         </div>
+                                      </div>
+
+                                      <div className="p-2 bg-slate-950/20 rounded border border-slate-800 space-y-0.5">
+                                         <span className="text-slate-500 text-[9px] block">قوة المشترين (Taker)</span>
+                                         <div className="flex items-center gap-1.5 justify-start text-xs font-bold text-slate-200" dir="ltr">
+                                            <span>{log.metrics?.takerRatio ? log.metrics.takerRatio.toFixed(3) : '1.0'}</span>
+                                            {log.metrics?.takerTrend === 'BULLISH' && <span className="text-emerald-400 font-bold">📈 BUY</span>}
+                                            {log.metrics?.takerTrend === 'BEARISH' && <span className="text-rose-400 font-bold">📉 SELL</span>}
+                                            {log.metrics?.takerTrend === 'NEUTRAL' && <span className="text-slate-400">■ NEUT</span>}
+                                         </div>
+                                      </div>
+
+                                      <div className="p-2 bg-slate-950/20 rounded border border-slate-800 space-y-0.5">
+                                         <span className="text-slate-500 text-[9px] block">رسوم التمويل (Funding)</span>
+                                         <div className="flex items-center gap-1.5 justify-start text-xs font-bold text-slate-200" dir="ltr">
+                                            <span className={log.metrics?.fundingRate > 0 ? "text-rose-400" : log.metrics?.fundingRate < 0 ? "text-emerald-400" : "text-slate-300"}>
+                                               {log.metrics?.fundingRate !== undefined ? `${(log.metrics.fundingRate * 100).toFixed(4)}%` : '0.0000%'}
+                                            </span>
+                                         </div>
+                                      </div>
+
+                                      <div className="p-2 bg-slate-950/20 rounded border border-slate-800 space-y-0.5">
+                                         <span className="text-slate-500 text-[9px] block">مؤشر القوة (RSI) / السعر</span>
+                                         <div className="flex items-center gap-1.5 justify-start text-[11px] font-bold text-slate-200" dir="ltr">
+                                            <span>RSI: {log.metrics?.rsi ? log.metrics.rsi.toFixed(1) : '50.0'}</span>
+                                            <span className="text-slate-500">|</span>
+                                            <span>${log.currentPrice ? log.currentPrice.toFixed(4) : log.entryPrice ? log.entryPrice.toFixed(4) : 'N/A'}</span>
+                                         </div>
+                                      </div>
+                                   </div>
+                                </div>
+                             </div>
+                          );
+                       })}
+                    </div>
+                 )}
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
