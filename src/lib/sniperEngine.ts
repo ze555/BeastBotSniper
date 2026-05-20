@@ -27,6 +27,7 @@ export class SniperEngine {
   private mode: "PAPER" | "LIVE" = "PAPER";
   private activeTrades: Map<string, Trade> = new Map();
   private tradeHistory: Trade[] = [];
+  private adaptiveCascadeLogs: any[] = [];
   private exchange: any = null;
   private binanceInitialized = false;
   private core = new CoreEngine();
@@ -320,6 +321,10 @@ export class SniperEngine {
 
   public getTradeHistory(): Trade[] {
     return this.tradeHistory;
+  }
+
+  public getAdaptiveCascadeLogs(): any[] {
+    return this.adaptiveCascadeLogs;
   }
 
   public triggerPanic(active: boolean) {
@@ -725,6 +730,90 @@ export class SniperEngine {
       if (trade.volHistory.length > 50) trade.volHistory.shift();
     }
 
+    // --- REAL-TIME ADAPTIVE CASCADE EVALUATION & TELEMETRY ---
+    let oiTrend: 'UP' | 'DOWN' | 'FLAT' = 'FLAT';
+    if (trade.oiHistory && trade.oiHistory.length > 1) {
+      const avgOI = trade.oiHistory.reduce((a, b) => a + b, 0) / trade.oiHistory.length;
+      if (currentOI !== undefined) {
+        if (currentOI > avgOI * 1.001) oiTrend = 'UP';
+        else if (currentOI < avgOI * 0.999) oiTrend = 'DOWN';
+      }
+    }
+
+    let volTrend: 'UP' | 'DOWN' | 'FLAT' = 'FLAT';
+    if (trade.volHistory && trade.volHistory.length > 1) {
+      const avgVol = trade.volHistory.reduce((a, b) => a + b, 0) / trade.volHistory.length;
+      if (currentVol !== undefined) {
+        if (currentVol > avgVol * 1.05) volTrend = 'UP';
+        else if (currentVol < avgVol * 0.95) volTrend = 'DOWN';
+      }
+    }
+
+    let takerTrend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    const takerRatioVal = currentTakerRatio !== undefined ? currentTakerRatio : 1.0;
+    if (takerRatioVal > 1.01) takerTrend = 'BULLISH';
+    else if (takerRatioVal < 0.99) takerTrend = 'BEARISH';
+
+    const adaptiveEval = this.evaluateAdaptiveExit(trade, currentPrice, currentOI, currentVol, currentTakerRatio, klines, rsi, adx);
+
+    const latestResult = {
+      time: Date.now(),
+      decision: adaptiveEval.decision,
+      reason: adaptiveEval.reason,
+      score: adaptiveEval.score,
+      metrics: {
+        price: currentPrice,
+        rsi: rsi,
+        openInterest: currentOI,
+        volume: currentVol,
+        takerRatio: currentTakerRatio,
+        oiTrend,
+        volTrend,
+        takerTrend
+      }
+    };
+
+    trade.latestAdaptiveResult = latestResult;
+
+    // Record the telemetry logs (throttle logging slightly to prevent duplicate logs of normal continue states, or keep all evaluations but clean)
+    // We can write a log entry when:
+    // 1. It is a state other than CONTINUE, OR
+    // 2. No logs exist for this symbol, OR
+    // 3. The decision changes, OR
+    // 4. Over 30 seconds have passed since the last log for this symbol.
+    const lastLog = this.adaptiveCascadeLogs.slice().reverse().find(l => l.symbol === symbol);
+    const shouldWriteLog = !lastLog || 
+                           lastLog.decision !== adaptiveEval.decision || 
+                           (Date.now() - lastLog.time > 30000) || 
+                           adaptiveEval.decision !== "CONTINUE";
+
+    if (shouldWriteLog) {
+      this.adaptiveCascadeLogs.push({
+        id: `${symbol}-${Date.now()}`,
+        symbol,
+        type: trade.type,
+        entryPrice: trade.entryPrice,
+        currentPrice,
+        decision: adaptiveEval.decision,
+        reason: adaptiveEval.reason,
+        score: adaptiveEval.score,
+        time: Date.now(),
+        metrics: {
+          rsi,
+          openInterest: currentOI,
+          volume: currentVol,
+          takerRatio: currentTakerRatio,
+          oiTrend,
+          volTrend,
+          takerTrend
+        }
+      });
+
+      if (this.adaptiveCascadeLogs.length > 200) {
+        this.adaptiveCascadeLogs.shift();
+      }
+    }
+
     // --- 1. CORE POSITION UPDATE (Standard PnL & Stats) ---
     const managerVerdict = this.manager.manage(trade as any, currentPrice, {
       strictFastBreakevenPerc: this.settings.strictFastBreakevenPerc,
@@ -738,7 +827,7 @@ export class SniperEngine {
                                 (managerVerdict.reason && (managerVerdict.reason.includes("TP") || managerVerdict.reason.includes("TRAILING")));
 
       if (shouldCheckAdaptive) {
-        const adaptive = this.evaluateAdaptiveExit(trade, currentPrice, currentOI, currentVol, currentTakerRatio, klines, rsi, adx);
+        const adaptive = adaptiveEval; // Re-use the already evaluated live state!
         
         if (adaptive.decision === ExitDecision.HOLD_FOR_MOON || adaptive.decision === ExitDecision.CONTINUE) {
            console.log(`[ADAPTIVE CASCADE] 🛡️ Exit Overridden: Staying in ${symbol} | Reason: ${managerVerdict.reason} -> ${adaptive.reason}`);

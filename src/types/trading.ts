@@ -64,6 +64,22 @@ export interface Trade {
   tickHistory?: number[]; // Live Data: Tracks every incoming price tick
   oiHistory?: number[]; // Open Interest history
   volHistory?: number[]; // Volume history
+  latestAdaptiveResult?: {
+    time: number;
+    decision: string;
+    reason: string;
+    score: number;
+    metrics: {
+      price: number;
+      rsi: number;
+      openInterest?: number;
+      volume?: number;
+      takerRatio?: number;
+      oiTrend?: 'UP' | 'DOWN' | 'FLAT';
+      volTrend?: 'UP' | 'DOWN' | 'FLAT';
+      takerTrend?: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    }
+  };
 }
 
 export interface MarketCondition {

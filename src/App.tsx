@@ -11,10 +11,27 @@ export default function App() {
   const [stats, setStats] = useState({ totalPnl: 0, winRate: 0, openCount: 0, totalTrades: 0 });
   const [marketContext, setMarketContext] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
+  const [adaptiveLogs, setAdaptiveLogs] = useState<any[]>([]);
   const [panicActive, setPanicActive] = useState(false);
   const [botActive, setBotActive] = useState(false);
   const [isInverse, setIsInverse] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Sorting & Pagination States
+  const [wlSortField, setWlSortField] = useState<string>('symbol');
+  const [wlSortDir, setWlSortDir] = useState<'asc' | 'desc'>('asc');
+  const [wlPage, setWlPage] = useState<number>(1);
+  const wlPageSize = 5;
+
+  const [histSortField, setHistSortField] = useState<string>('exitTime');
+  const [histSortDir, setHistSortDir] = useState<'asc' | 'desc'>('desc');
+  const [histPage, setHistPage] = useState<number>(1);
+  const histPageSize = 10;
+
+  const [adeSortField, setAdeSortField] = useState<string>('time');
+  const [adeSortDir, setAdeSortDir] = useState<'asc' | 'desc'>('desc');
+  const [adePage, setAdePage] = useState<number>(1);
+  const adePageSize = 10;
   const [settings, setSettings] = useState({ 
     portfolioSize: 2000, 
     riskPerTradePerc: 1, 
@@ -176,14 +193,15 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [wlRes, activeRes, histRes, statsRes, statusRes, contextRes, logsRes] = await Promise.all([
+      const [wlRes, activeRes, histRes, statsRes, statusRes, contextRes, logsRes, adpRes] = await Promise.all([
         fetch('/api/scanner/watchlist'),
         fetch('/api/trades/active'),
         fetch('/api/trades/history'),
         fetch('/api/stats'),
         fetch('/api/bot/status'),
         fetch('/api/market/context'),
-        fetch('/api/system/logs')
+        fetch('/api/system/logs'),
+        fetch('/api/system/adaptive-logs')
       ]);
       setWatchlist(await wlRes.json());
       setActiveTrades(await activeRes.json());
@@ -193,6 +211,7 @@ export default function App() {
       setBotActive(statusData.active);
       setMarketContext(await contextRes.json());
       setLogs(await logsRes.json());
+      setAdaptiveLogs(await adpRes.json());
     } catch(e) { }
   }
 
@@ -267,6 +286,113 @@ export default function App() {
       console.error(e);
     }
   }
+
+  // --- SORTING & PAGINATION CALCULATIONS ---
+  const handleWlSort = (field: string) => {
+    if (wlSortField === field) {
+      setWlSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setWlSortField(field);
+      setWlSortDir('asc');
+    }
+    setWlPage(1);
+  };
+
+  const handleHistSort = (field: string) => {
+    if (histSortField === field) {
+      setHistSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setHistSortField(field);
+      setHistSortDir('asc');
+    }
+    setHistPage(1);
+  };
+
+  const handleAdeSort = (field: string) => {
+    if (adeSortField === field) {
+      setAdeSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setAdeSortField(field);
+      setAdeSortDir('asc');
+    }
+    setAdePage(1);
+  };
+
+  // Watchlist sorting logic
+  const sortedWatchlist = [...watchlist].sort((a, b) => {
+    let valA: any = a[wlSortField];
+    let valB: any = b[wlSortField];
+
+    if (wlSortField === 'decision') {
+      valA = a.decision?.action || '';
+      valB = b.decision?.action || '';
+    } else if (wlSortField === 'volatilityPass') {
+      valA = a.checks?.volatilityPass ? 1 : 0;
+      valB = b.checks?.volatilityPass ? 1 : 0;
+    }
+
+    if (valA === undefined || valA === null) return wlSortDir === 'asc' ? 1 : -1;
+    if (valB === undefined || valB === null) return wlSortDir === 'asc' ? -1 : 1;
+
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      return wlSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    } else {
+      return wlSortDir === 'asc' ? valA - valB : valB - valA;
+    }
+  });
+
+  const totalWlPages = Math.ceil(sortedWatchlist.length / wlPageSize) || 1;
+  const paginatedWatchlist = sortedWatchlist.slice((wlPage - 1) * wlPageSize, wlPage * wlPageSize);
+
+  // Closed Trades (History) sorting logic
+  const sortedHistory = [...historyTrades].sort((a, b) => {
+    let valA: any = a[histSortField];
+    let valB: any = b[histSortField];
+
+    if (histSortField === 'pnlPerc') {
+      valA = getDisplayPnLPerc(a.pnlPerc || 0, a.amount || 0, a.leverage || 10);
+      valB = getDisplayPnLPerc(b.pnlPerc || 0, b.amount || 0, b.leverage || 10);
+    } else if (histSortField === 'pnl') {
+      valA = getDisplayPnL(a.pnl || 0, a.amount || 0);
+      valB = getDisplayPnL(b.pnl || 0, b.amount || 0);
+    }
+
+    if (valA === undefined || valA === null) return histSortDir === 'asc' ? 1 : -1;
+    if (valB === undefined || valB === null) return histSortDir === 'asc' ? -1 : 1;
+
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      return histSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    } else {
+      return histSortDir === 'asc' ? valA - valB : valB - valA;
+    }
+  });
+
+  const totalHistPages = Math.ceil(sortedHistory.length / histPageSize) || 1;
+  const paginatedHistory = sortedHistory.slice((histPage - 1) * histPageSize, histPage * histPageSize);
+
+  // Adaptive Cascade Logs sorting logic
+  const sortedAdaptive = [...adaptiveLogs].sort((a, b) => {
+    let valA: any = a[adeSortField];
+    let valB: any = b[adeSortField];
+
+    if (adeSortField.startsWith('metrics.')) {
+      const key = adeSortField.split('.')[1];
+      valA = a.metrics?.[key];
+      valB = b.metrics?.[key];
+    }
+
+    if (valA === undefined || valA === null) return adeSortDir === 'asc' ? 1 : -1;
+    if (valB === undefined || valB === null) return adeSortDir === 'asc' ? -1 : 1;
+
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      return adeSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    } else {
+      return adeSortDir === 'asc' ? valA - valB : valB - valA;
+    }
+  });
+
+  const totalAdePages = Math.ceil(sortedAdaptive.length / adePageSize) || 1;
+  const paginatedAdaptive = sortedAdaptive.slice((adePage - 1) * adePageSize, adePage * adePageSize);
   
   return (
     <div className="flex h-screen overflow-hidden bg-slate-900 border-t-4 border-emerald-500">
@@ -281,6 +407,7 @@ export default function App() {
           </div>
           <nav className="flex flex-col gap-2 px-2 md:px-4">
             <NavItem icon={<Activity />} label="لوحة التحكم ومراقبة السوق" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+            <NavItem icon={<Zap className="text-amber-400" />} label="فحص الخروج التكيفي (Cascade Log)" active={activeTab === 'adaptiveLogs'} onClick={() => setActiveTab('adaptiveLogs')} />
             <NavItem icon={<BarChart2 />} label="سجل الصفقات الموحد" active={activeTab === 'trades'} onClick={() => setActiveTab('trades')} />
             <NavItem icon={<Settings />} label="لوحة التحكم والنظام الموحد" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
           </nav>
@@ -439,6 +566,7 @@ export default function App() {
                                 </h4>
                                 <p className="text-xs text-slate-400 mt-1">السعر الحالي: <span className="font-mono text-slate-300">{t.currentPrice ? parseFloat(t.currentPrice as any).toFixed(4) : '...'}</span></p>
                                 <p className="text-xs text-slate-400 mt-1">الدخول: <span className="font-mono text-slate-300">{parseFloat(t.entryPrice as any).toFixed(4)}</span></p>
+                                <p className="text-xs text-slate-400 mt-1">تاريخ الدخول: <span className="font-mono text-emerald-400 font-medium">{new Date(t.entryTime || Date.now()).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}</span></p>
                                 <p className="text-xs text-slate-400 mt-1 flex items-center justify-between">
                                   <span>حجم الصفقة: <span className="font-mono text-slate-300">${parseFloat(t.amount as any).toFixed(2)}</span></span>
                                   <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-mono">{(t as any).leverage || 10}x</span>
@@ -459,6 +587,75 @@ export default function App() {
                               <div>وقف الخسارة: <span className="font-mono text-slate-200 block">{parseFloat(t.sl).toFixed(4)}</span></div>
                               <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
                            </div>
+
+                           {/* Adaptive exit real-time status */}
+                           {t.latestAdaptiveResult ? (
+                             <div className="mt-3 pt-3 border-t border-slate-800/80 bg-slate-950/40 p-2.5 rounded-lg space-y-2">
+                               <div className="flex justify-between items-center text-[11px]">
+                                 <span className="text-slate-400 font-medium">مراقبة الخروج التكيفي Tracker:</span>
+                                 <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] uppercase border ${
+                                   t.latestAdaptiveResult.decision === 'CONTINUE' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                   t.latestAdaptiveResult.decision === 'HOLD_FOR_MOON' ? 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-pink-400 border-pink-500/30 font-bold animate-pulse' :
+                                   t.latestAdaptiveResult.decision === 'TRAIL_TIGHT' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                   'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                 }`}>
+                                   {t.latestAdaptiveResult.decision === 'CONTINUE' ? '✓ استمرار' :
+                                    t.latestAdaptiveResult.decision === 'HOLD_FOR_MOON' ? '🚀 تمسك قمري' :
+                                    t.latestAdaptiveResult.decision === 'TRAIL_TIGHT' ? '⚠️ تشديد الوقف' :
+                                    '🛑 خروج فوراً'}
+                                 </span>
+                               </div>
+
+                               {/* Live Indicators & Trends */}
+                               <div className="grid grid-cols-3 gap-1.5 text-[10px] font-mono text-center">
+                                 <div className="bg-slate-900/60 p-1 rounded border border-slate-800/40">
+                                   <div className="text-slate-500 text-[8px] truncate">السيولة OI</div>
+                                   <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                                     <span className="text-slate-200">
+                                       {t.latestAdaptiveResult.metrics.openInterest ? (t.latestAdaptiveResult.metrics.openInterest > 1e6 ? `${(t.latestAdaptiveResult.metrics.openInterest / 1e6).toFixed(1)}M` : t.latestAdaptiveResult.metrics.openInterest.toFixed(0)) : 'N/A'}
+                                     </span>
+                                     {t.latestAdaptiveResult.metrics.oiTrend === 'UP' && <span className="text-emerald-400">▲</span>}
+                                     {t.latestAdaptiveResult.metrics.oiTrend === 'DOWN' && <span className="text-rose-400">▼</span>}
+                                     {t.latestAdaptiveResult.metrics.oiTrend === 'FLAT' && <span className="text-slate-500">■</span>}
+                                   </div>
+                                 </div>
+                                 <div className="bg-slate-900/60 p-1 rounded border border-slate-800/40">
+                                   <div className="text-slate-500 text-[8px] truncate">حجم Vol</div>
+                                   <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                                     <span className="text-slate-200">
+                                       {t.latestAdaptiveResult.metrics.volume ? (t.latestAdaptiveResult.metrics.volume > 1e6 ? `${(t.latestAdaptiveResult.metrics.volume / 1e6).toFixed(1)}M` : t.latestAdaptiveResult.metrics.volume.toFixed(0)) : 'N/A'}
+                                     </span>
+                                     {t.latestAdaptiveResult.metrics.volTrend === 'UP' && <span className="text-emerald-400">▲</span>}
+                                     {t.latestAdaptiveResult.metrics.volTrend === 'DOWN' && <span className="text-rose-400">▼</span>}
+                                     {t.latestAdaptiveResult.metrics.volTrend === 'FLAT' && <span className="text-slate-500">■</span>}
+                                   </div>
+                                 </div>
+                                 <div className="bg-slate-900/60 p-1 rounded border border-slate-800/40">
+                                   <div className="text-slate-500 text-[8px] truncate">Taker</div>
+                                   <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                                     <span className={`font-semibold ${
+                                       t.latestAdaptiveResult.metrics.takerTrend === 'BULLISH' ? 'text-emerald-400' :
+                                       t.latestAdaptiveResult.metrics.takerTrend === 'BEARISH' ? 'text-rose-400' : 'text-slate-200'
+                                     }`}>
+                                       {t.latestAdaptiveResult.metrics.takerRatio ? t.latestAdaptiveResult.metrics.takerRatio.toFixed(2) : '1.00'}
+                                     </span>
+                                   </div>
+                                 </div>
+                               </div>
+
+                               {/* Decision reason */}
+                               <div className="text-[10px] text-slate-300 flex flex-col gap-0.5 leading-normal">
+                                 <div className="text-slate-500 text-[9px]">سبب القرار:</div>
+                                 <div className="italic text-slate-300 line-clamp-2 leading-relaxed bg-slate-900/40 px-1.5 py-1 rounded border border-slate-850/30 font-sans">
+                                   {t.latestAdaptiveResult.reason}
+                                 </div>
+                               </div>
+                             </div>
+                           ) : (
+                             <div className="mt-3 pt-3 border-t border-slate-800/80 text-center text-slate-600 text-[10px] italic">
+                               بانتظار مخرجات الفحص التكيفي...
+                             </div>
+                           )}
                         </div>
                       ))}
                     </div>
@@ -481,24 +678,24 @@ export default function App() {
                 
                 <div className="overflow-x-auto">
                   <table className="w-full text-right text-sm">
-                     <thead className="bg-slate-800/30 text-slate-400">
+                     <thead className="bg-slate-800/30 text-slate-400 border-b border-slate-750">
                       <tr>
-                        <th className="px-5 py-3 font-medium">العملة</th>
-                        <th className="px-5 py-3 font-medium">التقييم</th>
-                        <th className="px-5 py-3 font-medium">الاتجاه</th>
-                        <th className="px-5 py-3 font-medium">RVOL</th>
-                        <th className="px-5 py-3 font-medium">التذبذب</th>
-                        <th className="px-5 py-3 font-medium">حالة الفحوصات</th>
-                        <th className="px-5 py-3 font-medium">محرك القرار (7-Layers)</th>
+                        <SortableHeader label="العملة" field="symbol" sortField={wlSortField} sortDir={wlSortDir} onSort={handleWlSort} />
+                        <SortableHeader label="التقييم" field="score" sortField={wlSortField} sortDir={wlSortDir} onSort={handleWlSort} />
+                        <SortableHeader label="الاتجاه" field="trend" sortField={wlSortField} sortDir={wlSortDir} onSort={handleWlSort} />
+                        <SortableHeader label="RVOL" field="rvol" sortField={wlSortField} sortDir={wlSortDir} onSort={handleWlSort} />
+                        <SortableHeader label="التذبذب" field="volatility" sortField={wlSortField} sortDir={wlSortDir} onSort={handleWlSort} />
+                        <th className="px-5 py-3 font-semibold text-slate-300">حالة الفحوصات</th>
+                        <SortableHeader label="محرك القرار (7-Layers)" field="decision" sortField={wlSortField} sortDir={wlSortDir} onSort={handleWlSort} />
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
-                        {watchlist.length === 0 && !loading && (
+                        {paginatedWatchlist.length === 0 && !loading && (
                            <tr>
-                             <td colSpan={6} className="py-8 text-center text-slate-500">جاري مسح الأسواق أو لا توجد عملات استوفت الشروط...</td>
+                             <td colSpan={7} className="py-8 text-center text-slate-500">جاري مسح الأسواق أو لا توجد عملات استوفت الشروط...</td>
                            </tr>
                         )}
-                        {watchlist.map((coin, i) => (
+                        {paginatedWatchlist.map((coin, i) => (
                            <tr key={i} className="hover:bg-slate-700/20 transition-colors">
                               <td className="px-5 py-4 font-bold font-mono text-emerald-400">{coin.symbol}</td>
                               <td className="px-5 py-4">
@@ -524,7 +721,7 @@ export default function App() {
                                 <CheckBadge active={coin.checks.spreadPass} label="SPR" />
                                 <CheckBadge active={coin.checks.oiPass} label="OI" />
                               </td>
-                              <td className="px-5 py-4">
+                              <td className="px-5 py-4 font-sans">
                                 {coin.decision ? (
                                    <div className="flex flex-col gap-1">
                                       <div className="flex items-center gap-2">
@@ -539,28 +736,35 @@ export default function App() {
                                             )}
                                          </span>
                                          <span className="text-[10px] text-slate-400 font-mono">{(coin.decision.confidence * 100).toFixed(0)}%</span>
-                                      </div>
-                                      {(isInverse ? (coin.decision.action === 'SLEEP') : (coin.decision.confidence < 0.6 && coin.decision.action === 'ATTACK')) && (
-                                         <div className="text-[9px] text-rose-400 font-bold italic">
-                                            {isInverse ? '⚠️ تقييم غير مكتمل (معكوس)' : '⚠️ تقييم غير مكتمل'}
-                                         </div>
-                                      )}
-                                      <div className="text-[10px] text-emerald-400/80 font-medium">
-                                         {coin.decision.regime}
-                                      </div>
-                                      <div className="text-[9px] text-slate-500 truncate max-w-[120px]" title={coin.decision.reason}>
-                                         {coin.decision.reason}
-                                      </div>
-                                   </div>
-                                ) : (
-                                   <span className="text-slate-600 font-mono text-[10px]">No Data</span>
-                                )}
+                                       </div>
+                                       {(isInverse ? (coin.decision.action === 'SLEEP') : (coin.decision.confidence < 0.6 && coin.decision.action === 'ATTACK')) && (
+                                          <div className="text-[9px] text-rose-400 font-bold italic font-sans">
+                                             {isInverse ? '⚠️ تقييم غير مكتمل (معكوس)' : '⚠️ تقييم غير مكتمل'}
+                                          </div>
+                                       )}
+                                       <div className="text-[10px] text-emerald-400/80 font-medium font-sans animate-pulse">
+                                          {coin.decision.regime}
+                                       </div>
+                                       <div className="text-[9px] text-slate-500 truncate max-w-[120px] font-sans" title={coin.decision.reason}>
+                                          {coin.decision.reason}
+                                       </div>
+                                    </div>
+                                 ) : (
+                                    <span className="text-slate-600 font-mono text-[10px]">No Data</span>
+                                 )}
                               </td>
                            </tr>
                         ))}
                      </tbody>
                   </table>
                 </div>
+                {totalWlPages > 1 && (
+                  <TablePagination 
+                    currentPage={wlPage} 
+                    totalPages={totalWlPages} 
+                    onPageChange={setWlPage} 
+                  />
+                )}
               </div>
 
               {/* System Execution Logs */}
@@ -575,7 +779,7 @@ export default function App() {
                        <span className="text-[10px] text-emerald-500/70 font-mono italic">STREAMING_ACTIVE</span>
                     </div>
                  </div>
-                 <div className="p-4 h-48 overflow-y-auto font-mono text-[11px] space-y-1 bg-black/20">
+                 <div className="p-4 h-48 overflow-y-auto font-mono text-[11px] space-y-1 bg-black/20 text-right">
                     {logs.length === 0 ? (
                        <div className="text-slate-600 italic">بانتظار أحداث النظام...</div>
                     ) : logs.slice().reverse().map((log, i) => (
@@ -604,41 +808,41 @@ export default function App() {
                   </h3>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-right text-sm text-slate-300">
-                     <thead className="bg-slate-800/30 text-slate-400">
+                  <table className="w-full text-right text-sm text-slate-300 font-sans">
+                     <thead className="bg-slate-800/30 text-slate-400 border-b border-slate-750">
                       <tr>
-                        <th className="px-5 py-3 font-medium">العملة</th>
-                        <th className="px-5 py-3 font-medium">الآلية</th>
-                        <th className="px-5 py-3 font-medium">النوع</th>
-                        <th className="px-5 py-3 font-medium">الرافعة</th>
-                        <th className="px-5 py-3 font-medium">الدخول</th>
-                        <th className="px-5 py-3 font-medium">الخروج</th>
-                        <th className="px-5 py-3 font-medium">PnL %</th>
-                        <th className="px-5 py-3 font-medium">الربح ($)</th>
-                        <th className="px-5 py-3 font-medium">الحالة</th>
+                        <SortableHeader label="العملة" field="symbol" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الآلية" field="source" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="النوع" field="type" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الرافعة" field="leverage" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الدخول" field="entryPrice" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الخروج" field="exitPrice" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="PnL %" field="pnlPerc" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الربح ($)" field="pnl" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الحالة" field="exitReason" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
-                        {historyTrades.length === 0 ? (
+                        {paginatedHistory.length === 0 ? (
                            <tr>
-                             <td colSpan={9} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد.</td>
+                             <td colSpan={9} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد أو لا توجد صفقات مطابقة.</td>
                            </tr>
-                        ) : historyTrades.map((t, i) => (
-                           <tr key={i} className="hover:bg-slate-700/20">
+                        ) : paginatedHistory.map((t, i) => (
+                           <tr key={i} className="hover:bg-slate-700/20 transition-colors">
                               <td className="px-5 py-4 font-bold font-mono text-slate-100">{t.symbol}</td>
                               <td className="px-5 py-4">
                                  {t.source === 'AGGRESSIVE_INCOMPLETE' || t.source === 'DIRECT_ENTRY' ? (
                                     <div className="flex flex-col gap-1">
-                                       <span className="flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 px-2 py-1 rounded border border-rose-500/20 whitespace-nowrap font-bold">
+                                       <span className="flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 px-2 py-1 rounded border border-rose-500/20 whitespace-nowrap font-bold w-fit">
                                           <Zap className="w-3 h-3 fill-current" />
                                           هجومي 🔥
                                        </span>
                                     </div>
                                  ) : (
-                                    <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap font-medium">
+                                    <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap font-medium w-fit">
                                        <Target className="w-3 h-3" />
                                        قناص 🎯
-                                    </span>
+                                     </span>
                                  )}
                               </td>
                               <td className="px-5 py-4">
@@ -666,6 +870,123 @@ export default function App() {
                         ))}
                      </tbody>
                   </table>
+                </div>
+                {totalHistPages > 1 && (
+                  <TablePagination
+                    currentPage={histPage}
+                    totalPages={totalHistPages}
+                    onPageChange={setHistPage}
+                  />
+                )}
+             </div>
+          )}
+
+          {activeTab === 'adaptiveLogs' && (
+             <div className="space-y-6">
+                {/* Visual Header */}
+                <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-6 relative overflow-hidden group">
+                   <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 blur-[100px] -mr-32 -mt-32"></div>
+                   <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div>
+                         <h3 className="text-xl font-bold flex items-center gap-2 text-slate-100">
+                            <Zap className="w-5 h-5 text-amber-400" />
+                            سجل الفحص التكيفي والتدفقات (Adaptive Cascade Telemetry Block)
+                         </h3>
+                         <p className="text-xs text-slate-400 mt-1">تتبع التدفق الذكي لقرارات حماية الأرباح وتجنب الخروج العشوائي بناءً على السيولة اللحظية ومؤشرات الحوت.</p>
+                      </div>
+                      <div className="flex gap-2">
+                         <span className="text-[10px] px-2 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded font-bold">حالة الفحص النشط: آمن 🛡️</span>
+                         <span className="text-[10px] px-2 py-1 bg-slate-900 text-slate-400 rounded font-mono font-bold">OI_THRESHOLD: ACTIVE</span>
+                      </div>
+                   </div>
+                </div>
+
+                {/* Main Table */}
+                <div className="rounded-xl bg-slate-800/50 border border-slate-700/50 overflow-hidden">
+                   <div className="p-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/80">
+                      <h4 className="text-sm font-bold flex items-center gap-2 text-slate-300">
+                         <Activity className="w-4 h-4 text-emerald-400" />
+                         تدفق الفحوصات الحية للصفقات النشطة (الاستمرار / الخروج القسري)
+                      </h4>
+                   </div>
+                   <div className="overflow-x-auto">
+                      <table className="w-full text-right text-sm text-slate-300 font-sans">
+                         <thead className="bg-slate-800/30 text-slate-400 border-b border-slate-750">
+                            <tr>
+                               <SortableHeader label="تاريخ الفحص" field="time" sortField={adeSortField} sortDir={adeSortDir} onSort={handleAdeSort} />
+                               <SortableHeader label="العملة" field="symbol" sortField={adeSortField} sortDir={adeSortDir} onSort={handleAdeSort} />
+                               <SortableHeader label="المخرجات / القرار" field="decision" sortField={adeSortField} sortDir={adeSortDir} onSort={handleAdeSort} />
+                               <SortableHeader label="السيولة (Open Interest)" field="metrics.openInterest" sortField={adeSortField} sortDir={adeSortDir} onSort={handleAdeSort} />
+                               <SortableHeader label="قوة المشترين (Taker)" field="metrics.takerRatio" sortField={adeSortField} sortDir={adeSortDir} onSort={handleAdeSort} />
+                               <th className="px-5 py-3 font-semibold text-slate-300">تفاصيل معطيات القرار والمؤشرات الحية</th>
+                            </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-700/50">
+                            {paginatedAdaptive.length === 0 ? (
+                               <tr>
+                                  <td colSpan={6} className="py-8 text-center text-slate-500 font-medium font-sans">لا توجد سجلات فحص تكيفية حالياً للصفقات المفتوحة.</td>
+                               </tr>
+                            ) : paginatedAdaptive.map((log, i) => (
+                               <tr key={i} className="hover:bg-slate-700/10 transition-colors">
+                                  <td className="px-5 py-4 font-mono text-xs text-slate-400 text-nowrap">
+                                     {new Date(log.time || Date.now()).toLocaleTimeString('ar-SA')} - {new Date(log.time || Date.now()).toLocaleDateString('ar-SA')}
+                                  </td>
+                                  <td className="px-5 py-4 font-bold font-mono text-slate-100">{log.symbol}</td>
+                                  <td className="px-5 py-4">
+                                     <span className={`px-2 py-1 text-[11px] font-bold rounded ${
+                                        log.decision === 'CONTINUE' || log.decision?.includes('STAY') ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' :
+                                        log.decision === 'SL_TRAIL' || log.decision?.includes('TRAIL') ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20 animate-pulse' :
+                                        'bg-rose-500/20 text-rose-400 border border-rose-500/20'
+                                     }`}>
+                                        {log.decision === 'CONTINUE' && 'استمرار بالصفقة 💎'}
+                                        {log.decision === 'SL_TRAIL' && 'تأمين وزحف الوقف 🛡️'}
+                                        {log.decision === 'EXIT_NOW' && 'خروج فوري وتصفية 🚨'}
+                                        {!['CONTINUE', 'SL_TRAIL', 'EXIT_NOW'].includes(log.decision || '') && log.decision}
+                                     </span>
+                                  </td>
+                                  <td className="px-5 py-4 font-mono">
+                                     {log.metrics?.openInterest ? (
+                                        <div className="flex flex-col">
+                                           <span className="font-bold text-slate-200">
+                                              {log.metrics.openInterest > 1e6 ? `${(log.metrics.openInterest / 1e6).toFixed(2)}M` : log.metrics.openInterest.toFixed(0)}
+                                           </span>
+                                           <span className={`text-[10px] ${log.metrics.oiChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                              {log.metrics.oiChange >= 0 ? '↗ زاد الاهتمام' : '↘ نقص الاهتمام'} ({log.metrics.oiChange?.toFixed(2)}%)
+                                           </span>
+                                        </div>
+                                     ) : (
+                                        <span className="text-slate-600 font-mono text-xs">-</span>
+                                     )}
+                                  </td>
+                                  <td className="px-5 py-4 font-mono">
+                                     {log.metrics?.takerRatio ? (
+                                        <div className="flex flex-col">
+                                           <span className={`font-bold ${log.metrics.takerRatio >= 1.0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                              {(log.metrics.takerRatio * 100).toFixed(1)}%
+                                           </span>
+                                           <span className="text-[10px] text-slate-500">معدل الشراء</span>
+                                        </div>
+                                     ) : (
+                                        <span className="text-slate-600 font-mono text-xs">-</span>
+                                     )}
+                                  </td>
+                                  <td className="px-5 py-4 font-sans text-xs max-w-sm">
+                                     <div className="text-slate-300 leading-relaxed font-semibold">
+                                        {log.reason}
+                                     </div>
+                                  </td>
+                               </tr>
+                            ))}
+                         </tbody>
+                      </table>
+                   </div>
+                   {totalAdePages > 1 && (
+                      <TablePagination
+                         currentPage={adePage}
+                         totalPages={totalAdePages}
+                         onPageChange={setAdePage}
+                      />
+                   )}
                 </div>
              </div>
           )}
@@ -728,6 +1049,69 @@ function StatCard({ title, value, trend, positive }: { title: string, value: str
                  {trend}
              </span>
         )}
+    </div>
+  );
+}
+
+// Helper: Sortable Header Component in Arabic
+function SortableHeader({ 
+  label, 
+  field, 
+  sortField, 
+  sortDir, 
+  onSort 
+}: { 
+  label: string, 
+  field: string, 
+  sortField: string, 
+  sortDir: 'asc' | 'desc', 
+  onSort: (field: string) => void 
+}) {
+  const isSorted = sortField === field;
+  return (
+    <th 
+      onClick={() => onSort(field)} 
+      className="px-5 py-3 cursor-pointer hover:bg-slate-700/30 text-right select-none transition-colors"
+    >
+      <div className="flex items-center gap-1.5 justify-start">
+        <span className="font-semibold text-slate-300">{label}</span>
+        <span className="text-[10px] text-emerald-400 font-mono">
+          {isSorted ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
+}
+
+// Helper: Arabic pagination controls
+function TablePagination({ 
+  currentPage, 
+  totalPages, 
+  onPageChange 
+}: { 
+  currentPage: number, 
+  totalPages: number, 
+  onPageChange: (page: number) => void 
+}) {
+  return (
+    <div className="flex justify-between items-center px-5 py-3 bg-slate-800/25 border-t border-slate-750 text-xs">
+      <span className="text-slate-400 font-medium select-none">الصفحة <span className="text-emerald-400 font-mono">{currentPage}</span> من <span className="font-mono">{totalPages}</span></span>
+      <div className="flex gap-1.5">
+        <button
+          disabled={currentPage === 1}
+          onClick={() => onPageChange(currentPage - 1)}
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-700 hover:border-slate-500 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 disabled:hover:border-slate-700 font-medium text-slate-300 transition-all select-none cursor-pointer disabled:cursor-not-allowed"
+        >
+          السابق
+        </button>
+        <button
+          disabled={currentPage === totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-700 hover:border-slate-500 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 disabled:hover:border-slate-700 font-medium text-slate-300 transition-all select-none cursor-pointer disabled:cursor-not-allowed"
+        >
+          التالي
+        </button>
+      </div>
     </div>
   );
 }

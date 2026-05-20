@@ -63,6 +63,10 @@ async function startServer() {
     res.json(getSystemLogs());
   });
 
+  app.get("/api/system/adaptive-logs", (req, res) => {
+    res.json(sniper.getAdaptiveCascadeLogs());
+  });
+
   app.post("/api/bot/panic", (req, res) => {
     const { active } = req.body;
     sniper.triggerPanic(active);
