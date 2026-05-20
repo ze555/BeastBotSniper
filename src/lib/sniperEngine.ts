@@ -844,8 +844,10 @@ export class SniperEngine {
       }
 
       if (adaptiveEval.decision === ExitDecision.TRAIL_TIGHT) {
-        console.log(`[ADAPTIVE CASCADE] ⚠️ Hegemony Tightened Trailing stop for ${symbol} | Reason: ${adaptiveEval.reason}`);
-        trade.sl = trade.type === "LONG" ? currentPrice * 0.998 : currentPrice * 1.002;
+        const oldSl = trade.sl;
+        const smartSl = this.calculateSmartTightStop(trade, currentPrice);
+        trade.sl = smartSl;
+        console.log(`[ADAPTIVE CASCADE] ⚠️ Hegemony Tightened Trailing stop for ${symbol} | Old SL: ${oldSl ? oldSl.toFixed(4) : 'None'} -> New SL: ${smartSl.toFixed(4)} | Reason: ${adaptiveEval.reason}`);
         updated = true;
       }
     }
@@ -872,8 +874,10 @@ export class SniperEngine {
         }
         
         if (adaptive.decision === ExitDecision.TRAIL_TIGHT) {
-           console.log(`[ADAPTIVE CASCADE] ⚠️ Tightening Trailing Stop for ${symbol} instead of closing.`);
-           trade.sl = trade.type === "LONG" ? currentPrice * 0.998 : currentPrice * 1.002;
+           const oldSl = trade.sl;
+           const smartSl = this.calculateSmartTightStop(trade, currentPrice);
+           trade.sl = smartSl;
+           console.log(`[ADAPTIVE CASCADE] ⚠️ Tightening Trailing Stop for ${symbol} instead of closing | Old SL: ${oldSl ? oldSl.toFixed(4) : 'None'} -> New SL: ${smartSl.toFixed(4)}.`);
            updated = true;
            return; 
         }
@@ -1405,6 +1409,57 @@ export class SniperEngine {
     );
     if (result.shouldExit) {
       await this.closeTrade(trade, currentPrice, result.reason);
+    }
+  }
+
+  private calculateSmartTightStop(trade: Trade, currentPrice: number): number {
+    const isLong = trade.type === "LONG";
+    const currentSl = trade.sl || 0;
+    
+    // Calculate the extreme high or low price achieved to detect deviations
+    const highestPrice = trade.highestPrice || (isLong ? currentPrice : 0);
+    const lowestPrice = trade.lowestPrice || (!isLong ? currentPrice : Infinity);
+    
+    // Check if the price/market is deteriorating (reversing from best potential prices)
+    let isDeteriorating = false;
+    let reversePerc = 0;
+    if (isLong && highestPrice > currentPrice) {
+      isDeteriorating = true;
+      reversePerc = ((highestPrice - currentPrice) / highestPrice) * 100;
+    } else if (!isLong && currentPrice > lowestPrice && lowestPrice > 0) {
+      isDeteriorating = true;
+      reversePerc = ((currentPrice - lowestPrice) / lowestPrice) * 100;
+    }
+    
+    // Dynamic trail distance: standard is 0.2% (0.002)
+    // "اذا اسوء اعدل واقربها للحد من الخسارة اوالحفاظ علي اقرب ربح"
+    // If situation is deteriorating, we tighten the trail distance further to 0.1% (0.001) to squeeze against loss.
+    let squeezeRatio = 0.002;
+    if (isDeteriorating) {
+      squeezeRatio = 0.001; // Squeeze extremely tight to preserve maximum remaining asset value
+    } else {
+      // If position has moved favorably, adapt tightening depending on current profits
+      const basePnlPerc = trade.pnlPerc || 0;
+      if (basePnlPerc > 1.5) {
+        squeezeRatio = 0.0012; // In strong profit list -> squeeze trail to lock in high returns
+      } else {
+        squeezeRatio = 0.0018; 
+      }
+    }
+    
+    const candidateSl = isLong 
+      ? currentPrice * (1 - squeezeRatio)
+      : currentPrice * (1 + squeezeRatio);
+      
+    // Golden safety rule of trailing: we can only lock in better (tighter) positions, never retract!
+    if (!currentSl) {
+      return candidateSl;
+    }
+    
+    if (isLong) {
+      return Math.max(currentSl, candidateSl);
+    } else {
+      return Math.min(currentSl, candidateSl);
     }
   }
 
