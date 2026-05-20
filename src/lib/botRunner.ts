@@ -122,30 +122,56 @@ export async function runTradeLoop() {
               let currentOI: number | undefined = undefined;
               let currentVol: number | undefined = undefined;
 
-              // 1. DATA FETCHING (KINETIC & ADAPTIVE)
+              // 1. DATA FETCHING (KINETIC & ADAPTIVE) - SELF-HEALING & SEGREGATED
               const tfs = getTimeframes(!!settings.isLongTerm);
               let klines: any[] = [];
               let currentRsi = 50;
               let currentAdx = 25;
               let currentTakerRatio = 1.0;
+              let currentFundingRate = 0.0;
 
               try {
-                // Fetch klines and taker ratio first
-                const [klinesRes, takerVRes, oiRes] = await Promise.all([
-                  axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=${tfs.m5}&limit=35`, { timeout: 4000 }),
-                  axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 }),
+                // Fetch each endpoint in parallel with individual safe catch handlers to prevent cascading failures
+                const [klinesRes, takerVRes, oiRes, premiumRes] = await Promise.all([
+                  axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=${tfs.m5}&limit=35`, { timeout: 4000 })
+                    .catch(err => {
+                       console.warn(`[BOT RUNNER] Klines fetch backup needed for ${t.symbol}:`, err.message);
+                       return { data: [] };
+                    }),
+                  axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 })
+                    .catch(() => {
+                       // Suppress warnings as some low cap/new coins do not support taker buy/sell volume endpoints
+                       return { data: [] };
+                    }),
                   axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${t.symbol}`, { timeout: 3000 })
+                    .catch(() => {
+                       return { data: null };
+                    }),
+                  axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex?symbol=${t.symbol}`, { timeout: 3000 })
+                    .catch(() => {
+                       return { data: null };
+                    })
                 ]);
                 
                 klines = klinesRes.data;
-                currentOI = parseFloat(oiRes.data.openInterest);
+                if (klines && klines.length > 0) {
+                  currentVol = parseFloat(klines[klines.length - 1][5]);
+                }
+
+                if (oiRes && oiRes.data && oiRes.data.openInterest) {
+                  currentOI = parseFloat(oiRes.data.openInterest);
+                }
 
                 if (takerVRes.data && takerVRes.data.length > 0) {
                   currentTakerRatio = parseFloat(takerVRes.data[0].buyVol) / parseFloat(takerVRes.data[0].sellVol);
                 }
 
+                if (premiumRes && premiumRes.data && premiumRes.data.lastFundingRate) {
+                  currentFundingRate = parseFloat(premiumRes.data.lastFundingRate);
+                }
+
                 // Calculate RSI/ADX if klines available
-                if (klines.length >= 15) {
+                if (klines && klines.length >= 15) {
                   const calcRSI = (endIdx: number, period: number) => {
                     let gains = 0, losses = 0;
                     for (let i = endIdx - period + 1; i <= endIdx; i++) {
@@ -159,19 +185,18 @@ export async function runTradeLoop() {
                   };
                   currentRsi = calcRSI(klines.length - 1, 14);
                 }
-                
-                currentVol = parseFloat(klines[klines.length - 1][5]);
 
                 // Unified Manage Trades call
                 await sniper.manageTrades(t.symbol, currentPx, currentOI, currentVol, currentTakerRatio, { 
-                  emaTrend: currentPx > parseFloat(klines[klines.length - 1][4]) ? 'LONG' : 'SHORT',
+                  emaTrend: klines && klines.length > 0 && currentPx > parseFloat(klines[klines.length - 1][4]) ? 'LONG' : 'SHORT',
                   rsi: currentRsi,
                   adx: currentAdx,
-                  klines: klines 
+                  klines: klines,
+                  fundingRate: currentFundingRate
                 });
 
                 // 2. SMART & WISE EXIT LOGIC (Reusing fetched data)
-                if (settings.useWiseExit) {
+                if (settings.useWiseExit && klines && klines.length > 0) {
                   await sniper.wiseExit(t.symbol, currentPx, klines);
                   if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) return;
                 }

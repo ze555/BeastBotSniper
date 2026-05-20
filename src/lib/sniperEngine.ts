@@ -362,7 +362,8 @@ export class SniperEngine {
     taker?: number,
     klines: any[] = [],
     rsi: number = 50,
-    adx: number = 25
+    adx: number = 25,
+    funding?: number
   ) {
     const metrics: MarketMetrics = {
        symbol: trade.symbol,
@@ -376,6 +377,7 @@ export class SniperEngine {
        spread: 0,
        openInterest: oi,
        takerRatio: taker,
+       fundingRate: funding !== undefined ? funding : trade.fundingRate,
        isChop: false
     };
 
@@ -701,6 +703,7 @@ export class SniperEngine {
       emaTrend?: "LONG" | "SHORT";
       btcTrend?: "LONG" | "SHORT";
       klines?: any[];
+      fundingRate?: number;
     },
   ) {
     const trade = this.activeTrades.get(symbol);
@@ -712,6 +715,11 @@ export class SniperEngine {
     const klines = indicators?.klines || [];
     const rsi = indicators?.rsi || 50;
     const adx = indicators?.adx || 25;
+    const fundingRate = indicators?.fundingRate;
+
+    if (fundingRate !== undefined) {
+      trade.fundingRate = fundingRate;
+    }
 
     // --- 0. PRE-FLIGHT: Update Price & Metric History ---
     if (!trade.tickHistory) trade.tickHistory = [];
@@ -754,7 +762,7 @@ export class SniperEngine {
     if (takerRatioVal > 1.01) takerTrend = 'BULLISH';
     else if (takerRatioVal < 0.99) takerTrend = 'BEARISH';
 
-    const adaptiveEval = this.evaluateAdaptiveExit(trade, currentPrice, currentOI, currentVol, currentTakerRatio, klines, rsi, adx);
+    const adaptiveEval = this.evaluateAdaptiveExit(trade, currentPrice, currentOI, currentVol, currentTakerRatio, klines, rsi, adx, fundingRate);
 
     const latestResult = {
       time: Date.now(),
@@ -767,6 +775,7 @@ export class SniperEngine {
         openInterest: currentOI,
         volume: currentVol,
         takerRatio: currentTakerRatio,
+        fundingRate: fundingRate !== undefined ? fundingRate : trade.fundingRate,
         oiTrend,
         volTrend,
         takerTrend
@@ -803,6 +812,7 @@ export class SniperEngine {
           openInterest: currentOI,
           volume: currentVol,
           takerRatio: currentTakerRatio,
+          fundingRate: fundingRate !== undefined ? fundingRate : trade.fundingRate,
           oiTrend,
           volTrend,
           takerTrend
@@ -811,6 +821,23 @@ export class SniperEngine {
 
       if (this.adaptiveCascadeLogs.length > 200) {
         this.adaptiveCascadeLogs.shift();
+      }
+    }
+
+    // --- 0. HEGEMONY ADAPTIVE CASCADE EXIT OVERRIDE ---
+    // If the Hegemony mode is active, the Adaptive decision has complete dominance to exit or tighten stop loss immediately!
+    if (this.settings.overrideAllWithAdaptive) {
+      if (adaptiveEval.decision === ExitDecision.EXIT_NOW) {
+        console.log(`[ADAPTIVE CASCADE] 🚨 HEGEMONY EXIT: Exiting ${symbol} immediately. Reason: ${adaptiveEval.reason}`);
+        addLog(`Hegemony Exit: ${symbol} is closed immediately | Reason: ${adaptiveEval.reason}`, 'warn');
+        await this.closeTrade(trade, currentPrice, `⚡ CASCADE_HEGEMONY_EXIT: ${adaptiveEval.reason}`);
+        return;
+      }
+
+      if (adaptiveEval.decision === ExitDecision.TRAIL_TIGHT) {
+        console.log(`[ADAPTIVE CASCADE] ⚠️ Hegemony Tightened Trailing stop for ${symbol} | Reason: ${adaptiveEval.reason}`);
+        trade.sl = trade.type === "LONG" ? currentPrice * 0.998 : currentPrice * 1.002;
+        updated = true;
       }
     }
 

@@ -264,7 +264,7 @@ export function SettingsView({
                         <Waves className="w-5 h-5 text-cyan-400" />
                         <h4 className="font-black text-white text-sm uppercase">المحرك الاندماجي (Fusion)</h4>
                       </div>
-                      <input type="checkbox" checked={settings.useFusionEngine} onChange={e => setSettings({...settings, useFusionEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
+                      <input type="checkbox" checked={!!settings.useFusionEngine} onChange={e => setSettings({...settings, useFusionEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
                     </div>
                     <div className={`space-y-4 transition-all relative z-10 ${!settings.useFusionEngine ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
                       <div className="space-y-1">
@@ -290,7 +290,7 @@ export function SettingsView({
                       <ArrowUpRight className="w-5 h-5 text-cyan-400" />
                       <h4 className="font-black text-white text-sm uppercase">الملاحقة الحركية (Kinetic)</h4>
                     </div>
-                    <input type="checkbox" checked={settings.useKineticEngine} onChange={e => setSettings({...settings, useKineticEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
+                    <input type="checkbox" checked={!!settings.useKineticEngine} onChange={e => setSettings({...settings, useKineticEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
                   </div>
                   <div className={`space-y-4 transition-all ${!settings.useKineticEngine ? 'opacity-20 grayscale-0 pointer-events-none' : ''}`}>
                     <div className="space-y-1">
@@ -310,7 +310,7 @@ export function SettingsView({
                       <RefreshCw className="w-5 h-5 text-rose-400" />
                       <h4 className="font-black text-white text-sm uppercase">الحماية المعكوسة (Inverse)</h4>
                     </div>
-                    <input type="checkbox" checked={settings.inverseTrailingEnabled} onChange={e => setSettings({...settings, inverseTrailingEnabled: e.target.checked})} className="w-6 h-6 accent-rose-500" />
+                    <input type="checkbox" checked={!!settings.inverseTrailingEnabled} onChange={e => setSettings({...settings, inverseTrailingEnabled: e.target.checked})} className="w-6 h-6 accent-rose-500" />
                   </div>
                   <div className={`space-y-4 transition-all ${!settings.inverseTrailingEnabled ? 'opacity-20 pointer-events-none' : ''}`}>
                     <div className="space-y-1">
@@ -387,7 +387,7 @@ export function SettingsView({
                       <div className="flex flex-col items-center gap-2">
                         <input 
                           type="checkbox" 
-                          checked={settings.overrideAllWithAdaptive} 
+                          checked={!!settings.overrideAllWithAdaptive} 
                           onChange={e => setSettings({...settings, overrideAllWithAdaptive: e.target.checked})} 
                           className="w-10 h-10 accent-indigo-600 cursor-pointer" 
                         />

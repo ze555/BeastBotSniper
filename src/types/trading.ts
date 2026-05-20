@@ -75,6 +75,7 @@ export interface Trade {
       openInterest?: number;
       volume?: number;
       takerRatio?: number;
+      fundingRate?: number;
       oiTrend?: 'UP' | 'DOWN' | 'FLAT';
       volTrend?: 'UP' | 'DOWN' | 'FLAT';
       takerTrend?: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
