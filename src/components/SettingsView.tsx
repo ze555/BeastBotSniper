@@ -340,7 +340,7 @@ export function SettingsView({
                       </select>
                    </div>
 
-                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800">
                         <div className="space-y-1">
                           <span className="text-[10px] font-black text-slate-400 uppercase">1. فحص الانعكاس</span>
@@ -361,6 +361,13 @@ export function SettingsView({
                           <p className="text-[8px] text-slate-500">Momentum Node</p>
                         </div>
                         <input type="checkbox" checked={settings.exitUseMomentumCheck !== false} onChange={e => setSettings({...settings, exitUseMomentumCheck: e.target.checked})} className="w-5 h-5 accent-rose-500" />
+                       </div>
+                       <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800">
+                         <div className="space-y-1 text-right">
+                           <span className="text-[10px] font-black text-slate-400 uppercase">4. فحص الزخم (RSI)</span>
+                           <p className="text-[8px] text-slate-500 font-medium">RSI Check</p>
+                         </div>
+                         <input type="checkbox" checked={settings.exitUseRsiCheck !== false} onChange={e => setSettings({...settings, exitUseRsiCheck: e.target.checked})} className="w-5 h-5 accent-amber-500" />
                       </div>
                    </div>
 

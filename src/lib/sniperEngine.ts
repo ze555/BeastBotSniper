@@ -75,6 +75,7 @@ export class SniperEngine {
     layerRiskEnabled: true,
     inverseTrailingEnabled: false,
     inverseTrailingSensitivity: 0.05,
+    exitUseRsiCheck: true,
   };
 
   constructor() {
@@ -294,6 +295,7 @@ export class SniperEngine {
             fusionWeightVol: dbSettings.fusionWeightVol ?? 0.25,
             fusionWeightInst: dbSettings.fusionWeightInst ?? 0.25,
             fusionMinScore: dbSettings.fusionMinScore ?? 70,
+            exitUseRsiCheck: dbSettings.exitUseRsiCheck !== 0,
           };
         }
         console.log("[SNIPER] Loaded settings from database", this.settings);

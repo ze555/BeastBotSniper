@@ -27,7 +27,7 @@ export class AdaptiveCascadeEngine {
     const mode = settings.exitValidationMode ?? 'ADAPTIVE_CASCADE';
 
     // 1. Quantum Reversion Check (صلاحية الانعكاس)
-    const quantum = this.checkQuantumReversion(trade, metrics, klines);
+    const quantum = this.checkQuantumReversion(trade, metrics, klines, settings);
     
     // 2. Fusion Check (تدفق السيولة الحقيقي)
     const fusion = this.checkFusion(trade, metrics, settings);
@@ -63,7 +63,7 @@ export class AdaptiveCascadeEngine {
    * Stage 1: Quantum Reversion Check
    * هل سبب الدخول الأصلي ما زال قائمًا؟
    */
-  private static checkQuantumReversion(trade: Trade, metrics: MarketMetrics, klines: any[]) {
+  private static checkQuantumReversion(trade: Trade, metrics: MarketMetrics, klines: any[], settings: BotSettings) {
     // Check if price returned to mean (SMA 20) or Bollinger Mid
     // For simplicity, we check if Taker Ratio returned to 1.0 (Neutral)
     const taker = metrics.takerRatio ?? 1.0;
@@ -71,7 +71,9 @@ export class AdaptiveCascadeEngine {
     
     // Check RSI extreme
     const rsi = metrics.rsi;
-    const isRsiNeutral = trade.type === 'LONG' ? rsi > 45 : rsi < 55;
+    const isRsiNeutral = settings.exitUseRsiCheck !== false
+      ? (trade.type === 'LONG' ? rsi > 45 : rsi < 55)
+      : false;
 
     const score = (isReverted ? 0 : 50) + (isRsiNeutral ? 0 : 50);
     return {

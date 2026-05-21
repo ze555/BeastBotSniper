@@ -303,6 +303,7 @@ export interface BotSettings {
   // 🛡️ Adaptive Exit Cascade (نظام الخروج التكيفي المتسلسل)
   exitValidationMode?: 'QUANTUM_ONLY' | 'FUSION_PRIORITY' | 'MOMENTUM_ASSISTED' | 'FULL_CONSENSUS' | 'ADAPTIVE_CASCADE';
   exitUseQuantumCheck?: boolean;       // فحص صلاحية الانعكاس الأصلي
+  exitUseRsiCheck?: boolean;           // فحص مؤشر القوة النسبية (RSI) في الخروج التكيفي
   exitUseFusionCheck?: boolean;        // فحص تدفق السيولة الحقيقي
   exitUseMomentumCheck?: boolean;      // فحص التحول الزخمي
   exitAdaptiveAggression?: number;     // عدوانية الخروج التكيفي (0.1 - 1.0)

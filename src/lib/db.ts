@@ -128,7 +128,8 @@ export const initDB = () => {
           fusionWeightFunding REAL DEFAULT 0.25,
           fusionWeightVol REAL DEFAULT 0.25,
           fusionWeightInst REAL DEFAULT 0.25,
-          fusionMinScore REAL DEFAULT 70
+          fusionMinScore REAL DEFAULT 70,
+          exitUseRsiCheck INTEGER DEFAULT 1
         )
       `);
       
@@ -219,7 +220,8 @@ export const initDB = () => {
         "fusionWeightFunding REAL DEFAULT 0.25",
         "fusionWeightVol REAL DEFAULT 0.25",
         "fusionWeightInst REAL DEFAULT 0.25",
-        "fusionMinScore REAL DEFAULT 70"
+        "fusionMinScore REAL DEFAULT 70",
+        "exitUseRsiCheck INTEGER DEFAULT 1"
       ];
       
       let pending = newCols.length;
@@ -347,9 +349,9 @@ export function saveSettingsToDB(settings: any) {
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
       inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc,
       isNightmareMode, marketPanicThreshold,
-      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore
+      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -439,7 +441,8 @@ export function saveSettingsToDB(settings: any) {
       fusionWeightFunding=excluded.fusionWeightFunding,
       fusionWeightVol=excluded.fusionWeightVol,
       fusionWeightInst=excluded.fusionWeightInst,
-      fusionMinScore=excluded.fusionMinScore
+      fusionMinScore=excluded.fusionMinScore,
+      exitUseRsiCheck=excluded.exitUseRsiCheck
   `;
 
   const values = [
@@ -470,7 +473,8 @@ export function saveSettingsToDB(settings: any) {
     settings.useFusionEngine ? 1 : 0, settings.fusionSensitivity ?? 1.0,
     settings.fusionWeightOi ?? 0.25, settings.fusionWeightFunding ?? 0.25,
     settings.fusionWeightVol ?? 0.25, settings.fusionWeightInst ?? 0.25,
-    settings.fusionMinScore ?? 70
+    settings.fusionMinScore ?? 70,
+    settings.exitUseRsiCheck !== false ? 1 : 0
   ];
 
   db.run(query, values, (err) => {
@@ -522,6 +526,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.beastConfirmWithVolume = row.beastConfirmWithVolume === 1;
         row.fastExitEnabled = row.fastExitEnabled === 1;
         row.useFusionEngine = row.useFusionEngine === 1;
+        row.exitUseRsiCheck = row.exitUseRsiCheck !== 0;
         resolve(row);
       }
     });
