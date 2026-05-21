@@ -838,6 +838,7 @@ export class SniperEngine {
     // --- 0. HEGEMONY ADAPTIVE CASCADE EXIT OVERRIDE ---
     // If the Hegemony mode is active, the Adaptive decision has complete dominance to exit or tighten stop loss immediately!
     if (this.settings.overrideAllWithAdaptive) {
+      // 1. Direct EXIT decision from the Adaptive Cascade Engine
       if (adaptiveEval.decision === ExitDecision.EXIT_NOW) {
         console.log(`[ADAPTIVE CASCADE] 🚨 HEGEMONY EXIT: Exiting ${symbol} immediately. Reason: ${adaptiveEval.reason}`);
         addLog(`Hegemony Exit: ${symbol} is closed immediately | Reason: ${adaptiveEval.reason}`, 'warn');
@@ -845,13 +846,41 @@ export class SniperEngine {
         return;
       }
 
+      // 2. Run manager to update basic trade statistics (PnL, high price, etc. for frontend updates)
+      const managerVerdict = this.manager.manage(trade as any, currentPrice, {
+        strictFastBreakevenPerc: this.settings.strictFastBreakevenPerc,
+        tradingFeeRate: this.settings.tradingFeeRate,
+        leverage: this.settings.leverage
+      });
+      if (managerVerdict.updatedTrade) {
+        Object.assign(trade, managerVerdict.updatedTrade);
+        updated = true;
+      }
+
+      // 3. Handle TRAIL_TIGHT decision
       if (adaptiveEval.decision === ExitDecision.TRAIL_TIGHT) {
         const oldSl = trade.sl;
         const smartSl = this.calculateSmartTightStop(trade, currentPrice);
         trade.sl = smartSl;
         console.log(`[ADAPTIVE CASCADE] ⚠️ Hegemony Tightened Trailing stop for ${symbol} | Old SL: ${oldSl ? oldSl.toFixed(4) : 'None'} -> New SL: ${smartSl.toFixed(4)} | Reason: ${adaptiveEval.reason}`);
         updated = true;
+
+        // Verify if our tightened adaptive trailing stop has been crossed by the market price
+        const hitSl = trade.type === "LONG" ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+        if (hitSl) {
+          console.log(`[ADAPTIVE CASCADE] 🛑 Hegemony Trailing Stop Hit for ${symbol} at ${currentPrice}`);
+          addLog(`Hegemony Trailing Hit: ${symbol} is closed | Trailing Stop at ${trade.sl.toFixed(4)} hit @ ${currentPrice}`, 'warn');
+          await this.closeTrade(trade, currentPrice, `🛡️ CASCADE_HEGEMONY_TRAIL_HIT`);
+          return;
+        }
       }
+
+      // 4. Save state & bypass all other safety valves and other exits completely
+      if (updated) {
+        saveTrade(trade);
+        this.activeTrades.set(symbol, trade);
+      }
+      return; 
     }
 
     // --- 1. CORE POSITION UPDATE (Standard PnL & Stats) ---
@@ -1389,6 +1418,10 @@ export class SniperEngine {
   }
 
   public async smartExit(symbol: string, currentPrice: number, reason: string) {
+    if (this.settings.overrideAllWithAdaptive) {
+      console.log(`[SMART EXIT] Bypassed for ${symbol} because Hegemony is active.`);
+      return;
+    }
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
 
@@ -1400,6 +1433,10 @@ export class SniperEngine {
   }
 
   public async wiseExit(symbol: string, currentPrice: number, klines: any[]) {
+    if (this.settings.overrideAllWithAdaptive) {
+      console.log(`[WISE EXIT] Bypassed for ${symbol} because Hegemony is active.`);
+      return;
+    }
     const trade = this.activeTrades.get(symbol);
     if (!trade) return;
     if (trade.status === "CLOSED") return;
