@@ -512,7 +512,8 @@ export class SniperEngine {
       sl,
       leverage,
       maxTrades,
-      this.settings.minPositionSizePerc || 0
+      this.settings.minPositionSizePerc || 0,
+      this.settings.riskPerTradePerc || 1
     );
 
     if (positionSizeUsd <= 0) {
@@ -622,7 +623,8 @@ export class SniperEngine {
       sl,
       leverage,
       maxTrades,
-      this.settings.minPositionSizePerc || 0
+      this.settings.minPositionSizePerc || 0,
+      this.settings.riskPerTradePerc || 1
     );
 
     // Ensure minimum position for exchange rules (Binance usually requires 5-10 USD)
