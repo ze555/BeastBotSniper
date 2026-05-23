@@ -257,6 +257,9 @@ export default function App() {
     };
   })();
 
+  const openTradesProfit = activeTrades.reduce((acc, t) => acc + getDisplayPnL(t.pnl || 0, t.amount || 0), 0);
+  const netBalance = settings.portfolioSize + displayStats.totalPnl + openTradesProfit;
+
   const togglePanic = async () => {
     const newState = !panicActive;
     try {
@@ -487,6 +490,13 @@ export default function App() {
 
           {activeTab === 'dashboard' && (
             <>
+              {/* نظرة عامة على محفظة الحساب والأرباح المفتوحة */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                   <StatCard title="الرصيد الأساسي" value={`$${settings.portfolioSize.toFixed(2)}`} trend="رأس المال المالي" positive={true} />
+                   <StatCard title="ربح الصفقات المفتوحة (عائم)" value={`${openTradesProfit >= 0 ? '+' : ''}$${openTradesProfit.toFixed(2)}`} trend={openTradesProfit >= 0 ? "أرباح جارية 🟢" : "انعكاس عائم 🔴"} positive={openTradesProfit >= 0} />
+                   <StatCard title="الرصيد الصافي" value={`$${netBalance.toFixed(2)}`} trend="الرصيد الكلي الحالي" positive={netBalance >= settings.portfolioSize} />
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                    <StatCard title="إجمالي الأرباح" value={`$${displayStats.totalPnl.toFixed(2)}`} trend="" positive={displayStats.totalPnl >= 0} />
                    <StatCard title="نسبة الدقة (Win Rate)" value={`${displayStats.winRate.toFixed(1)}%`} trend={`${displayStats.totalTrades} صفقات`} />
