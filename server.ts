@@ -6,6 +6,7 @@ import fs from "fs";
 import { runBinanceScanner, getWatchlist } from "./src/lib/binanceScanner.js";
 import { runTradeLoop, setBotActive, isBotActive, getGlobalMarketContext, getSystemLogs, addLog } from "./src/lib/botRunner.js";
 import { sniper } from "./src/lib/sniperEngine.js";
+import { simulator } from "./src/lib/engine/EventReplaySimulator.js";
 
 // __dirname is natively available in CommonJS. Since this file is compiled to CommonJS via esbuild, we don't need fileURLToPath.
 
@@ -104,6 +105,25 @@ async function startServer() {
   app.post("/api/settings", (req, res) => {
     sniper.updateSettings(req.body);
     res.json(sniper.getSettings());
+  });
+
+  app.get("/api/backtest/scenarios", (req, res) => {
+    res.json(simulator.getScenarios().map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      regime: s.regime
+    })));
+  });
+
+  app.post("/api/backtest/run", (req, res) => {
+    try {
+      const { scenarioId, settings } = req.body;
+      const result = simulator.runSimulation(scenarioId, settings);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/utils/reset-db", async (req, res) => {

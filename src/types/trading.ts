@@ -294,6 +294,7 @@ export interface BotSettings {
   minPositionSizePerc?: number;         // 💰 Minimum capital allocation per trade (e.g. 20%)
 
   // 🌀 Quantum Fusion Engine (المحرك الاندماجي الكمي)
+  useCreativeEngine?: boolean;          // 🎨 المحرك الدخول الابداعي (مفصول تماما)
   useFusionEngine?: boolean;            // تفعيل المحرك الاندماجي الموحد
   fusionSensitivity?: number;          // حساسية الاندماج (1.0 - 5.0)
   fusionWeightOi?: number;             // وزن الفائدة المفتوحة (Open Interest)

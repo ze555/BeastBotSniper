@@ -12,8 +12,10 @@ import ccxt from "ccxt";
 import { CoreEngine } from "./engine/CoreEngine.js";
 import { RiskEngine } from "./engine/RiskEngine.js";
 import { PositionManager } from "./engine/PositionManager.js";
+import { CreativePositionManager } from "./engine/CreativePositionManager.js";
 import { WiseExitEngine } from "./engine/WiseExitEngine.js";
 import { FusionEngine } from "./engine/FusionEngine.js";
+import { RegimeEngine } from "./engine/RegimeEngine.js";
 import { AdaptiveCascadeEngine, ExitDecision } from "./engine/AdaptiveCascadeEngine.js";
 import {
   MarketMetrics,
@@ -49,6 +51,7 @@ export class SniperEngine {
     useWiseExit: true,
     useWiseEntry: true,
     useSlyFox: true,
+    useCreativeEngine: false,
     useKineticEngine: true,
     beastMode: false,
     beastConfirmWithSMC: false,
@@ -289,6 +292,7 @@ export class SniperEngine {
             isNightmareMode: dbSettings.isNightmareMode === 1,
             marketPanicThreshold: dbSettings.marketPanicThreshold ?? 3.0,
             useFusionEngine: dbSettings.useFusionEngine === 1,
+            useCreativeEngine: dbSettings.useCreativeEngine === 1,
             fusionSensitivity: dbSettings.fusionSensitivity ?? 1.0,
             fusionWeightOi: dbSettings.fusionWeightOi ?? 0.25,
             fusionWeightFunding: dbSettings.fusionWeightFunding ?? 0.25,
@@ -506,6 +510,13 @@ export class SniperEngine {
     // 3. Position Sizing
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
+    
+    // Compute dynamic elements for Risk position sizing
+    const testConfidence = cond.score ? cond.score * 10 : 70;
+    const testVolatility = cond.atr !== undefined ? cond.atr : 1.0;
+    const testStability = RegimeEngine.getRecentTrendRespect();
+    const testLiquidity = cond.isLiquidityGood ? 1.3 : 0.7;
+
     const positionSizeUsd = this.risk.calculatePositionSize(
       this.settings.portfolioSize,
       entryPrice,
@@ -513,7 +524,10 @@ export class SniperEngine {
       leverage,
       maxTrades,
       this.settings.minPositionSizePerc || 0,
-      this.settings.riskPerTradePerc || 1
+      testConfidence,
+      testVolatility,
+      testStability,
+      testLiquidity
     );
 
     if (positionSizeUsd <= 0) {
@@ -617,45 +631,13 @@ export class SniperEngine {
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
-
-    // --- FUSION ENGINE VALIDATION GATE (NEW) ---
-    if (this.settings.useFusionEngine && source !== "FUSION_DIRECT") {
-      const metrics: MarketMetrics = {
-        symbol: cond.symbol,
-        price: entryPrice,
-        adx: 25,
-        atr: cond.atr || 0,
-        atrPerc: cond.atr ? (cond.atr / entryPrice) * 100 : 0,
-        rsi: 50,
-        volume: cond.vol24h || 0,
-        rvol: cond.isMomentumHigh ? 2.0 : 1.2,
-        spread: cond.spread || 0,
-        fundingRate: cond.fundingRate,
-        openInterest: cond.oi,
-        takerRatio: cond.takerBuySellRatio,
-        isChop: false
-      };
-      
-      const fusion = FusionEngine.calculateFusionScore(metrics, this.settings);
-      const minScore = this.settings.fusionMinScore ?? 70;
-      
-      if (fusion.score < minScore) {
-        console.log(`[FUSION] 🛡️ Entry Blocked (Quantum Path): ${cond.symbol} | Score: ${fusion.score.toFixed(1)} < ${minScore}% | ${fusion.reason}`);
-        addLog(`FUSION Blocked ${cond.symbol}: Score ${fusion.score.toFixed(0)}%`, 'warn');
-        return;
-      }
-      console.log(`[FUSION] ✅ Core Validated (Quantum Path): ${cond.symbol} | Score: ${fusion.score.toFixed(1)}%`);
-      source = `FUSION_${source}`;
-    }
-
     let positionSizeUsd = this.risk.calculatePositionSize(
       this.settings.portfolioSize,
       entryPrice,
       sl,
       leverage,
       maxTrades,
-      this.settings.minPositionSizePerc || 0,
-      this.settings.riskPerTradePerc || 1
+      this.settings.minPositionSizePerc || 0
     );
 
     // Ensure minimum position for exchange rules (Binance usually requires 5-10 USD)
@@ -866,6 +848,76 @@ export class SniperEngine {
       if (trade.adaptiveHistoryLogs.length > 50) {
         trade.adaptiveHistoryLogs.shift();
       }
+    }
+
+    // --- SPECIAL HANDLING: CREATIVE POSITION STATE MACHINE (Gap 6 / Point 6) ---
+    if (trade.source && trade.source.startsWith("CREATIVE_")) {
+      // 1. Calculate inline parameters for the Creative State Machine
+      let inlineRvol = 1.0;
+      if (klines && klines.length >= 20) {
+        const last20Vols = klines.slice(-20).map(k => parseFloat(k[5]));
+        const avgVol20 = last20Vols.reduce((a, b) => a + b, 0) / 20;
+        const lastVol = currentVol !== undefined ? currentVol : parseFloat(klines[klines.length - 1][5]);
+        inlineRvol = avgVol20 > 0 ? lastVol / avgVol20 : 1.0;
+      }
+
+      let inlineOiUp = false;
+      let inlineOiVelocity = 1.0;
+      if (trade.oiHistory && trade.oiHistory.length >= 2) {
+        const prevOI = trade.oiHistory[trade.oiHistory.length - 2];
+        const lastOI = currentOI !== undefined ? currentOI : trade.oiHistory[trade.oiHistory.length - 1];
+        inlineOiVelocity = prevOI > 0 ? lastOI / prevOI : 1.0;
+        inlineOiUp = inlineOiVelocity > 1.0005;
+      }
+
+      let inlineAtr = 1.0;
+      if (klines && klines.length >= 15) {
+        let trSum = 0;
+        for (let i = klines.length - 14; i < klines.length; i++) {
+          const h = parseFloat(klines[i][2]);
+          const l = parseFloat(klines[i][3]);
+          const pc = parseFloat(klines[i - 1][4]);
+          const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+          trSum += tr;
+        }
+        const avgTr = trSum / 14;
+        inlineAtr = currentPrice > 0 ? (avgTr / currentPrice) * 100 : 1.0;
+      }
+
+      const creativeTakerRatio = currentTakerRatio !== undefined ? currentTakerRatio : 1.0;
+
+      // Execute Creative Position State Machine!
+      const creativeVerdict = CreativePositionManager.manage(
+        trade,
+        currentPrice,
+        inlineRvol,
+        creativeTakerRatio,
+        inlineOiUp,
+        inlineOiVelocity,
+        inlineAtr
+      );
+
+      if (creativeVerdict.action === "CLOSE") {
+        console.log(`[CREATIVE SM] 🚨 EXIT TRIGGERED for ${symbol}: ${creativeVerdict.reason}`);
+        addLog(`🎨 اغلاق ابداعي: ${symbol} | السبب: ${creativeVerdict.reason}`, 'warn');
+        await this.closeTrade(trade, currentPrice, creativeVerdict.reason || "CREATIVE_SM_EXIT");
+        return;
+      } else if (creativeVerdict.action === "PARTIAL" && creativeVerdict.updatedTrade) {
+        Object.assign(trade, creativeVerdict.updatedTrade);
+        console.log(`[CREATIVE SM] 💸 PARTIAL EXIT for ${symbol}: ${creativeVerdict.reason}`);
+        addLog(`💸 جني ربح جزئي ابداعي: ${symbol} تم بيع 50% وتأمين الدخول بقفل مأمون.`, 'success');
+        updated = true;
+      } else if (creativeVerdict.action === "UPDATE" && creativeVerdict.updatedTrade) {
+        Object.assign(trade, creativeVerdict.updatedTrade);
+        console.log(`[CREATIVE SM] 🔄 STATE UPDATE for ${symbol}: ${creativeVerdict.reason}`);
+        updated = true;
+      }
+
+      if (updated) {
+        saveTrade(trade);
+        this.activeTrades.set(symbol, trade);
+      }
+      return; // Complete bypass other managers so creative exit mechanisms do NOT get touched by normal/hegemony models
     }
 
     // --- 0. HEGEMONY ADAPTIVE CASCADE EXIT OVERRIDE ---
@@ -1613,6 +1665,17 @@ export class SniperEngine {
     this.activeTrades.delete(trade.symbol);
     this.tradeHistory.unshift({ ...trade }); // Add to beginning of history
     saveTrade(trade);
+
+    // --- REGIME MEMORY: RECORD RESULTS (Requirement 2) ---
+    const isWin = finalPnl > 0;
+    RegimeEngine.recordTradeResult(isWin);
+    
+    const isFakeoutExit = reason.includes("STOP_LOSS_HIT") || reason.includes("BREAKEVEN_HIT") || reason.includes("WEAKNESS");
+    if (isFakeoutExit && trade.source && (trade.source.includes("BREAKOUT") || trade.source.includes("CORE"))) {
+      RegimeEngine.recordBreakout(true); // it was a fakeout breakout!
+    } else if (isWin && trade.source && (trade.source.includes("BREAKOUT") || trade.source.includes("CORE"))) {
+      RegimeEngine.recordBreakout(false); // successful breakout respect!
+    }
 
     // --- BEAST MODE: NEURAL LEARNING & TRAP REVERSAL ---
     if (this.settings.beastMode) {

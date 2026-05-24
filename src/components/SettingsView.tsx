@@ -264,7 +264,7 @@ export function SettingsView({
                         <Waves className="w-5 h-5 text-cyan-400" />
                         <h4 className="font-black text-white text-sm uppercase">المحرك الاندماجي (Fusion)</h4>
                       </div>
-                      <input type="checkbox" checked={!!settings.useFusionEngine} onChange={e => setSettings({...settings, useFusionEngine: e.target.checked})} className="w-6 h-6 accent-cyan-500" />
+                      <input type="checkbox" checked={!!settings.useFusionEngine} onChange={e => setSettings({...settings, useFusionEngine: e.target.checked, useCreativeEngine: e.target.checked ? false : settings.useCreativeEngine})} className="w-6 h-6 accent-cyan-500" />
                     </div>
                     <div className={`space-y-4 transition-all relative z-10 ${!settings.useFusionEngine ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
                       <div className="space-y-1">
@@ -277,6 +277,82 @@ export function SettingsView({
                       </div>
                     </div>
                   </div>
+
+                  {/* المحرك الدخول الابداعي (Creative Entry Engine) */}
+                  <div className="col-span-1 md:col-span-2 bg-gradient-to-l from-amber-950/20 to-slate-950/50 border border-amber-500/30 rounded-2xl p-8 space-y-6 overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-2 opacity-10"><BrainCircuit className="w-24 h-24 text-amber-500 rotate-12" /></div>
+                    
+                    <div className="flex items-center justify-between border-b border-amber-500/20 pb-4 relative z-10">
+                      <div className="flex items-center gap-3">
+                        <BrainCircuit className="w-6 h-6 text-amber-500 animate-pulse" />
+                        <div className="text-right">
+                          <h4 className="font-black text-amber-400 text-base uppercase">المحرك الدخول الابداعي (Creative Engine)</h4>
+                          <p className="text-[10px] text-slate-400 mt-1 font-sans">محرك استراتيجي ذكي مستقل مبني بالكامل على هيكلية السيولة وقراءة تلاعبات الأسواق وحركة المال الذكي (SMC)</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        {settings.useCreativeEngine && (
+                          <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded font-black animate-pulse">SOLO MODE ACTIVE</span>
+                        )}
+                        <input 
+                          type="checkbox" 
+                          checked={!!settings.useCreativeEngine} 
+                          onChange={e => {
+                            const isChecked = e.target.checked;
+                            setSettings({
+                              ...settings, 
+                              useCreativeEngine: isChecked,
+                              useFusionEngine: isChecked ? false : settings.useFusionEngine
+                            });
+                          }} 
+                          className="w-7 h-7 accent-amber-500 cursor-pointer" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10 text-right">
+                      {/* Section 1: Playbooks */}
+                      <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-xs text-white justify-end">
+                          دليل الصفقات الذكية (Smart Playbooks)
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                          يحتوي على نماذج دخول مستقلة دقيقة تتوافق تلقائياً مع نظام السوق المكتشف مثل الكسر الحقيقي، نطاقات التجميع، والمصائد.
+                        </p>
+                      </div>
+
+                      {/* Section 2: Rejection Checks */}
+                      <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-xs text-white justify-end">
+                          فحص الفخاخ ورفض الاختراقات
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                          يتتبع تدفقات سيول الأسواق الحقيقية ومستويات الفائدة المفتوحة (OI) لتجاوز فخاخ الثيران والدببة وتجمعات عقود التجميع.
+                        </p>
+                      </div>
+
+                      {/* Section 3: Candle Confirmation */}
+                      <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-xs text-white justify-end">
+                          التأكيد الهيكلي لذيول الشموع
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                          يبحث عن إثباتات واضحة على ذيول الرفض وضغط التجاوز قبل إعطاء الإذن النهائي بالدخول الفعلي لمنع أي ارتدادات مباغتة.
+                        </p>
+                      </div>
+                    </div>
+
+                    {settings.useCreativeEngine && (
+                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 text-xs text-amber-300 relative z-10 text-right font-sans">
+                        💡 <strong>ملاحظة التوافق المستقل:</strong> تم تفعيل محرك الدخول الإبداعي في <strong>الوضع الفردي الحصري (Solo Mode)</strong>. تم إلغاء تفعيل المحركات الأخرى (Quantum Core و Fusion Engine) احترازاً وتحت إدارته المستقلة لمنع أي تضارب مالي أو تقني.
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               </div>
             )}

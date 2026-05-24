@@ -123,6 +123,7 @@ export const initDB = () => {
           fastExitEnabled INTEGER DEFAULT 0,
           fastExitPerc REAL DEFAULT 0.5,
           useFusionEngine INTEGER DEFAULT 0,
+           useCreativeEngine INTEGER DEFAULT 0,
           fusionSensitivity REAL DEFAULT 1.0,
           fusionWeightOi REAL DEFAULT 0.25,
           fusionWeightFunding REAL DEFAULT 0.25,
@@ -216,6 +217,7 @@ export const initDB = () => {
         "fastExitEnabled INTEGER DEFAULT 0",
         "fastExitPerc REAL DEFAULT 0.5",
         "useFusionEngine INTEGER DEFAULT 0",
+         "useCreativeEngine INTEGER DEFAULT 0",
         "fusionSensitivity REAL DEFAULT 1.0",
         "fusionWeightOi REAL DEFAULT 0.25",
         "fusionWeightFunding REAL DEFAULT 0.25",
@@ -351,9 +353,9 @@ export function saveSettingsToDB(settings: any) {
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
       inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc,
       isNightmareMode, marketPanicThreshold,
-      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive
+      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -445,7 +447,8 @@ export function saveSettingsToDB(settings: any) {
       fusionWeightInst=excluded.fusionWeightInst,
       fusionMinScore=excluded.fusionMinScore,
       exitUseRsiCheck=excluded.exitUseRsiCheck,
-      overrideAllWithAdaptive=excluded.overrideAllWithAdaptive
+      overrideAllWithAdaptive=excluded.overrideAllWithAdaptive,
+      useCreativeEngine=excluded.useCreativeEngine
   `;
 
   const values = [
@@ -478,7 +481,8 @@ export function saveSettingsToDB(settings: any) {
     settings.fusionWeightVol ?? 0.25, settings.fusionWeightInst ?? 0.25,
     settings.fusionMinScore ?? 70,
     settings.exitUseRsiCheck !== false ? 1 : 0,
-    settings.overrideAllWithAdaptive ? 1 : 0
+    settings.overrideAllWithAdaptive ? 1 : 0,
+    settings.useCreativeEngine ? 1 : 0
   ];
 
   db.run(query, values, (err) => {
@@ -530,6 +534,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.beastConfirmWithVolume = row.beastConfirmWithVolume === 1;
         row.fastExitEnabled = row.fastExitEnabled === 1;
         row.useFusionEngine = row.useFusionEngine === 1;
+        row.useCreativeEngine = row.useCreativeEngine === 1;
         row.exitUseRsiCheck = row.exitUseRsiCheck !== 0;
         row.overrideAllWithAdaptive = row.overrideAllWithAdaptive === 1;
         resolve(row);

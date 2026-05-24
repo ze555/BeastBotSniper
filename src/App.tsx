@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap } from 'lucide-react';
 import { SettingsView } from './components/SettingsView';
+import { ReplaySimulatorView } from './components/ReplaySimulatorView';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -411,6 +412,7 @@ export default function App() {
           </div>
           <nav className="flex flex-col gap-2 px-2 md:px-4">
             <NavItem icon={<Activity />} label="لوحة التحكم ومراقبة السوق" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+            <NavItem icon={<Sliders className="text-amber-400" />} label="محاكي السيولة والباكتست" active={activeTab === 'replay'} onClick={() => setActiveTab('replay')} />
             <NavItem icon={<Zap className="text-amber-400" />} label="فحص الخروج التكيفي (Cascade Log)" active={activeTab === 'adaptiveLogs'} onClick={() => setActiveTab('adaptiveLogs')} />
             <NavItem icon={<BarChart2 />} label="سجل الصفقات الموحد" active={activeTab === 'trades'} onClick={() => setActiveTab('trades')} />
             <NavItem icon={<Settings />} label="لوحة التحكم والنظام الموحد" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
@@ -1010,6 +1012,10 @@ export default function App() {
                    )}
                 </div>
              </div>
+          )}
+
+          {activeTab === 'replay' && (
+             <ReplaySimulatorView />
           )}
 
           {activeTab === 'settings' && (

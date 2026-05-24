@@ -28,13 +28,18 @@ export class PositionManager {
     
     // ROE % = (PriceChange% - Fee%) * Leverage (Binance Standard)
     const roePerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
-    newTrade.pnlPerc = roePerc;
     
     // PnL $ = (Amount * PriceChange / 100) - Fees + Realized
     let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
     if (trade.realizedPnl) {
         currentPnl += trade.realizedPnl;
     }
+
+    // تحديث مرجع الكائن مباشرة في الذاكرة لتستفيد الواجهة البرمجية والـ UI بالتحديث اللحظي للربح والخسارة دون انقطاع
+    trade.pnl = currentPnl;
+    trade.pnlPerc = roePerc;
+
+    newTrade.pnlPerc = roePerc;
     newTrade.pnl = currentPnl;
 
     // 2. تحديثات تتبع السعر (Highest Price)

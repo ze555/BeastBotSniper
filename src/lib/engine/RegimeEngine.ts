@@ -2,10 +2,52 @@
 import { MarketMetrics, MarketRegime } from '../../types/trading.js';
 
 export class RegimeEngine {
+  private static recentBreakouts: { isFakeout: boolean; time: number }[] = [];
+  private static recentTrades: { isWin: boolean; time: number }[] = [];
+  private static recentLiquidations: { isCascade: boolean; time: number }[] = [];
+
+  public static recordBreakout(isFakeout: boolean) {
+    this.recentBreakouts.push({ isFakeout, time: Date.now() });
+    if (this.recentBreakouts.length > 20) this.recentBreakouts.shift();
+  }
+
+  public static recordTradeResult(isWin: boolean) {
+    this.recentTrades.push({ isWin, time: Date.now() });
+    if (this.recentTrades.length > 20) this.recentTrades.shift();
+  }
+
+  public static recordLiquidation(isCascade: boolean) {
+    this.recentLiquidations.push({ isCascade, time: Date.now() });
+    if (this.recentLiquidations.length > 20) this.recentLiquidations.shift();
+  }
+
+  public static getRecentFakeoutRate(): number {
+    if (this.recentBreakouts.length === 0) return 0.20; // default 20%
+    const fakeouts = this.recentBreakouts.filter(b => b.isFakeout).length;
+    return fakeouts / this.recentBreakouts.length;
+  }
+
+  public static getRecentTrendRespect(): number {
+    if (this.recentTrades.length === 0) return 0.70; // default 70% Winrate
+    const wins = this.recentTrades.filter(t => t.isWin).length;
+    return wins / this.recentTrades.length;
+  }
+
+  public static getRecentLiquidationBehavior(): 'NORMAL' | 'CASCADING' | 'NONE' {
+    if (this.recentLiquidations.length === 0) return 'NORMAL';
+    const cascades = this.recentLiquidations.filter(l => l.isCascade).length;
+    return cascades >= 3 ? 'CASCADING' : 'NORMAL';
+  }
+
   /**
    * تحليل حالة السوق بناءً على المقاييس التقنية والسيولة
    */
   public analyze(metrics: MarketMetrics): { regime: MarketRegime; decision: 'TRADE' | 'WAIT' | 'SLEEP' } {
+    // Check if recent fakeout rates are high to switch regime to TRAP_MODE
+    const fakeRate = RegimeEngine.getRecentFakeoutRate();
+    if (fakeRate > 0.40) {
+      return { regime: MarketRegime.TRAP_MODE, decision: 'WAIT' };
+    }
     // 1. Extreme Dead Zone (Only sleep if both ADX and RVOL are dead)
     if (metrics.adx < 12 && metrics.rvol < 1.1) {
       return { regime: MarketRegime.DEAD_CHOP, decision: 'SLEEP' };

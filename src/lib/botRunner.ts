@@ -1,87 +1,11 @@
 import axios from 'axios';
 import { sniper } from './sniperEngine.js';
 import { getWatchlist } from './binanceScanner.js';
-import { MarketCondition, GlobalContext, MarketMetrics } from '../types/trading.js';
+import { MarketCondition, GlobalContext } from '../types/trading.js';
 import { getTimeframes } from './timeframeUtils.js';
-import { FusionEngine } from './engine/FusionEngine.js';
 
 const BINANCE_FAPI = 'https://fapi.binance.com';
 let isRunning = false;
-
-let top100Queue: string[] = [];
-let queueIndex = 0;
-let lastQueueRefresh = 0;
-
-async function getTop100VolumeSymbols(): Promise<string[]> {
-  try {
-    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 7000 });
-    const tickers = res.data as any[];
-    const excludedAssets = [
-      'BTCUSDT', 'ETHUSDT', 'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'USDPUSDT', 'EURUSDT', 'AEURUSDT',
-      'PAXGUSDT', 'XAUTUSDT'
-    ];
-    const filtered = tickers.filter(t => 
-      t.symbol.endsWith('USDT') && 
-      !excludedAssets.includes(t.symbol) &&
-      !t.symbol.includes('UPUSDT') && !t.symbol.includes('DOWNUSDT') &&
-      !t.symbol.includes('BULLUSDT') && !t.symbol.includes('BEARUSDT')
-    );
-    
-    // 1. Sort by 24h volume first to secure highly liquid trading pools (getting the top 150)
-    filtered.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-    const liquidPool = filtered.slice(0, 150);
-
-    // 2. Filter for coins in a tight consolidation phase (excluding those that have already exploded/collapsed)
-    // We define this as an absolute 24h price change of less than or equal to 4.0%
-    const consolidatingPool = liquidPool.filter(t => {
-      const change = Math.abs(parseFloat(t.priceChangePercent));
-      return change <= 4.0;
-    });
-
-    let finalSymbols = consolidatingPool;
-    if (finalSymbols.length < 50) {
-      // Fallback: If excessive volatility across the market limits candidates, sort by absolute 24h change ascending
-      const sortedByQuietness = [...liquidPool].sort((a, b) => 
-        Math.abs(parseFloat(a.priceChangePercent)) - Math.abs(parseFloat(b.priceChangePercent))
-      );
-      finalSymbols = sortedByQuietness.slice(0, 100);
-    } else {
-      // Sort by volume descending within the consolidating ones and select up to 100 symbols
-      finalSymbols.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-      finalSymbols = finalSymbols.slice(0, 100);
-    }
-
-    return finalSymbols.map(t => t.symbol);
-  } catch (e: any) {
-    console.error('Error fetching consolidated top volume symbols:', e.message);
-    return [];
-  }
-}
-
-async function getNextBatchToScan(batchSize: number = 10): Promise<string[]> {
-  if (top100Queue.length === 0 || Date.now() - lastQueueRefresh > 300000) {
-    try {
-      const symbols = await getTop100VolumeSymbols();
-      if (symbols && symbols.length > 0) {
-        top100Queue = symbols;
-        lastQueueRefresh = Date.now();
-        console.log(`[BOT] Refreshed top 100 volume queue. Count: ${top100Queue.length}`);
-      }
-    } catch (e: any) {
-      console.error('[BOT] Error refreshing top 100 volume queue:', e.message);
-    }
-  }
-
-  if (top100Queue.length === 0) return [];
-
-  const batch: string[] = [];
-  for (let i = 0; i < batchSize; i++) {
-    const sym = top100Queue[queueIndex % top100Queue.length];
-    batch.push(sym);
-    queueIndex++;
-  }
-  return batch;
-}
 let botActive = false; // State to control if hunting is active
 let globalContext: GlobalContext = {
   avgAdx: 25,
@@ -323,29 +247,21 @@ export async function runTradeLoop() {
       }
       
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
-      if (activeTrades.length < maxTrades) {
-         // Get rotating chunk from the top 100 volume symbols
-         const top100Chunk = await getNextBatchToScan(5);
-         const watchlistSymbols = watchlist.map(c => c.symbol);
-         
-         // Combine them: include all from watchlist plus any from top 100 volume that aren't there yet
-         const targetSymbols: string[] = [...watchlistSymbols];
-         for (const sym of top100Chunk) {
-            if (!targetSymbols.includes(sym)) {
-                targetSymbols.push(sym);
-            }
-         }
-         
-         const targetsToCheck = targetSymbols.slice(0, 8).map(sym => ({ symbol: sym }));
+      if (activeTrades.length < maxTrades && watchlist.length > 0) {
+        // Optimized Scanning: Lower count and add spacing to prevent 429
+        const scanCount = 15; 
+        const targetsToCheck = [...watchlist].sort(() => 0.5 - Math.random()).slice(0, scanCount);
 
-         let rejectedCount = 0;
+        let rejectedCount = 0;
         let signalFoundInThisLoop = false;
         let rejectionReasons: Record<string, number> = {};
 
-        // Only use Quantum Scalper now
+        // Select and run active entry engine
         try {
             const { QuantumEngine } = await import('./engine/QuantumEngine.js');
+            const { CreativeEntryEngine } = await import('./engine/CreativeEntryEngine.js');
             const quantum = new QuantumEngine();
+            const creativeEngine = new CreativeEntryEngine();
 
             for (const coin of targetsToCheck) {
                 // If we found a signal and filled our slots, stop scanning
@@ -354,7 +270,7 @@ export async function runTradeLoop() {
 
                 // 🛑 RATE LIMIT PROTECTION: Add a small gap between scanning new symbols
                 // This doesn't affect active trade updates which run in parallel above
-                await sleep(350); 
+                await sleep(200); 
 
                 const tfs = getTimeframes(!!settings.isLongTerm);
                 try {
@@ -362,7 +278,7 @@ export async function runTradeLoop() {
                      const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
-                     // 1. Taker ratio
+                     // Taker ratio fallback: Try to get it but don't fail if endpoint is dead
                      let takerRatio = 1.0;
                      try {
                         const takerRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 });
@@ -371,37 +287,13 @@ export async function runTradeLoop() {
                             const sv = parseFloat(takerRes.data[0].sellVol);
                             if (sv > 0) takerRatio = bv / sv;
                         }
-                     } catch (e) {}
-
-                     // 2. Extra data for Fusion Engine (OI & Funding)
-                     let currentOI: number | undefined = undefined;
-                     let currentFunding: number | undefined = undefined;
-
-                     if (settings.useFusionEngine) {
-                        try {
-                            const [oiRes, premiumRes] = await Promise.all([
-                                axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 }).catch(() => null),
-                                axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex?symbol=${coin.symbol}`, { timeout: 3000 }).catch(() => null)
-                            ]);
-                            if (oiRes?.data?.openInterest) currentOI = parseFloat(oiRes.data.openInterest);
-                            if (premiumRes?.data?.lastFundingRate) currentFunding = parseFloat(premiumRes.data.lastFundingRate);
-                        } catch (e) {}
+                     } catch (e) {
+                         // Default to 1.0 if Binance Taker endpoint fails
                      }
 
-                     let sumVol = 0;
-                     for (let i = klines.length - 11; i < klines.length - 1; i++) {
-                       sumVol += parseFloat(klines[i][5]);
-                     }
-                     const avgVol = sumVol / 10;
-                     const lastVol = parseFloat(klines[klines.length - 1][5]);
-                     const rvol = avgVol > 0 ? (lastVol / avgVol) : 1.0;
-
-                     const quantumEnabled = (settings.quantumUseReversion !== false) || (settings.quantumUseMomentum !== false);
-                     let decision = { shouldEnter: false, type: 'LONG' as any, reason: '', takeProfitPerc: 0, stopLossPerc: 0 };
-
-                     if (quantumEnabled) {
-                         decision = quantum.analyze(klines, takerRatio, sniper.getSettings());
-                     }
+                     const decision = settings.useCreativeEngine
+                        ? creativeEngine.analyze(klines, takerRatio, sniper.getSettings())
+                        : quantum.analyze(klines, takerRatio, sniper.getSettings());
 
                      if (decision.shouldEnter) {
                           signalFoundInThisLoop = true;
@@ -422,103 +314,23 @@ export async function runTradeLoop() {
                               support: decision.type === 'LONG' ? support : 0,
                               resistance: decision.type === 'SHORT' ? resistance : 0,
                               takerBuySellRatio: takerRatio,
-                              oi: currentOI,
-                              fundingRate: currentFunding,
                               atr: 0 
                           };
                           
-                          // The Fusion check happens inside executeQuantumTrade effectively or we can pre-check here
-                          addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
-                          await sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          if (settings.useCreativeEngine) {
+                              addLog(`🎨 الابداعي TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
+                              if ((decision as any).marketNarrative) {
+                                  addLog(`💬 سياق الصفقة: ${(decision as any).marketNarrative}`, 'info');
+                              }
+                           } else {
+                              addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
+                           }
+                          await sniper.executeQuantumTrade(condition, settings.useCreativeEngine ? `CREATIVE_${decision.reason}` : `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
                           
-                     } else if (settings.useFusionEngine) {
-                          const currentPx = parseFloat(klines[klines.length - 1][4]);
-                          const metrics: MarketMetrics = {
-                              symbol: coin.symbol,
-                              price: currentPx,
-                              adx: 25,
-                              atr: 0,
-                              atrPerc: 0,
-                              rsi: 50,
-                              volume: 0,
-                              rvol: rvol,
-                              spread: 0,
-                              fundingRate: currentFunding,
-                              openInterest: currentOI,
-                              takerRatio: takerRatio,
-                              isChop: false
-                          };
-
-                          const fusion = FusionEngine.calculateFusionScore(metrics, settings);
-                          const minScore = settings.fusionMinScore ?? 70;
-
-                          if (fusion.score >= minScore) {
-                              signalFoundInThisLoop = true;
-
-                              // Direction decision based on taker bias and SMA trend
-                              let longSignals = 0;
-                              let shortSignals = 0;
-
-                              if (takerRatio > 1.01) longSignals += 2;
-                              if (takerRatio < 0.99) shortSignals += 2;
-
-                              let sum20 = 0;
-                              for (let i = klines.length - 21; i < klines.length - 1; i++) {
-                                  sum20 += parseFloat(klines[i][4]);
-                              }
-                              const sma20 = sum20 / 20;
-                              if (currentPx > sma20) longSignals++;
-                              if (currentPx < sma20) shortSignals++;
-
-                              const lastK = klines[klines.length - 1];
-                              const closeK = parseFloat(lastK[4]);
-                              const openK = parseFloat(lastK[1]);
-                              if (closeK > openK) longSignals++;
-                              if (closeK < openK) shortSignals++;
-
-                              const direction: 'LONG' | 'SHORT' = longSignals >= shortSignals ? 'LONG' : 'SHORT';
-
-                              // Volatility factor based on SMA variance
-                              let sumVariance = 0;
-                              for (let i = klines.length - 21; i < klines.length - 1; i++) {
-                                  const dev = parseFloat(klines[i][4]) - sma20;
-                                  sumVariance += dev * dev;
-                              }
-                              const stdDev = Math.sqrt(sumVariance / 20);
-                              const bbWidthPerc = ((stdDev * 2 * 2) / sma20) * 100;
-                              const volFactor = Math.max(0.3, Math.min(bbWidthPerc * 0.6, 5.0));
-
-                              // Volatility safe stops
-                              const slPerc = Math.max(0.2, volFactor * 0.85);
-                              const tpPerc = slPerc * 1.5;
-
-                              const slDistance = (slPerc / 100) * currentPx;
-                              const support = currentPx - slDistance;
-                              const resistance = currentPx + slDistance;
-
-                              const condition: MarketCondition = {
-                                  symbol: coin.symbol,
-                                  price: currentPx,
-                                  type: direction,
-                                  score: 5,
-                                  isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
-                                  support: direction === 'LONG' ? support : 0,
-                                  resistance: direction === 'SHORT' ? resistance : 0,
-                                  takerBuySellRatio: takerRatio,
-                                  oi: currentOI,
-                                  fundingRate: currentFunding,
-                                  atr: 0
-                              };
-
-                              addLog(`🌊 DIRECT FUSION ENTRY: ${direction} ${coin.symbol} | Score: ${fusion.score.toFixed(0)}%`, 'success');
-                              await sniper.executeQuantumTrade(condition, `FUSION_DIRECT`, tpPerc, slPerc);
-                          } else {
-                              rejectedCount++;
-                              rejectionReasons['Fusion Rejected'] = (rejectionReasons['Fusion Rejected'] || 0) + 1;
-                          }
                      } else {
                          rejectedCount++;
-                         rejectionReasons['Quantum No Signal'] = (rejectionReasons['Quantum No Signal'] || 0) + 1;
+                         const label = settings.useCreativeEngine ? 'Creative No Signal' : 'Quantum No Signal';
+                          rejectionReasons[label] = (rejectionReasons[label] || 0) + 1;
                      }
                 } catch(e: any) {
                      if (e.response && (e.response.status === 429 || e.response.status === 418)) {
@@ -545,5 +357,5 @@ export async function runTradeLoop() {
     } finally {
       isRunning = false;
     }
-  }, 4500); // Poll every 4.5s for tracking active trades and scanning targets
+  }, 3000); // Poll every 3s for tracking active trades and scanning targets
 }
