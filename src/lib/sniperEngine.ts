@@ -619,7 +619,7 @@ export class SniperEngine {
     const maxTrades = this.settings.maxConcurrentTrades || 10;
 
     // --- FUSION ENGINE VALIDATION GATE (NEW) ---
-    if (this.settings.useFusionEngine) {
+    if (this.settings.useFusionEngine && source !== "FUSION_DIRECT") {
       const metrics: MarketMetrics = {
         symbol: cond.symbol,
         price: entryPrice,
