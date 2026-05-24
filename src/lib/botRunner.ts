@@ -26,10 +26,34 @@ async function getTop100VolumeSymbols(): Promise<string[]> {
       !t.symbol.includes('UPUSDT') && !t.symbol.includes('DOWNUSDT') &&
       !t.symbol.includes('BULLUSDT') && !t.symbol.includes('BEARUSDT')
     );
+    
+    // 1. Sort by 24h volume first to secure highly liquid trading pools (getting the top 150)
     filtered.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-    return filtered.slice(0, 100).map(t => t.symbol);
+    const liquidPool = filtered.slice(0, 150);
+
+    // 2. Filter for coins in a tight consolidation phase (excluding those that have already exploded/collapsed)
+    // We define this as an absolute 24h price change of less than or equal to 4.0%
+    const consolidatingPool = liquidPool.filter(t => {
+      const change = Math.abs(parseFloat(t.priceChangePercent));
+      return change <= 4.0;
+    });
+
+    let finalSymbols = consolidatingPool;
+    if (finalSymbols.length < 50) {
+      // Fallback: If excessive volatility across the market limits candidates, sort by absolute 24h change ascending
+      const sortedByQuietness = [...liquidPool].sort((a, b) => 
+        Math.abs(parseFloat(a.priceChangePercent)) - Math.abs(parseFloat(b.priceChangePercent))
+      );
+      finalSymbols = sortedByQuietness.slice(0, 100);
+    } else {
+      // Sort by volume descending within the consolidating ones and select up to 100 symbols
+      finalSymbols.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+      finalSymbols = finalSymbols.slice(0, 100);
+    }
+
+    return finalSymbols.map(t => t.symbol);
   } catch (e: any) {
-    console.error('Error fetching top 100 volume symbols:', e.message);
+    console.error('Error fetching consolidated top volume symbols:', e.message);
     return [];
   }
 }
@@ -301,7 +325,7 @@ export async function runTradeLoop() {
       // 3. Scan for Entry Conditions (Only let max X trades run concurrently for safety)
       if (activeTrades.length < maxTrades) {
          // Get rotating chunk from the top 100 volume symbols
-         const top100Chunk = await getNextBatchToScan(10);
+         const top100Chunk = await getNextBatchToScan(5);
          const watchlistSymbols = watchlist.map(c => c.symbol);
          
          // Combine them: include all from watchlist plus any from top 100 volume that aren't there yet
@@ -312,7 +336,7 @@ export async function runTradeLoop() {
             }
          }
          
-         const targetsToCheck = targetSymbols.slice(0, 15).map(sym => ({ symbol: sym }));
+         const targetsToCheck = targetSymbols.slice(0, 8).map(sym => ({ symbol: sym }));
 
          let rejectedCount = 0;
         let signalFoundInThisLoop = false;
@@ -330,7 +354,7 @@ export async function runTradeLoop() {
 
                 // 🛑 RATE LIMIT PROTECTION: Add a small gap between scanning new symbols
                 // This doesn't affect active trade updates which run in parallel above
-                await sleep(200); 
+                await sleep(350); 
 
                 const tfs = getTimeframes(!!settings.isLongTerm);
                 try {
@@ -521,5 +545,5 @@ export async function runTradeLoop() {
     } finally {
       isRunning = false;
     }
-  }, 3000); // Poll every 3s for tracking active trades and scanning targets
+  }, 4500); // Poll every 4.5s for tracking active trades and scanning targets
 }
