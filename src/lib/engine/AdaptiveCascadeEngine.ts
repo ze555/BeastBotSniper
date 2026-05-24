@@ -1,6 +1,6 @@
-
-import { Trade, MarketMetrics, BotSettings, TradeType } from '../../types/trading.js';
+import { Trade, MarketMetrics, BotSettings } from '../../types/trading.js';
 import { FusionEngine } from './FusionEngine.js';
+import { AdaptiveExitEngine } from './AdaptiveExitEngine.js';
 
 export enum ExitDecision {
   EXIT_NOW = 'EXIT_NOW',
@@ -35,6 +35,34 @@ export class AdaptiveCascadeEngine {
     // 3. Momentum Check (التحول الزخمي)
     const momentum = this.checkMomentum(trade, metrics, klines);
 
+    // 4. Advanced Microstructure Engine Extraction
+    const micro = AdaptiveExitEngine.analyzeMicrostructure(trade, metrics, klines, settings);
+
+    // Non-linear adjustments applied to the base Fusion & overall model score
+    let adjustedFusionScore = Math.min(100, Math.max(0, fusion.score + micro.matrix.scoreAdjustment));
+    
+    // Adjust quantum validity if microstructure matrix suggests Trapped positions
+    if (micro.matrix.bias === 'TRAPPED_LONGS' && trade.type === 'LONG') {
+      quantum.isValid = false;
+      quantum.score = Math.max(0, quantum.score - 40);
+    }
+
+    // Dynamic Regime Weighting overrides based on analyzed multi-regime scores
+    let quantumWeight = 0.2;
+    let fusionWeight = 0.5;
+    let momentumWeight = 0.3;
+
+    // Direct shift if CHOP or RANGE is dominating the current hybrid regime
+    if (micro.regimes.chopScore > 65) {
+      quantumWeight = 0.4;
+      fusionWeight = 0.5;
+      momentumWeight = 0.1; // ignore momentum indicators in a dead chop
+    } else if (micro.regimes.trendScore > 65) {
+      quantumWeight = 0.1;
+      fusionWeight = 0.4;
+      momentumWeight = 0.5; // elevate momentum weighting during actual trends
+    }
+
     // Decision Logic based on Mode
     switch (mode) {
       case 'QUANTUM_ONLY':
@@ -42,7 +70,7 @@ export class AdaptiveCascadeEngine {
                                : { decision: ExitDecision.EXIT_NOW, reason: 'Quantum Reversion Exhausted', score: 0 };
       
       case 'FUSION_PRIORITY':
-        if (fusion.score > 60) return { decision: ExitDecision.CONTINUE, reason: 'Strong Fusion Flow', score: fusion.score };
+        if (adjustedFusionScore > 60) return { decision: ExitDecision.CONTINUE, reason: `Strong Fusion Flow (${adjustedFusionScore.toFixed(0)})`, score: adjustedFusionScore };
         return { decision: ExitDecision.EXIT_NOW, reason: 'Weak Fusion Flow', score: 0 };
 
       case 'MOMENTUM_ASSISTED':
@@ -50,12 +78,44 @@ export class AdaptiveCascadeEngine {
         return { decision: ExitDecision.EXIT_NOW, reason: 'No Momentum Support', score: 0 };
 
       case 'FULL_CONSENSUS':
-        if (quantum.isValid && fusion.score > 50 && momentum.isStrong) return { decision: ExitDecision.CONTINUE, reason: 'Full Consensus Reached', score: 100 };
+        if (quantum.isValid && adjustedFusionScore > 50 && momentum.isStrong) return { decision: ExitDecision.CONTINUE, reason: 'Full Consensus Reached', score: 100 };
         return { decision: ExitDecision.EXIT_NOW, reason: 'Consensus Missing', score: 0 };
 
       case 'ADAPTIVE_CASCADE':
       default:
-        return this.runAdaptiveCascade(quantum, fusion, momentum, aggression, trade);
+        // Pass enriched parameters into our cascade processor
+        const evaluation = this.runAdaptiveCascade(
+          quantum, 
+          { ...fusion, score: adjustedFusionScore }, 
+          momentum, 
+          aggression, 
+          trade,
+          micro,
+          { quantumWeight, fusionWeight, momentumWeight }
+        );
+
+        // --- Low-Liquidity/Vacuum Execution Slippage Safeguard ---
+        // If the decision is EXIT_NOW, but expected slippage or vacuum score is extremely high:
+        // We prevent the engine from executing bad market orders. Instead, we degrade to a TRAIL_TIGHT stop.
+        if (evaluation.decision === ExitDecision.EXIT_NOW && micro.slippageRisk > 70) {
+          return {
+            decision: ExitDecision.TRAIL_TIGHT,
+            reason: `⚠️ SLIPPAGE GUARD: Early Exit suggested but prevented due to low passive liquidity (${micro.slippageRisk.toFixed(0)}% Slippage Risk). Recommending Tight Trailing Stop instead. Detail: ${evaluation.reason}`,
+            score: evaluation.score
+          };
+        }
+
+        // --- Passive Absorption Guard ---
+        // If there's high institutional limit buying absorbing aggressive sell volumes, avoid premature exit
+        if (evaluation.decision === ExitDecision.EXIT_NOW && micro.matrix.bias === 'PASSIVE_ABSORPTION') {
+          return {
+            decision: ExitDecision.TRAIL_TIGHT,
+            reason: `🛡️ ABSORPTION GUARD: Volume delta is bearish but price is holding. Icebergs detected. Tightening stop instead of immediate market exit.`,
+            score: 40
+          };
+        }
+
+        return evaluation;
     }
   }
 
@@ -121,14 +181,16 @@ export class AdaptiveCascadeEngine {
   }
 
   /**
-   * The Advanced Cascade Logic (Tree-based)
+   * The Advanced Cascade Logic (Tree-based) with multi-microstructure metrics integration
    */
   private static runAdaptiveCascade(
     quantum: any, 
     fusion: any, 
     momentum: any, 
     aggression: number,
-    trade: Trade
+    trade: Trade,
+    micro: any,
+    weights: { quantumWeight: number; fusionWeight: number; momentumWeight: number }
   ): { decision: ExitDecision; reason: string; score: number } {
     
     // Case 1: Quantum edge GONE, but Fusion & Momentum are STRONG
@@ -136,7 +198,7 @@ export class AdaptiveCascadeEngine {
     if (!quantum.isValid && fusion.score > 70 && momentum.isStrong) {
       return { 
         decision: ExitDecision.HOLD_FOR_MOON, 
-        reason: '🔄 TRANSITION: Reversion ended but Trend Expansion confirmed by Fusion & Momentum.', 
+        reason: `🔄 TRANSITION: Reversion ended but trend expansion confirmed by Fusion & Momentum. [${micro.matrix.reason}]`, 
         score: 95 
       };
     }
@@ -145,7 +207,7 @@ export class AdaptiveCascadeEngine {
     if (!quantum.isValid && fusion.score < 40 && !momentum.isStrong) {
       return { 
         decision: ExitDecision.EXIT_NOW, 
-        reason: '❌ TOTAL EXHAUSTION: All engines signaling weakness.', 
+        reason: `❌ TOTAL EXHAUSTION: All engines signalling extreme weakness. [${micro.matrix.reason}]`, 
         score: 0 
       };
     }
@@ -154,7 +216,7 @@ export class AdaptiveCascadeEngine {
     if (!quantum.isValid && fusion.score > 50 && !momentum.isStrong) {
       return { 
         decision: ExitDecision.TRAIL_TIGHT, 
-        reason: '⚠️ UNCERTAINTY: Fusion exists but Momentum stalling. Tightening Trailing Stop.', 
+        reason: `⚠️ UNCERTAINTY: Flows exist but momentum stalled. [${micro.matrix.reason}]`, 
         score: 50 
       };
     }
@@ -163,27 +225,33 @@ export class AdaptiveCascadeEngine {
     if (fusion.score > 80 && momentum.isStrong) {
       return { 
         decision: ExitDecision.HOLD_FOR_MOON, 
-        reason: '🔥 EXPLOSION: Absolute momentum/liquidity alignment. Letting profits run.', 
+        reason: `🔥 MOMENTUM EXPLOSION: Absolute alignment across volumetric engines. [${micro.matrix.reason}]`, 
         score: 100 
       };
     }
 
-    // Case 5: Default behavior based on Aggression
-    const totalScore = (quantum.score * 0.2) + (fusion.score * 0.5) + (momentum.score * 0.3);
+    // Case 5: Default behavior based on Aggression & Weighted Microstructure variables
+    let rawTotalScore = (quantum.score * weights.quantumWeight) + 
+                        (fusion.score * weights.fusionWeight) + 
+                        (momentum.score * weights.momentumWeight);
+    
+    // Apply dynamic Stagnation Time Decay penalty directly to the total score of stagnant positions
+    rawTotalScore = Math.max(0, rawTotalScore - micro.timeDecayPenalty);
+
     const threshold = (1 - aggression) * 100; // If aggression is 0.8, threshold is 20.
 
-    if (totalScore > threshold) {
+    if (rawTotalScore > threshold) {
       return { 
         decision: ExitDecision.CONTINUE, 
-        reason: `✅ ADAPTIVE HOLD: Score (${totalScore.toFixed(0)}) above threshold (${threshold.toFixed(0)}).`, 
-        score: totalScore 
+        reason: `✅ ADAPTIVE HOLD: Cumulative score (${rawTotalScore.toFixed(0)}) above threshold (${threshold.toFixed(0)}). Stagnation Penalty: -${micro.timeDecayPenalty.toFixed(0)}`, 
+        score: rawTotalScore 
       };
     }
 
     return { 
       decision: ExitDecision.EXIT_NOW, 
-      reason: `📉 CASCADE EXIT: Cumulative score (${totalScore.toFixed(0)}) too low.`, 
-      score: totalScore 
+      reason: `📉 CASCADE EXIT: Cumulative score (${rawTotalScore.toFixed(0)}) fell below exit filter (${threshold.toFixed(0)}). [${micro.matrix.reason}]`, 
+      score: rawTotalScore 
     };
   }
 }

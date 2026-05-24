@@ -617,6 +617,37 @@ export class SniperEngine {
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
+
+    // --- FUSION ENGINE VALIDATION GATE (NEW) ---
+    if (this.settings.useFusionEngine) {
+      const metrics: MarketMetrics = {
+        symbol: cond.symbol,
+        price: entryPrice,
+        adx: 25,
+        atr: cond.atr || 0,
+        atrPerc: cond.atr ? (cond.atr / entryPrice) * 100 : 0,
+        rsi: 50,
+        volume: cond.vol24h || 0,
+        rvol: cond.isMomentumHigh ? 2.0 : 1.2,
+        spread: cond.spread || 0,
+        fundingRate: cond.fundingRate,
+        openInterest: cond.oi,
+        takerRatio: cond.takerBuySellRatio,
+        isChop: false
+      };
+      
+      const fusion = FusionEngine.calculateFusionScore(metrics, this.settings);
+      const minScore = this.settings.fusionMinScore ?? 70;
+      
+      if (fusion.score < minScore) {
+        console.log(`[FUSION] 🛡️ Entry Blocked (Quantum Path): ${cond.symbol} | Score: ${fusion.score.toFixed(1)} < ${minScore}% | ${fusion.reason}`);
+        addLog(`FUSION Blocked ${cond.symbol}: Score ${fusion.score.toFixed(0)}%`, 'warn');
+        return;
+      }
+      console.log(`[FUSION] ✅ Core Validated (Quantum Path): ${cond.symbol} | Score: ${fusion.score.toFixed(1)}%`);
+      source = `FUSION_${source}`;
+    }
+
     let positionSizeUsd = this.risk.calculatePositionSize(
       this.settings.portfolioSize,
       entryPrice,

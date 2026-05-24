@@ -22,7 +22,7 @@ export class FusionEngine {
     // 1. Open Interest (OI) Component
     // Growing OI + Growing Price = Long strength
     // Falling OI + Growing Price = Short squeeze / Weak move
-    const oiScore = this.evaluateOI(metrics.oiChange ?? 0, sensitivity);
+    const oiScore = this.evaluateOI(metrics.oiChange, sensitivity);
     totalScore += oiScore * weights.oi;
     details.push(`OI: ${oiScore.toFixed(0)}%`);
 
@@ -51,35 +51,39 @@ export class FusionEngine {
     };
   }
 
-  private static evaluateOI(oiChange: number, sensitivity: number): number {
-    // oiChange is usually daily or since last scan %
+  private static evaluateOI(oiChange: number | undefined, sensitivity: number): number {
+    if (oiChange === undefined) return 50; // Neutral if no change data
     const absChange = Math.abs(oiChange);
+    if (absChange === 0) return 50; // Neutral
+    
     if (absChange > 5 * (1 / sensitivity)) return 100;
     if (absChange > 2 * (1 / sensitivity)) return 75;
     if (absChange > 0.5) return 50;
-    return 20;
+    return 30; // Slightly negative if very low change but exists
   }
 
-  private static evaluateFunding(funding: number, sensitivity: number): number {
+  private static evaluateFunding(funding: number | undefined, sensitivity: number): number {
+    if (funding === undefined) return 50; // Neutral
     const absFunding = Math.abs(funding);
     // Extreme funding (e.g. > 0.05%) attracts institutional "mean reversion" or "liquidation hunting"
     if (absFunding > 0.03 * sensitivity) return 100;
     if (absFunding > 0.01) return 80;
-    return 50;
+    return 55; // Slightly bullish/positive bias
   }
 
   private static evaluateVolume(rvol: number, sensitivity: number): number {
     if (rvol > 3.0 * (1 / sensitivity)) return 100; // Institutional surge
-    if (rvol > 1.5) return 75; // Strong momentum
-    if (rvol > 1.0) return 50;
-    return 20;
+    if (rvol > 1.5) return 80; // Strong momentum
+    if (rvol > 1.0) return 60;
+    return 40; // Weak but not dead
   }
 
-  private static evaluateInstitutional(takerRatio: number, sensitivity: number): number {
+  private static evaluateInstitutional(takerRatio: number | undefined, sensitivity: number): number {
+    if (takerRatio === undefined) return 50;
     const diff = Math.abs(1 - takerRatio);
     if (diff > 0.1 * (1 / sensitivity)) return 100; // Heavy taker imbalance
     if (diff > 0.05) return 80;
-    if (diff > 0.01) return 50;
-    return 30;
+    if (diff > 0.01) return 60;
+    return 50;
   }
 }

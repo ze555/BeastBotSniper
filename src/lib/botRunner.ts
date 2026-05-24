@@ -276,7 +276,7 @@ export async function runTradeLoop() {
                      const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
-                     // Taker ratio fallback: Try to get it but don't fail if endpoint is dead
+                     // 1. Taker ratio
                      let takerRatio = 1.0;
                      try {
                         const takerRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 });
@@ -285,8 +285,21 @@ export async function runTradeLoop() {
                             const sv = parseFloat(takerRes.data[0].sellVol);
                             if (sv > 0) takerRatio = bv / sv;
                         }
-                     } catch (e) {
-                         // Default to 1.0 if Binance Taker endpoint fails
+                     } catch (e) {}
+
+                     // 2. Extra data for Fusion Engine (OI & Funding)
+                     let currentOI: number | undefined = undefined;
+                     let currentFunding: number | undefined = undefined;
+
+                     if (settings.useFusionEngine) {
+                        try {
+                            const [oiRes, premiumRes] = await Promise.all([
+                                axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 }).catch(() => null),
+                                axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex?symbol=${coin.symbol}`, { timeout: 3000 }).catch(() => null)
+                            ]);
+                            if (oiRes?.data?.openInterest) currentOI = parseFloat(oiRes.data.openInterest);
+                            if (premiumRes?.data?.lastFundingRate) currentFunding = parseFloat(premiumRes.data.lastFundingRate);
+                        } catch (e) {}
                      }
 
                      const decision = quantum.analyze(klines, takerRatio, sniper.getSettings());
@@ -310,9 +323,12 @@ export async function runTradeLoop() {
                               support: decision.type === 'LONG' ? support : 0,
                               resistance: decision.type === 'SHORT' ? resistance : 0,
                               takerBuySellRatio: takerRatio,
+                              oi: currentOI,
+                              fundingRate: currentFunding,
                               atr: 0 
                           };
                           
+                          // The Fusion check happens inside executeQuantumTrade effectively or we can pre-check here
                           addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
                           await sniper.executeQuantumTrade(condition, `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
                           
