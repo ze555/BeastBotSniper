@@ -52,6 +52,7 @@ export class SniperEngine {
     useWiseEntry: true,
     useSlyFox: true,
     useCreativeEngine: false,
+    creativeUseAdaptiveExit: false,
     useKineticEngine: true,
     beastMode: false,
     beastConfirmWithSMC: false,
@@ -293,6 +294,7 @@ export class SniperEngine {
             marketPanicThreshold: dbSettings.marketPanicThreshold ?? 3.0,
             useFusionEngine: dbSettings.useFusionEngine === 1,
             useCreativeEngine: dbSettings.useCreativeEngine === 1,
+            creativeUseAdaptiveExit: dbSettings.creativeUseAdaptiveExit === 1,
             fusionSensitivity: dbSettings.fusionSensitivity ?? 1.0,
             fusionWeightOi: dbSettings.fusionWeightOi ?? 0.25,
             fusionWeightFunding: dbSettings.fusionWeightFunding ?? 0.25,
@@ -851,7 +853,7 @@ export class SniperEngine {
     }
 
     // --- SPECIAL HANDLING: CREATIVE POSITION STATE MACHINE (Gap 6 / Point 6) ---
-    if (trade.source && trade.source.startsWith("CREATIVE_")) {
+    if (trade.source && trade.source.startsWith("CREATIVE_") && !this.settings.creativeUseAdaptiveExit) {
       // 1. Calculate inline parameters for the Creative State Machine
       let inlineRvol = 1.0;
       if (klines && klines.length >= 20) {

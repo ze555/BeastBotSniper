@@ -309,4 +309,5 @@ export interface BotSettings {
   exitUseMomentumCheck?: boolean;      // فحص التحول الزخمي
   exitAdaptiveAggression?: number;     // عدوانية الخروج التكيفي (0.1 - 1.0)
   overrideAllWithAdaptive?: boolean;   // السماح للنظام التكيفي بتجاوز جميع قرارات الخروج الأخرى
+  creativeUseAdaptiveExit?: boolean;   // استخدام نظام الخروج التكيفي للصفقات الإبداعية بدلاً من صانع الحركة الافتراضي
 }

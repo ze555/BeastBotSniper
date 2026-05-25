@@ -345,6 +345,22 @@ export function SettingsView({
                         </p>
                       </div>
                     </div>
+                    
+                    {/* خيار الخروج التكيفي للصفقات الإبداعية */}
+                    <div className="flex items-center justify-between p-4 bg-slate-900/60 rounded-xl border border-amber-500/20 relative z-10 text-right">
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-amber-400">توجيه الصفقات الإبداعية للخروج التكيفي (Creative Adaptive Exit)</span>
+                        <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                          عند تفعيل هذا الخيار، سيتم تسليم صفقات المحرك الإبداعي بمجرد دخولها لنظام الخروج التكيفي المتسلسل (Adaptive Exit Cascade) بدلاً من استراتيجية الخروج الافتراضية الخاصة بالمحرك الإبداعي لتأمين ونحت الأرباح كلياً في الأوقات الارتدادية.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.creativeUseAdaptiveExit} 
+                        onChange={e => setSettings({...settings, creativeUseAdaptiveExit: e.target.checked})} 
+                        className="w-6 h-6 accent-amber-500 cursor-pointer shrink-0 ml-4" 
+                      />
+                    </div>
 
                     {settings.useCreativeEngine && (
                       <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 text-xs text-amber-300 relative z-10 text-right font-sans">

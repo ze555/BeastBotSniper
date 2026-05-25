@@ -131,7 +131,8 @@ export const initDB = () => {
           fusionWeightInst REAL DEFAULT 0.25,
           fusionMinScore REAL DEFAULT 70,
           exitUseRsiCheck INTEGER DEFAULT 1,
-          overrideAllWithAdaptive INTEGER DEFAULT 0
+          overrideAllWithAdaptive INTEGER DEFAULT 0,
+          creativeUseAdaptiveExit INTEGER DEFAULT 0
         )
       `);
       
@@ -225,7 +226,8 @@ export const initDB = () => {
         "fusionWeightInst REAL DEFAULT 0.25",
         "fusionMinScore REAL DEFAULT 70",
         "exitUseRsiCheck INTEGER DEFAULT 1",
-        "overrideAllWithAdaptive INTEGER DEFAULT 0"
+        "overrideAllWithAdaptive INTEGER DEFAULT 0",
+        "creativeUseAdaptiveExit INTEGER DEFAULT 0"
       ];
       
       let pending = newCols.length;
@@ -353,9 +355,9 @@ export function saveSettingsToDB(settings: any) {
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
       inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc,
       isNightmareMode, marketPanicThreshold,
-      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine
+      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine, creativeUseAdaptiveExit
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -448,7 +450,8 @@ export function saveSettingsToDB(settings: any) {
       fusionMinScore=excluded.fusionMinScore,
       exitUseRsiCheck=excluded.exitUseRsiCheck,
       overrideAllWithAdaptive=excluded.overrideAllWithAdaptive,
-      useCreativeEngine=excluded.useCreativeEngine
+      useCreativeEngine=excluded.useCreativeEngine,
+      creativeUseAdaptiveExit=excluded.creativeUseAdaptiveExit
   `;
 
   const values = [
@@ -482,7 +485,8 @@ export function saveSettingsToDB(settings: any) {
     settings.fusionMinScore ?? 70,
     settings.exitUseRsiCheck !== false ? 1 : 0,
     settings.overrideAllWithAdaptive ? 1 : 0,
-    settings.useCreativeEngine ? 1 : 0
+    settings.useCreativeEngine ? 1 : 0,
+    settings.creativeUseAdaptiveExit ? 1 : 0
   ];
 
   db.run(query, values, (err) => {
@@ -535,6 +539,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.fastExitEnabled = row.fastExitEnabled === 1;
         row.useFusionEngine = row.useFusionEngine === 1;
         row.useCreativeEngine = row.useCreativeEngine === 1;
+        row.creativeUseAdaptiveExit = row.creativeUseAdaptiveExit === 1;
         row.exitUseRsiCheck = row.exitUseRsiCheck !== 0;
         row.overrideAllWithAdaptive = row.overrideAllWithAdaptive === 1;
         resolve(row);
