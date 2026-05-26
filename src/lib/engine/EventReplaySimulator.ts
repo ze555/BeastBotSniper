@@ -546,7 +546,7 @@ export class EventReplaySimulator {
             slPrice,
             leverage,
             settings.maxConcurrentTrades || 10,
-            settings.minPositionSizePerc || 0
+            settings.riskPerTradePerc || 1
           );
           const sizeUsd = rawSelectedSize * sizeMultiplier;
 

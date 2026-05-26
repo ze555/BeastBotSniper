@@ -51,6 +51,7 @@ export default function App() {
     quantumVolThreshold: 1.02,
     quantumMomentumVol: 1.5,
     minPositionSizePerc: 20,
+    useCreativeEngine: true,
   });
   const [savingSettings, setSavingSettings] = useState(false);
 

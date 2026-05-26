@@ -51,8 +51,9 @@ export class SniperEngine {
     useWiseExit: true,
     useWiseEntry: true,
     useSlyFox: true,
-    useCreativeEngine: false,
+    useCreativeEngine: true,
     creativeUseAdaptiveExit: false,
+    disableConsecutiveLoss: true,
     useKineticEngine: true,
     beastMode: false,
     beastConfirmWithSMC: false,
@@ -181,6 +182,11 @@ export class SniperEngine {
       await initDB();
       const dbSettings = await loadSettingsFromDB();
       if (dbSettings) {
+        // Enforce the user's explicit setup constraint: $2000 total portfolio size & Creative Engine enabled
+        dbSettings.portfolioSize = 2000;
+        dbSettings.useCreativeEngine = 1;
+        dbSettings.disableConsecutiveLoss = 1;
+
         if (
           dbSettings.portfolioSize === 1000 &&
           dbSettings.maxConcurrentTrades === 3
@@ -295,6 +301,7 @@ export class SniperEngine {
             useFusionEngine: dbSettings.useFusionEngine === 1,
             useCreativeEngine: dbSettings.useCreativeEngine === 1,
             creativeUseAdaptiveExit: dbSettings.creativeUseAdaptiveExit === 1,
+            disableConsecutiveLoss: dbSettings.disableConsecutiveLoss === 1,
             fusionSensitivity: dbSettings.fusionSensitivity ?? 1.0,
             fusionWeightOi: dbSettings.fusionWeightOi ?? 0.25,
             fusionWeightFunding: dbSettings.fusionWeightFunding ?? 0.25,
@@ -483,6 +490,8 @@ export class SniperEngine {
    */
   private async executeTrade(cond: MarketCondition, source?: string) {
     const entryPrice = cond.price;
+    const leverage = this.settings.leverage || 10;
+    const maxTrades = this.settings.maxConcurrentTrades || 10;
     let sl = 0;
 
     // 1. Stop Loss Placement: Prioritize ATR for dynamic protection
@@ -502,16 +511,18 @@ export class SniperEngine {
     const riskVerdict = this.risk.canTrade(
       this.getActiveTrades(),
       this.tradeHistory,
+      this.settings.portfolioSize,
+      leverage,
       this.settings.beastMode,
+      this.settings.disableConsecutiveLoss || this.settings.useCreativeEngine
     );
     if (!riskVerdict.allowed) {
       console.log(`[RISK] 🛡️ Entry Blocked: ${riskVerdict.reason}`);
+      addLog(`Entry Blocked: ${riskVerdict.reason}`, "error");
       return;
     }
 
     // 3. Position Sizing
-    const leverage = this.settings.leverage || 10;
-    const maxTrades = this.settings.maxConcurrentTrades || 10;
     
     // Compute dynamic elements for Risk position sizing
     const testConfidence = cond.score ? cond.score * 10 : 70;
@@ -525,7 +536,7 @@ export class SniperEngine {
       sl,
       leverage,
       maxTrades,
-      this.settings.minPositionSizePerc || 0,
+      this.settings.riskPerTradePerc || 1,
       testConfidence,
       testVolatility,
       testStability,
@@ -633,13 +644,29 @@ export class SniperEngine {
 
     const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
+
+    // 1. Risk Engine Validation: check global trade limits and portfolio margin
+    const riskVerdict = this.risk.canTrade(
+      this.getActiveTrades(),
+      this.tradeHistory,
+      this.settings.portfolioSize,
+      leverage,
+      this.settings.beastMode,
+      this.settings.disableConsecutiveLoss || this.settings.useCreativeEngine
+    );
+    if (!riskVerdict.allowed) {
+      console.log(`[RISK] 🛡️ Quantum Entry Blocked: ${riskVerdict.reason}`);
+      addLog(`Quantum Entry Blocked: ${riskVerdict.reason}`, "error");
+      return;
+    }
+
     let positionSizeUsd = this.risk.calculatePositionSize(
       this.settings.portfolioSize,
       entryPrice,
       sl,
       leverage,
       maxTrades,
-      this.settings.minPositionSizePerc || 0
+      this.settings.riskPerTradePerc || 1
     );
 
     // Ensure minimum position for exchange rules (Binance usually requires 5-10 USD)

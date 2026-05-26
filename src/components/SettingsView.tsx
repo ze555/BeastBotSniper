@@ -194,15 +194,11 @@ export function SettingsView({
                   </div>
                </div>
 
-               <div className="space-y-3">
-                  <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
-                     الحد الأدنى لحجم الصفقة <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">Min Allocation %</span>
-                  </label>
-                  <div className="relative">
-                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold">%</span>
-                     <input type="number" step="1" required min="1" max="100" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-10 py-4 text-emerald-400 font-mono focus:border-emerald-500 outline-none transition-all text-left text-lg" dir="ltr" value={settings.minPositionSizePerc ?? 20} onChange={e => setSettings({...settings, minPositionSizePerc: parseFloat(e.target.value)})} />
-                  </div>
-                  <p className="text-[10px] text-slate-500 italic">يضمن ألا يقل حجم الصفقة عن هذه النسبة من رأس المال مهما كانت درجة المخاطرة.</p>
+               <div className="space-y-3 bg-slate-900/60 p-4 rounded-2xl border border-emerald-500/20 text-right">
+                  <span className="text-xs font-bold text-emerald-400">تقسيم رأس المال التلقائي والموزع (Dynamic Capital Allocation)</span>
+                  <p className="text-[10px] text-slate-400 leading-relaxed font-sans mt-1">
+                     مُفعّل تلقائياً: يتم تقسيم وإفراز الهامش لكل صفقة بالتساوي بناءً على عدد الصفقات الأقصى المسموح به (<span className="text-emerald-300 font-mono">{settings.maxConcurrentTrades || 10} صفقات</span>). يضمن هذا النظام حجز جزء آمن من المحفظة لكل صفقة بحيث لا تستهلك أي صفقة كامل الرصيد ولا يتم فتح صفقة بدون رصيد كافٍ.
+                  </p>
                </div>
 
                <div className="space-y-3">
@@ -358,6 +354,22 @@ export function SettingsView({
                         type="checkbox" 
                         checked={!!settings.creativeUseAdaptiveExit} 
                         onChange={e => setSettings({...settings, creativeUseAdaptiveExit: e.target.checked})} 
+                        className="w-6 h-6 accent-amber-500 cursor-pointer shrink-0 ml-4" 
+                      />
+                    </div>
+
+                    {/* خيار إلغاء حماية الخسائر المتتالية */}
+                    <div className="flex items-center justify-between p-4 bg-slate-900/60 rounded-xl border border-amber-500/20 relative z-10 text-right">
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-amber-400">إلغاء حماية الخسائر المتتالية (Disable Consecutive Loss Protection)</span>
+                        <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                          عند تفعيل هذا الخيار، سيتم تعطيل حماية الحد من المخاطر للمحرك الإبداعي التي تحظر فتح الصفقات تلقائياً عند تتابع الخسائر للوصول للاستمرارية التوليدية للإشارات.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.disableConsecutiveLoss} 
+                        onChange={e => setSettings({...settings, disableConsecutiveLoss: e.target.checked})} 
                         className="w-6 h-6 accent-amber-500 cursor-pointer shrink-0 ml-4" 
                       />
                     </div>
