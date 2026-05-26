@@ -132,7 +132,7 @@ export const initDB = () => {
           fusionWeightInst REAL DEFAULT 0.25,
           fusionMinScore REAL DEFAULT 70,
           exitUseRsiCheck INTEGER DEFAULT 1,
-          overrideAllWithAdaptive INTEGER DEFAULT 0,
+          overrideAllWithAdaptive INTEGER DEFAULT 0, useSteelEngine INTEGER DEFAULT 0, steelMinProbability REAL DEFAULT 65, steelInfluenceCreative REAL DEFAULT 0.35, steelInfluenceQuantum REAL DEFAULT 0.35, steelInfluenceFusion REAL DEFAULT 0.30, steelTakerWeight REAL DEFAULT 1.5, steelOiWeight REAL DEFAULT 1.2, steelFundingWeight REAL DEFAULT 1.0, steelLiquidityWeight REAL DEFAULT 1.3, steelHtfTrendWeight REAL DEFAULT 1.4, steelAdaptiveSlTp INTEGER DEFAULT 1,
           creativeUseAdaptiveExit INTEGER DEFAULT 0
         )
       `);
@@ -229,7 +229,7 @@ export const initDB = () => {
         "fusionMinScore REAL DEFAULT 70",
         "exitUseRsiCheck INTEGER DEFAULT 1",
         "overrideAllWithAdaptive INTEGER DEFAULT 0",
-        "creativeUseAdaptiveExit INTEGER DEFAULT 0"
+        "creativeUseAdaptiveExit INTEGER DEFAULT 0", "useSteelEngine INTEGER DEFAULT 0", "steelMinProbability REAL DEFAULT 65", "steelInfluenceCreative REAL DEFAULT 0.35", "steelInfluenceQuantum REAL DEFAULT 0.35", "steelInfluenceFusion REAL DEFAULT 0.30", "steelTakerWeight REAL DEFAULT 1.5", "steelOiWeight REAL DEFAULT 1.2", "steelFundingWeight REAL DEFAULT 1.0", "steelLiquidityWeight REAL DEFAULT 1.3", "steelHtfTrendWeight REAL DEFAULT 1.4", "steelAdaptiveSlTp INTEGER DEFAULT 1"
       ];
       
       let pending = newCols.length;
@@ -357,9 +357,10 @@ export function saveSettingsToDB(settings: any) {
       quantumBeastAggression, quantumSmartExitAggression, quantumWiseEntryThreshold,
       inverseTrailingEnabled, inverseTrailingSensitivity, isLongTerm, minPositionSizePerc,
       isNightmareMode, marketPanicThreshold,
-      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine, creativeUseAdaptiveExit, disableConsecutiveLoss
+      useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine, creativeUseAdaptiveExit, disableConsecutiveLoss,
+      useSteelEngine, steelMinProbability, steelInfluenceCreative, steelInfluenceQuantum, steelInfluenceFusion, steelTakerWeight, steelOiWeight, steelFundingWeight, steelLiquidityWeight, steelHtfTrendWeight, steelAdaptiveSlTp
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -454,7 +455,18 @@ export function saveSettingsToDB(settings: any) {
       overrideAllWithAdaptive=excluded.overrideAllWithAdaptive,
       useCreativeEngine=excluded.useCreativeEngine,
       creativeUseAdaptiveExit=excluded.creativeUseAdaptiveExit,
-      disableConsecutiveLoss=excluded.disableConsecutiveLoss
+      disableConsecutiveLoss=excluded.disableConsecutiveLoss,
+      useSteelEngine=excluded.useSteelEngine,
+      steelMinProbability=excluded.steelMinProbability,
+      steelInfluenceCreative=excluded.steelInfluenceCreative,
+      steelInfluenceQuantum=excluded.steelInfluenceQuantum,
+      steelInfluenceFusion=excluded.steelInfluenceFusion,
+      steelTakerWeight=excluded.steelTakerWeight,
+      steelOiWeight=excluded.steelOiWeight,
+      steelFundingWeight=excluded.steelFundingWeight,
+      steelLiquidityWeight=excluded.steelLiquidityWeight,
+      steelHtfTrendWeight=excluded.steelHtfTrendWeight,
+      steelAdaptiveSlTp=excluded.steelAdaptiveSlTp
   `;
 
   const values = [
@@ -490,7 +502,18 @@ export function saveSettingsToDB(settings: any) {
     settings.overrideAllWithAdaptive ? 1 : 0,
     settings.useCreativeEngine ? 1 : 0,
     settings.creativeUseAdaptiveExit ? 1 : 0,
-    settings.disableConsecutiveLoss ? 1 : 0
+    settings.disableConsecutiveLoss ? 1 : 0,
+    settings.useSteelEngine ? 1 : 0,
+    settings.steelMinProbability ?? 65,
+    settings.steelInfluenceCreative ?? 0.35,
+    settings.steelInfluenceQuantum ?? 0.35,
+    settings.steelInfluenceFusion ?? 0.30,
+    settings.steelTakerWeight ?? 1.5,
+    settings.steelOiWeight ?? 1.2,
+    settings.steelFundingWeight ?? 1.0,
+    settings.steelLiquidityWeight ?? 1.3,
+    settings.steelHtfTrendWeight ?? 1.4,
+    settings.steelAdaptiveSlTp !== false ? 1 : 0
   ];
 
   db.run(query, values, (err) => {
@@ -547,6 +570,8 @@ export function loadSettingsFromDB(): Promise<any> {
         row.disableConsecutiveLoss = row.disableConsecutiveLoss === 1;
         row.exitUseRsiCheck = row.exitUseRsiCheck !== 0;
         row.overrideAllWithAdaptive = row.overrideAllWithAdaptive === 1;
+        row.useSteelEngine = row.useSteelEngine === 1;
+        row.steelAdaptiveSlTp = row.steelAdaptiveSlTp === 1;
         resolve(row);
       }
     });

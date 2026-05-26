@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap } from 'lucide-react';
+import { Target, Activity, Settings, BarChart2, ShieldCheck, Power, RefreshCw, TrendingUp, TrendingDown, Play, Square, Sliders, Zap, Cpu } from 'lucide-react';
 import { SettingsView } from './components/SettingsView';
 import { ReplaySimulatorView } from './components/ReplaySimulatorView';
 
@@ -602,8 +602,64 @@ export default function App() {
                               <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
                            </div>
 
-                           {/* Adaptive exit real-time status */}
-                           {t.latestAdaptiveResult ? (
+                           {/* Steel or Adaptive exit real-time status */}
+                           {t.latestSteelResult ? (
+                             <div className="mt-3 pt-3 border-t border-indigo-500/30 bg-gradient-to-l from-slate-950 via-slate-900 to-indigo-950/20 p-2.5 rounded-lg border border-indigo-500/20 space-y-2.5">
+                               <div className="flex justify-between items-center text-[11px]">
+                                 <div className="flex items-center gap-1 font-bold text-indigo-300">
+                                   <Cpu className="w-3.5 h-3.5 text-indigo-400 animate-spin" style={{ animationDuration: '8s' }} />
+                                   <span>المحرك الفولاذي الموحد</span>
+                                 </div>
+                                 <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase border ${
+                                   t.latestSteelResult.decision === 'CONTINUE' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
+                                   t.latestSteelResult.decision === 'HOLD_FOR_MOON' ? 'bg-gradient-to-r from-purple-500/20 to-indigo-500/20 text-indigo-300 border-indigo-500/20 font-bold animate-pulse' :
+                                   t.latestSteelResult.decision === 'TRAIL_TIGHT' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
+                                   t.latestSteelResult.decision === 'PARTIAL_PROFIT' ? 'bg-blue-500/10 text-blue-400 border-blue-500/15 font-bold' :
+                                   'bg-rose-500/10 text-rose-455 border-rose-500/10'
+                                 }`}>
+                                   {t.latestSteelResult.decision === 'CONTINUE' ? '✓ استمرار فولاذي' :
+                                    t.latestSteelResult.decision === 'HOLD_FOR_MOON' ? '🚀 تمسك قمري' :
+                                    t.latestSteelResult.decision === 'TRAIL_TIGHT' ? '⚠️ وقف مشدود' :
+                                    t.latestSteelResult.decision === 'PARTIAL_PROFIT' ? '💸 جني جزئي' :
+                                    '🛑 تسييل فوري'}
+                                 </span>
+                               </div>
+
+                               {/* Live Indicators & Trends */}
+                               <div className="grid grid-cols-3 gap-1 px-1.5 py-1 bg-slate-950/40 rounded-lg text-[9px] font-mono text-center">
+                                 <div>
+                                   <div className="text-slate-500 text-[8px] truncate">الاحتمال الاتجاهي</div>
+                                   <div className="text-indigo-300 font-bold mt-0.5">
+                                     {t.type === 'LONG' ? t.latestSteelResult.longProb.toFixed(0) : t.latestSteelResult.shortProb.toFixed(0)}%
+                                   </div>
+                                 </div>
+                                 <div>
+                                   <div className="text-slate-500 text-[8px] truncate">ضغط الحيتان Delta</div>
+                                   <div className={`font-bold mt-0.5 ${t.latestSteelResult.takerRatio > 1.0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                     {t.latestSteelResult.takerRatio.toFixed(2)}
+                                   </div>
+                                 </div>
+                                 <div>
+                                   <div className="text-slate-500 text-[8px] truncate">سرعة العقود OI</div>
+                                   <div className={`font-bold mt-0.5 ${t.latestSteelResult.oiChange > 0 ? 'text-emerald-400' : 'text-rose-450'}`}>
+                                     {t.latestSteelResult.oiChange > 0 ? '+' : ''}{t.latestSteelResult.oiChange.toFixed(2)}%
+                                   </div>
+                                 </div>
+                               </div>
+
+                               {/* Detailed exit plan explanations */}
+                               <div className="text-[10px] space-y-1 bg-slate-900/60 p-2 rounded-lg border border-slate-800/35">
+                                 <div className="flex justify-between items-center text-[9px]">
+                                   <span className="text-slate-500">حالة الموقف:</span>
+                                   <span className="text-indigo-200 font-extrabold">{t.latestSteelResult.currentState}</span>
+                                 </div>
+                                 <div className="text-[9px] leading-relaxed text-slate-300 font-sans mt-1">
+                                   <span className="font-extrabold text-indigo-400 block pb-0.5">🔍 آلية وتفسير الخروج:</span>
+                                   {t.latestSteelResult.exitIndicator}
+                                 </div>
+                               </div>
+                             </div>
+                           ) : t.latestAdaptiveResult ? (
                              <div className="mt-3 pt-3 border-t border-slate-800/80 bg-slate-950/40 p-2.5 rounded-lg space-y-2">
                                <div className="flex justify-between items-center text-[11px]">
                                  <span className="text-slate-400 font-medium">مراقبة الخروج التكيفي Tracker:</span>

@@ -260,8 +260,10 @@ export async function runTradeLoop() {
         try {
             const { QuantumEngine } = await import('./engine/QuantumEngine.js');
             const { CreativeEntryEngine } = await import('./engine/CreativeEntryEngine.js');
+            const { SteelEngine } = await import('./engine/SteelEngine.js');
             const quantum = new QuantumEngine();
             const creativeEngine = new CreativeEntryEngine();
+            const steelEngine = new SteelEngine();
 
             for (const coin of targetsToCheck) {
                 // If we found a signal and filled our slots, stop scanning
@@ -291,7 +293,9 @@ export async function runTradeLoop() {
                          // Default to 1.0 if Binance Taker endpoint fails
                      }
 
-                     const decision = settings.useCreativeEngine
+                     const decision = settings.useSteelEngine
+                        ? steelEngine.analyze(klines, takerRatio, sniper.getSettings(), parseFloat((coin as any).fundingRate || 0))
+                        : settings.useCreativeEngine
                         ? creativeEngine.analyze(klines, takerRatio, sniper.getSettings())
                         : quantum.analyze(klines, takerRatio, sniper.getSettings());
 
@@ -317,7 +321,12 @@ export async function runTradeLoop() {
                               atr: 0 
                           };
                           
-                          if (settings.useCreativeEngine) {
+                          if (settings.useSteelEngine) {
+                              addLog(`⚡ الفولاذي TRIGGERED: ${decision.type} ${coin.symbol} (الاحتمالية: ${decision.confidence.toFixed(0)}%)`, 'success');
+                              if ((decision as any).marketNarrative) {
+                                  addLog(`💬 سياق الصفقة الفولاذية: ${(decision as any).marketNarrative}`, 'info');
+                              }
+                          } else if (settings.useCreativeEngine) {
                               addLog(`🎨 الابداعي TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
                               if ((decision as any).marketNarrative) {
                                   addLog(`💬 سياق الصفقة: ${(decision as any).marketNarrative}`, 'info');
@@ -325,11 +334,11 @@ export async function runTradeLoop() {
                            } else {
                               addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
                            }
-                          await sniper.executeQuantumTrade(condition, settings.useCreativeEngine ? `CREATIVE_${decision.reason}` : `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          await sniper.executeQuantumTrade(condition, settings.useSteelEngine ? `STEEL_${decision.reason}` : settings.useCreativeEngine ? `CREATIVE_${decision.reason}` : `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
                           
                      } else {
                          rejectedCount++;
-                         const label = settings.useCreativeEngine ? 'Creative No Signal' : 'Quantum No Signal';
+                         const label = settings.useSteelEngine ? 'Steel No Signal' : settings.useCreativeEngine ? 'Creative No Signal' : 'Quantum No Signal';
                           rejectionReasons[label] = (rejectionReasons[label] || 0) + 1;
                      }
                 } catch(e: any) {

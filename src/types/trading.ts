@@ -81,6 +81,20 @@ export interface Trade {
       takerTrend?: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
     }
   };
+  latestSteelResult?: {
+    time: number;
+    decision: 'CONTINUE' | 'HOLD_FOR_MOON' | 'TRAIL_TIGHT' | 'EXIT_NOW' | 'PARTIAL_PROFIT';
+    reason: string;
+    longProb: number;
+    shortProb: number;
+    confidence: number;
+    exitIndicator: string;
+    currentState: string;
+    marketNarrative: string;
+    takerRatio: number;
+    oiChange: number;
+    fundingRate: number;
+  };
   adaptiveHistoryLogs?: any[];
 }
 
@@ -311,4 +325,17 @@ export interface BotSettings {
   overrideAllWithAdaptive?: boolean;   // السماح للنظام التكيفي بتجاوز جميع قرارات الخروج الأخرى
   creativeUseAdaptiveExit?: boolean;   // استخدام نظام الخروج التكيفي للصفقات الإبداعية بدلاً من صانع الحركة الافتراضي
   disableConsecutiveLoss?: boolean;     // 🛡️ إلغاء حماية الخسائر المتتالية
+
+  // ⚡ Steel Engine Settings (المحرك الفولاذي)
+  useSteelEngine?: boolean;             // تفعيل المحرك الفولاذي الخارق
+  steelMinProbability?: number;         // الحد الأدنى لاحتمالية نجاح القرار لتنفيذ الصفقة (مثال 65%)
+  steelInfluenceCreative?: number;      // قوة تأثير المحرك الإبداعي (0.0 - 1.0)
+  steelInfluenceQuantum?: number;       // قوة تأثير المحرك الكمي (0.0 - 1.0)
+  steelInfluenceFusion?: number;        // قوة تأثير المحرك الاندماجي وقوة السيولة (0.0 - 1.0)
+  steelTakerWeight?: number;            // وزن فلتر ضغط الحيتان المؤسساتي (Taker Ratio)
+  steelOiWeight?: number;               // وزن فلتر حركة وتدفق الفائدة المفتوحة (Open Interest)
+  steelFundingWeight?: number;          // وزن فلتر ضغط التمويل وعقود التصفية (Funding Gravity)
+  steelLiquidityWeight?: number;        // وزن تأثير المغناطيس للسيولة القريبة (Liquidity proximity)
+  steelHtfTrendWeight?: number;          // وزن محاذاة الفريم الأكبر لاتجاه الدخول (HTF Alignment)
+  steelAdaptiveSlTp?: boolean;          // ضبط تكيّفي مرن للأهداف والوقف بناءً على درجة الاحتمالية والتقلب
 }

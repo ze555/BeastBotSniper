@@ -235,6 +235,155 @@ export function SettingsView({
                   </div>
                 </div>
 
+                {/* المحرك الفولاذي الموحد الخارق (Steel Engine) */}
+                <div className="bg-gradient-to-l from-slate-900 via-slate-950 to-indigo-950/40 border-2 border-indigo-500/50 rounded-3xl p-8 space-y-8 overflow-hidden relative shadow-[0_0_30px_rgba(99,102,241,0.15)]">
+                  <div className="absolute top-0 right-0 p-2 opacity-5"><Shield className="w-40 h-40 text-indigo-400 rotate-12" /></div>
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-indigo-500/20 pb-6 relative z-10 gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/30 text-indigo-400">
+                        <Cpu className="w-8 h-8 animate-pulse text-indigo-400" />
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-indigo-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">محرك متفوق</span>
+                          <h4 className="font-black text-indigo-350 text-xl">المحرك الفولاذي المطلق (Steel Engine)</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2 font-sans max-w-xl">
+                          مُصمم بعبقرية مطلقة لدمج وتوحيد قوى ٣ محركات (الكمي والابتكاري والاندماجي) في شبكة عصبية واحدة. يقوم الذكاء الفولاذي بدراسة علم الاحتمالات الرقمية والاتجاهات الائتمانية وتدفقات الحيتان وحل أي تعارضات سوقية لصنع القرار المثالي بدقة خارقة.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 self-end md:self-center ml-0 mr-auto">
+                      {settings.useSteelEngine && (
+                        <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-1.5 rounded-xl font-bold animate-pulse">TRIPLE HARMONY ACTIVE</span>
+                      )}
+                      <input 
+                         type="checkbox" 
+                         checked={!!settings.useSteelEngine} 
+                         onChange={e => {
+                           const isChecked = e.target.checked;
+                           setSettings({
+                             ...settings, 
+                             useSteelEngine: isChecked,
+                             useCreativeEngine: isChecked ? false : settings.useCreativeEngine,
+                             useFusionEngine: isChecked ? false : settings.useFusionEngine
+                           });
+                         }} 
+                         className="w-8 h-8 accent-indigo-500 cursor-pointer" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className={`space-y-8 transition-all relative z-10 ${!settings.useSteelEngine ? 'opacity-25 grayscale pointer-events-none' : ''}`}>
+                    
+                    {/* Grid for Parameters */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-right">
+                      
+                      {/* Column 1: Threshold & Weights */}
+                      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
+                        <h5 className="font-extrabold text-white text-sm border-b border-slate-800 pb-2 flex items-center gap-2 justify-end">
+                          مستويات الدقة والاتخاذ
+                          <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                        </h5>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-xs font-bold text-slate-300">
+                            <span>% {settings.steelMinProbability ?? 65}</span>
+                            <span>الحد الأدنى للاحتمالية المقبولة</span>
+                          </div>
+                          <input type="range" min="50" max="95" className="w-full h-1 bg-slate-800 rounded-lg accent-indigo-400" value={settings.steelMinProbability ?? 65} onChange={e => setSettings({...settings, steelMinProbability: parseFloat(e.target.value)})} />
+                        </div>
+
+                        <div className="flex items-center justify-between p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                          <span className="text-[11px] text-slate-400 font-bold">الأهداف التكيفية المطلقة (Adaptive Targets)</span>
+                          <input 
+                            type="checkbox" 
+                            checked={settings.steelAdaptiveSlTp !== false} 
+                            onChange={e => setSettings({...settings, steelAdaptiveSlTp: e.target.checked})} 
+                            className="w-5 h-5 accent-indigo-500" 
+                          />
+                        </div>
+                      </div>
+
+                      {/* Column 2: Engine Influence Weights */}
+                      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
+                        <h5 className="font-extrabold text-white text-sm border-b border-slate-800 pb-2 flex items-center gap-2 justify-end">
+                          أوزان وتأثير المحركات الفرعية
+                          <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                        </h5>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-xs font-bold text-slate-300">
+                            <span>{settings.steelInfluenceCreative ?? 0.35}</span>
+                            <span>تأثير المحرك الإبداعي (SMC/Structures)</span>
+                          </div>
+                          <input type="range" min="0.1" max="0.8" step="0.05" className="w-full h-1 bg-slate-800 rounded-lg accent-amber-400" value={settings.steelInfluenceCreative ?? 0.35} onChange={e => setSettings({...settings, steelInfluenceCreative: parseFloat(e.target.value)})} />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-xs font-bold text-slate-300">
+                            <span>{settings.steelInfluenceQuantum ?? 0.35}</span>
+                            <span>تأثير المحرك الكمي (Volatility/BB)</span>
+                          </div>
+                          <input type="range" min="0.1" max="0.8" step="0.05" className="w-full h-1 bg-slate-800 rounded-lg accent-purple-500" value={settings.steelInfluenceQuantum ?? 0.35} onChange={e => setSettings({...settings, steelInfluenceQuantum: parseFloat(e.target.value)})} />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-xs font-bold text-slate-300">
+                            <span>{settings.steelInfluenceFusion ?? 0.30}</span>
+                            <span>تأثير محرك الاندماج والسيولة (Fusion)</span>
+                          </div>
+                          <input type="range" min="0.1" max="0.8" step="0.05" className="w-full h-1 bg-slate-800 rounded-lg accent-cyan-500" value={settings.steelInfluenceFusion ?? 0.30} onChange={e => setSettings({...settings, steelInfluenceFusion: parseFloat(e.target.value)})} />
+                        </div>
+                      </div>
+
+                      {/* Column 3: Institutional Gravity Weights */}
+                      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
+                        <h5 className="font-extrabold text-white text-sm border-b border-slate-800 pb-2 flex items-center gap-2 justify-end">
+                          أوزان الجاذبية المؤسساتية لحسم الاتجاه
+                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        </h5>
+                        
+                        <div className="grid grid-cols-2 gap-4 text-xs font-bold text-slate-300">
+                          <div className="space-y-1">
+                            <span>مضرّب حجم الـ Taker</span>
+                            <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-center text-emerald-400 font-mono" value={settings.steelTakerWeight ?? 1.5} onChange={e => setSettings({...settings, steelTakerWeight: parseFloat(e.target.value)})} />
+                          </div>
+                          <div className="space-y-1">
+                            <span>مضرّب العقود المفتوحة OI</span>
+                            <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-center text-blue-400 font-mono" value={settings.steelOiWeight ?? 1.2} onChange={e => setSettings({...settings, steelOiWeight: parseFloat(e.target.value)})} />
+                          </div>
+                          <div className="space-y-1">
+                            <span>مضرّب التمويل Funding</span>
+                            <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-center text-rose-400 font-mono" value={settings.steelFundingWeight ?? 1.0} onChange={e => setSettings({...settings, steelFundingWeight: parseFloat(e.target.value)})} />
+                          </div>
+                          <div className="space-y-1">
+                            <span>مضرّب سيولة الجذب Magnet</span>
+                            <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-center text-indigo-400 font-mono" value={settings.steelLiquidityWeight ?? 1.3} onChange={e => setSettings({...settings, steelLiquidityWeight: parseFloat(e.target.value)})} />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-slate-400">
+                            <span>{settings.steelHtfTrendWeight ?? 1.4}</span>
+                            <span>مضرّب ميل الفاصل الأكبر HTF</span>
+                          </div>
+                          <input type="range" min="0.5" max="3" step="0.1" className="w-full h-1 bg-slate-800 rounded-lg accent-indigo-400" value={settings.steelHtfTrendWeight ?? 1.4} onChange={e => setSettings({...settings, steelHtfTrendWeight: parseFloat(e.target.value)})} />
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Bilateral Explainer Footnote */}
+                    <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-4 text-xs text-indigo-450 text-right leading-relaxed font-sans">
+                      💡 <strong>التدفق العصبي الفولاذي:</strong> بحال وجود تعارض اتجاهي بين المحركات (مثال: محرك Bollinger يفضل الشراء ومحرك SMC يفضل البيع)، لن يتم تفويت الصفقة أو حدوث تضارب، بل يقوم المحرك بحساب معادلات الاحتمالية الصارمة ودراسة ضغط صانع السوق (Taker Buy/Sell ratio) وسرعة تزايد العقود المفتوحة لتحديد وتسمية الاتجاه بدقة نهائية وحسمه لجهة المنتصر فورا.
+                    </div>
+
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-8 space-y-6">
                     <div className="flex items-center gap-3 border-b border-slate-800/50 pb-4">

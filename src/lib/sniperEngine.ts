@@ -17,6 +17,7 @@ import { WiseExitEngine } from "./engine/WiseExitEngine.js";
 import { FusionEngine } from "./engine/FusionEngine.js";
 import { RegimeEngine } from "./engine/RegimeEngine.js";
 import { AdaptiveCascadeEngine, ExitDecision } from "./engine/AdaptiveCascadeEngine.js";
+import { SteelEngine } from "./engine/SteelEngine.js";
 import {
   MarketMetrics,
   MarketRegime,
@@ -36,6 +37,7 @@ export class SniperEngine {
   private risk = new RiskEngine();
   private manager = new PositionManager();
   private wiseEngine = new WiseExitEngine();
+  private steelEngine = new SteelEngine();
 
   private settings: BotSettings = {
     portfolioSize: 2000,
@@ -947,6 +949,147 @@ export class SniperEngine {
         this.activeTrades.set(symbol, trade);
       }
       return; // Complete bypass other managers so creative exit mechanisms do NOT get touched by normal/hegemony models
+    }
+
+    // --- 00. STEEL ENGINE MAXIMUM EXIT SYSTEM OVERRIDE ---
+    // If the Steel Engine is enabled, it takes total control over position exit behavior.
+    if (this.settings.useSteelEngine) {
+      const steelDecision = this.steelEngine.analyzeExit(
+        trade,
+        currentPrice,
+        takerRatioVal,
+        this.settings,
+        fundingRate !== undefined ? fundingRate : (trade.fundingRate || 0),
+        klines,
+        trade.oiHistory || [],
+        trade.volHistory || []
+      );
+
+      trade.latestSteelResult = {
+        time: Date.now(),
+        decision: steelDecision.decision,
+        reason: steelDecision.reason,
+        longProb: steelDecision.longProb,
+        shortProb: steelDecision.shortProb,
+        confidence: steelDecision.confidence,
+        exitIndicator: steelDecision.exitIndicator,
+        currentState: steelDecision.currentState,
+        marketNarrative: steelDecision.marketNarrative,
+        takerRatio: takerRatioVal,
+        oiChange: trade.oiHistory && trade.oiHistory.length >= 2 
+          ? ((trade.oiHistory[trade.oiHistory.length - 1] - trade.oiHistory[trade.oiHistory.length - 2]) / trade.oiHistory[trade.oiHistory.length - 2]) * 100 
+          : 0,
+        fundingRate: fundingRate !== undefined ? fundingRate : (trade.fundingRate || 0)
+      };
+
+      // Set latestAdaptiveResult fallback so existing card-level fallback fields are gracefully populated too
+      trade.latestAdaptiveResult = {
+        time: Date.now(),
+        decision: steelDecision.decision,
+        reason: steelDecision.exitIndicator,
+        score: steelDecision.confidence,
+        metrics: {
+          price: currentPrice,
+          rsi: rsi,
+          openInterest: currentOI,
+          volume: currentVol,
+          takerRatio: currentTakerRatio,
+          fundingRate: fundingRate !== undefined ? fundingRate : trade.fundingRate,
+          oiTrend,
+          volTrend,
+          takerTrend
+        }
+      };
+
+      // 1. Direct EXIT decision: close instantly!
+      if (steelDecision.decision === 'EXIT_NOW') {
+        console.log(`[STEEL EXIT] 🚨 DECISION: EXIT_NOW for ${symbol}. Reason: ${steelDecision.reason}`);
+        addLog(`🛡️ مخرج الفولاذي المطلق: تصفية صفقة ${symbol} | السبب: ${steelDecision.exitIndicator}`, 'warn');
+        await this.closeTrade(trade, currentPrice, `⚡ STEEL_EXIT_NOW: ${steelDecision.reason}`);
+        return;
+      }
+
+      // 2. PARTIAL PROFIT: close 50% and secure entry
+      if (steelDecision.decision === 'PARTIAL_PROFIT' && !trade.isPartialProfitTaken) {
+        trade.isPartialProfitTaken = true;
+        const entryPrice = trade.entryPrice;
+        trade.sl = entryPrice; // secure break even
+        const partialPnl = (trade.pnl || 0) * 0.5;
+        trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+        trade.amount = trade.amount * 0.5;
+        console.log(`[STEEL EXIT] 💸 DECISION: PARTIAL_PROFIT for ${symbol}. Reason: ${steelDecision.reason}`);
+        addLog(`💸 جني جزئي فولاذي: ${symbol} | تم إغلاق 50% وتأمين دخول الوقف عند ${entryPrice.toFixed(4)} | السبب: ${steelDecision.reason}`, 'success');
+        updated = true;
+      }
+
+      // 3. TRAIL TIGHT: tighten SL dynamically and check if breached
+      if (steelDecision.decision === 'TRAIL_TIGHT') {
+        const smartSl = this.calculateSmartTightStop(trade, currentPrice);
+        const oldSl = trade.sl;
+        if (trade.type === 'LONG' && smartSl > oldSl) {
+          trade.sl = smartSl;
+          updated = true;
+        } else if (trade.type === 'SHORT' && smartSl < oldSl) {
+          trade.sl = smartSl;
+          updated = true;
+        }
+
+        // Verify if Stop Loss has been triggered
+        const hitSl = trade.type === 'LONG' ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+        if (hitSl) {
+          console.log(`[STEEL EXIT] 🛑 TRAIL_TIGHT Stop Loss Hit for ${symbol} at ${currentPrice}`);
+          addLog(`🛡️ الوقف المشدد الفولاذي: ضرب الوقف لصفقة ${symbol} عند ${trade.sl.toFixed(4)} | السعر الحركي: ${currentPrice}`, 'warn');
+          await this.closeTrade(trade, currentPrice, `🛡️ STEEL_TRAIL_TIGHT_HIT`);
+          return;
+        }
+      }
+
+      // 4. Standard hard boundaries (Stop Loss & Take Profit) if NOT in HOLD_FOR_MOON status
+      if (steelDecision.decision !== 'HOLD_FOR_MOON') {
+        // Stop Loss
+        const hitSl = trade.type === 'LONG' ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+        if (hitSl) {
+          console.log(`[STEEL EXIT] 🛑 Stop Loss Hit for ${symbol} at ${currentPrice}`);
+          addLog(`🛑 مخرج الفولاذي (ضرب الوقف): إغلاق ${symbol} عند وقف الخسارة ${trade.sl.toFixed(4)}`, 'warn');
+          await this.closeTrade(trade, currentPrice, `🛑 STEEL_STOP_LOSS_HIT`);
+          return;
+        }
+
+        // Take Profit
+        const hitTp = trade.type === 'LONG' ? currentPrice >= trade.tp1 : currentPrice <= trade.tp1;
+        if (hitTp) {
+          console.log(`[STEEL EXIT] 🏆 Take Profit Hit for ${symbol} at ${currentPrice}`);
+          addLog(`🏆 مخرج الفولاذي (الربح المستهدف): إغلاق ${symbol} بنجاح عند الهدف ${trade.tp1.toFixed(4)}`, 'success');
+          await this.closeTrade(trade, currentPrice, `🏆 STEEL_TAKE_PROFIT_HIT`);
+          return;
+        }
+      } else {
+        // HOLD_FOR_MOON downside safety trailing stop
+        const hitSl = trade.type === 'LONG' ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+        if (hitSl) {
+          console.log(`[STEEL EXIT] 🛑 Hold For Moon SL hit for ${symbol}`);
+          addLog(`🌑 حماية الارباح الفولاذية: إغلاق ${symbol} على ضرب وقف تتبع القمر في المنطقة الآمنة`, 'warn');
+          await this.closeTrade(trade, currentPrice, `🚀 STEEL_MOON_TRAIL_HIT`);
+          return;
+        }
+      }
+
+      // Update regular statistics for card calculations (PnL / metrics)
+      const managerVerdict = this.manager.manage(trade as any, currentPrice, {
+        strictFastBreakevenPerc: this.settings.strictFastBreakevenPerc,
+        tradingFeeRate: this.settings.tradingFeeRate,
+        leverage: this.settings.leverage
+      });
+      if (managerVerdict.updatedTrade) {
+        Object.assign(trade, managerVerdict.updatedTrade);
+        updated = true;
+      }
+
+      if (updated) {
+        saveTrade(trade);
+        this.activeTrades.set(symbol, trade);
+      }
+      return; // Absolute authority complete handoff
     }
 
     // --- 0. HEGEMONY ADAPTIVE CASCADE EXIT OVERRIDE ---
