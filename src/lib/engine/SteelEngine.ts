@@ -485,17 +485,53 @@ ${conflictsResolved}
       ? ((currentPrice - entryPrice) / entryPrice) * 100
       : ((entryPrice - currentPrice) / entryPrice) * 100;
 
-    // --- CONSTRUCT DECISION BASED ON REAL-TIME MULTI-ENGINE PROBABILITY MATRIX ---
+    // --- SMART INSTITUTIONAL AND MARKET REAL VALUES EXIT ENGINE ---
     let decision: 'CONTINUE' | 'HOLD_FOR_MOON' | 'TRAIL_TIGHT' | 'EXIT_NOW' | 'PARTIAL_PROFIT' = 'CONTINUE';
     let reason = '';
     let exitIndicator = '';
     let currentState = '';
 
+    // Calculate real fee-related values to prevent fee ruin
+    const feeRate = settings.tradingFeeRate || 0.001;
+    const roundTripFeePerc = 2 * feeRate * 100; // e.g., 0.20% for 0.001 fee rate
+    const safeNetProfitThreshold = Math.max(0.35, roundTripFeePerc * 2.8); // Must cover fee multi-fold for non-emergency exits
+
+    // Calculate candle geometry for detecting wicks (Stop Hunt / Liquidity Sweep)
+    const lastKline = klines[klines.length - 1];
+    const openPrice = parseFloat(lastKline[1]);
+    const highPrice = parseFloat(lastKline[2]);
+    const lowPrice = parseFloat(lastKline[3]);
+    const closePrice = parseFloat(lastKline[4]);
+
+    const bodyMax = Math.max(openPrice, closePrice);
+    const bodyMin = Math.min(openPrice, closePrice);
+    const upperWickPerc = ((highPrice - bodyMax) / closePrice) * 100;
+    const lowerWickPerc = ((bodyMin - lowPrice) / closePrice) * 100;
+
+    // Detect if market makers are trying to hunt stops (large wicks)
+    const isLowerWickSweep = lowerWickPerc > Math.max(0.18, atrPerc * 0.45);
+    const isUpperWickSweep = upperWickPerc > Math.max(0.18, atrPerc * 0.45);
+
+    // Track peak profit to implement maximum efficiency trailing
+    const t = trade as any;
+    if (!t.peakProfitRecorded || priceChangePerc > (t.peakProfitRecorded || 0)) {
+      t.peakProfitRecorded = Math.max(0, priceChangePerc);
+    }
+    const currentPeakProfit = t.peakProfitRecorded || 0;
+
+    // A. EXTREME ORDER FLOW IMBALANCE (REAL INSTITUTIONAL VALUE - NO POINTS)
+    const isOppositeOrderFlowSurge = isLong
+      ? (takerRatio < 0.91 && rvol > 1.8) // High volume institutional selling
+      : (takerRatio > 1.09 && rvol > 1.8); // High volume institutional buying
+
+    const isHtfTrendOpposing = isLong
+      ? (htfBias === 'BEARISH')
+      : (htfBias === 'BULLISH');
+
     // === SPECIALIZED MAX LOSS / MIN PROFIT OVERRIDE GATE ===
     if (settings.steelMaxLossMode) {
       const sensitivity = settings.steelReboundSensitivity ?? 0.15;
       const minProfit = settings.steelMinProfitTake ?? 0.05;
-      const t = trade as any;
 
       // 1. MINIMUM PROFIT TAKE -> Close as soon as we make a tiny positive profit
       if (priceChangePerc >= minProfit) {
@@ -513,7 +549,6 @@ ${conflictsResolved}
 
       // 2. REBOUND FROM PEAK DRAWDOWN DETECTION
       if (isLong) {
-        // Only track drawdown when we are actually in a loss (below entry price)
         if (currentPrice < entryPrice) {
           if (!t.lowestLossPrice || currentPrice < t.lowestLossPrice) {
             t.lowestLossPrice = currentPrice;
@@ -534,7 +569,6 @@ ${conflictsResolved}
           }
         }
       } else {
-        // SHORT trade: loss is when currentPrice > entryPrice
         if (currentPrice > entryPrice) {
           if (!t.highestLossPrice || currentPrice > t.highestLossPrice) {
             t.highestLossPrice = currentPrice;
@@ -556,7 +590,6 @@ ${conflictsResolved}
         }
       }
 
-      // Default hold state under max loss mode to let drawdown run
       return {
         decision: 'CONTINUE',
         reason: 'STEEL_MAX_LOSS_ACCUMULATING',
@@ -569,42 +602,67 @@ ${conflictsResolved}
       };
     }
 
-    const dangerThreshold = -(settings.fastExitPerc ?? 0.5);
+    // === CORE REAL-VALUE INSTITUTIONAL DECISION GATES ===
 
-    // A. INSTANT EMERGENCY LIQUIDATION GATE -> Threat flipped / opposite trend dominate
-    if (priceChangePerc < dangerThreshold || directionProb < 45 || oppositeProb > 68) {
+    // Gate 1: Anti Stop-Hunting Shield (Detecting wick sweep manipulation by Market Makers)
+    const isBeingMarketMakerSwept = isLong ? isLowerWickSweep : isUpperWickSweep;
+
+    if (isBeingMarketMakerSwept && priceChangePerc < 0) {
+      decision = 'CONTINUE';
+      reason = 'STEEL_INSTITUTIONAL_WICK_SHIELD';
+      currentState = '🛡️ درع الرفض المؤسساتي (مكافحة تلاعب صناع السوق)';
+      exitIndicator = `تم رصد عملية سحب سيولة (Stop-loss Hunt) بواسطة ذيل شمعة حاد بنسبة ${isLong ? lowerWickPerc.toFixed(2) : upperWickPerc.toFixed(2)}%. نرفض الخروج الذعر؛ الحيتان يجمعون السيولة والإنقاذ قادم.`;
+    }
+    // Gate 2: Severe Real-Value Divergence or Opposite Order Flow Surge (Emergency Rescue)
+    else if (isOppositeOrderFlowSurge || (priceChangePerc < -(settings.fastExitPerc ?? 0.5) && isHtfTrendOpposing)) {
       decision = 'EXIT_NOW';
-      reason = 'STEEL_MATH_FLIP_SHIELD';
-      currentState = '🚨 تسييل فوري وتصفية المراكز';
-      exitIndicator = `انخفاض تماسك الاتجاه لـ ${directionProb.toFixed(0)}% وتصاعد المعارضة والضغط التناقضي لـ ${oppositeProb.toFixed(0)}% مع تغير حاد بالامتصاص المؤسساتي. تم تفعيل التسييل الفولاذي الموحد فوراً.`;
+      reason = 'STEEL_ORDERFLOW_FORCE_EXIT';
+      currentState = '🚨 إنقاذ فوري: تدفق السيولة المؤسساتي معاكس بالكامل';
+      exitIndicator = `خروج حتمي فوري: تم رصد هبوط حاد في تدفق السيولة (Taker Ratio: ${takerRatio.toFixed(2)}) وتصاعد في معدل الفائدة المفتوحة العكسي مع حجم تداول مؤسساتي ضخم (RVOL: ${rvol.toFixed(1)}).`;
     }
-    // B. PARTIAL PROFIT ZONE -> ROE is excellent, but momentum is showing exhaustion signs
-    else if (priceChangePerc >= (settings.strictFastBreakevenPerc ?? 0.3) * 3 && (directionProb < 58 || oppositeProb > 52) && !trade.isPartialProfitTaken) {
-      decision = 'PARTIAL_PROFIT';
-      reason = 'STEEL_MATH_EXHAUSTION_WARNING';
-      currentState = '💸 جني أرباح جزئي وتأمين الدخول';
-      exitIndicator = `أرباح ممتازة (+${priceChangePerc.toFixed(2)}%) مصاحبة لضعف تدريجي من دمج المحرك الثلاثي لتهبط قوة التماسك لـ ${directionProb.toFixed(0)}%. إغلاق 50% وتأمين الدخول بالكامل.`;
+    // Gate 3: Volatility-Adjusted Smart Trailing Stop (Real Value Profit-Lock)
+    else if (priceChangePerc > safeNetProfitThreshold) {
+      const dynamicTrailSensitivity = Math.max(0.15, Math.min(0.65, atrPerc * 0.45)); // adjust based on ATR
+      const pullbackFromPeak = currentPeakProfit - priceChangePerc;
+
+      if (pullbackFromPeak >= dynamicTrailSensitivity) {
+        decision = 'EXIT_NOW';
+        reason = 'STEEL_REAL_VALUE_TRAIL_HIT';
+        currentState = '🏆 جني أرباح كامل: تراجع الوقف المتتالي الذكي للسيولة';
+        exitIndicator = `جني أرباح كامل: السعر تراجع من القمة المحققة (+${currentPeakProfit.toFixed(2)}%) بقيمة ${pullbackFromPeak.toFixed(2)}% وهي أكبر من حساسية التقلب ATR الناتجة عن صناع السوق (${dynamicTrailSensitivity.toFixed(2)}%). تم تأمين صافي أرباح ممتاز بعد احتساب الرسوم.`;
+      } else if (priceChangePerc >= safeNetProfitThreshold * 2.5 && !trade.isPartialProfitTaken) {
+        // High-profit partial profit take
+        decision = 'PARTIAL_PROFIT';
+        reason = 'STEEL_REAL_VALUE_PARTIAL_HIT';
+        currentState = '💸 جني أرباح جزئي وتأمين نقطة الدخول';
+        exitIndicator = `جني أرباح جزئي بعد تأمين صافي ربح ممتاز قدره +${priceChangePerc.toFixed(2)}% (يتجاوز رسوم التداول ذهاباً وإياباً ${roundTripFeePerc.toFixed(2)}% بأكثر من 5 أضعاف). تم إغلاق النصف وتأمين المتبقي.`;
+      } else if (directionProb >= 72 && oiChangePct > 0.4 && !isOppositeOrderFlowSurge) {
+        // High confidence, high trend, backed by open interest and buy volumes
+        decision = 'HOLD_FOR_MOON';
+        reason = 'STEEL_INSTITUTIONAL_MOON_RIDE';
+        currentState = '🚀 ركوب موجة السيولة (Hold For Moon)';
+        exitIndicator = `تدفق السيولة المؤسساتي قوي كلياً: التماسك ${directionProb.toFixed(0)}%، الـ OI يصعد بقوة +${oiChangePct.toFixed(2)}%، والـ Taker يدعم بالكامل.`;
+      } else {
+        decision = 'CONTINUE';
+        reason = 'STEEL_REAL_VALUE_PROFITABLE_HOLD';
+        currentState = '📈 حيازة رابحة منتظمة';
+        exitIndicator = `الصفقة مسجلة +${priceChangePerc.toFixed(2)}% أرباح صافية تتجاوز الرسوم. نواصل حصد الاتجاه مع حماية حركية ضد التقلبات الفورية.`;
+      }
     }
-    // C. HOLD FOR THE MOON ZONE -> Momentum is backed by heavy buyDelta and rising OI
-    else if (priceChangePerc >= 0.15 && directionProb >= 75 && (metrics.oiChange ?? 0) > 0.2) {
-      decision = 'HOLD_FOR_MOON';
-      reason = 'STEEL_MATH_PARABOLIC_MOON';
-      currentState = '🚀 تمسك قمري مطلق (Hold For Moon)';
-      exitIndicator = `انسجام صعودي فائق: قوة الاحتمالية مع الاتجاه الحالي تبلغ ${directionProb.toFixed(0)}%، ضغط السيولة ${takerRatio.toFixed(2)}، وتسارع تدفق عقود البناء المفتوحة بنسبة +${(metrics.oiChange ?? 0).toFixed(2)}%.`;
-    }
-    // D. ACTIVE TIGHT TRAILING STOP -> Mild hazard of divergence
-    else if (directionProb < 54 || oppositeProb > 58 || creativeDecision.mode === 'CHAOTIC_DEATH_CHOP') {
+    // Gate 4: Underperforming under low-liquidity chop / noise (Fee Avoidance)
+    else if (Math.abs(priceChangePerc) < safeNetProfitThreshold && rvol < 0.75 && creativeDecision.mode === 'CHAOTIC_DEATH_CHOP') {
+      // Market has zero momentum and standard deviation is dying
       decision = 'TRAIL_TIGHT';
-      reason = 'STEEL_MATH_DIVERGENCE_PROTECT';
-      currentState = '⚠️ الحماية النشطة وتشديد الوقف';
-      exitIndicator = `تباين وتباطؤ مؤشرات القوة المشتركة للمحركات لتتراوح بين القوة ${directionProb.toFixed(0)}% والمعارضة ${oppositeProb.toFixed(0)}%. تم تفعيل تشديد وقف الخسارة لتأمين الربحية.`;
+      reason = 'STEEL_FEE_AVOIDANCE_TIGHT';
+      currentState = '⚠️ تجميد الوقف للحد من رسوم العبث المالي';
+      exitIndicator = `السوق في حالة ركود مطلق (RVOL: ${rvol.toFixed(2)}). لمنع الموت العرضي وضياع الرصيد في رسوم المعاملات المتكررة، تم تشديد الوقف لحماية رأس المال الحقيقي.`;
     }
-    // E. STABLE CONTINUE holding as usual
+    // Gate 5: General Stable holding
     else {
       decision = 'CONTINUE';
-      reason = 'STEEL_MATH_STABLE_HOLD';
+      reason = 'STEEL_STABLE_MARKET_HOLD';
       currentState = '✓ حيازة طبيعية وتوازن الاتجاه';
-      exitIndicator = `الاتجاه الحالي متسق كلياً بقوة تناسقية تبلغ ${directionProb.toFixed(0)}% من دمج محركات الذكاء (الهيكل الذكي، القنوات الكمية، ومستودعات السيولة والـ Delta).`;
+      exitIndicator = `الاتجاه متزن حركياً. لا مؤشرات تلاعب أو ضغط بيع مؤسساتي يهدد تماسك الصفقة. تداول آمن.`;
     }
 
     const confidence = isLong ? longProb : shortProb;

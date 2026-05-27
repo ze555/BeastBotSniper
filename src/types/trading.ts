@@ -48,6 +48,7 @@ export interface Trade {
   status: TradeStatus;
   exitPrice?: number;
   exitTime?: number;
+  exitReason?: string;
   currentPrice?: number; // Added to track current price for open trades
   pnl?: number;        // Profit/Loss in dollars
   realizedPnl?: number; // PnL generated from partial exits

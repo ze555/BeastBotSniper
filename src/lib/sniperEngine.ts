@@ -1826,13 +1826,204 @@ export class SniperEngine {
     const margin = trade.amount / leverage;
     trade.pnlPerc = (finalPnl / margin) * 100;
 
-    const badge = trade.pnl > 0 ? "🟢" : "🔴";
+    // --- ENHANCED COMPARATIVE ARABIC INSTITUTIONAL EXIT LOG SYSTEM ---
+    const formatDurationArabic = (ms: number): string => {
+      const totalSecs = Math.floor(ms / 1000);
+      const days = Math.floor(totalSecs / 86400);
+      const hours = Math.floor((totalSecs % 86400) / 3600);
+      const mins = Math.floor((totalSecs % 3600) / 60);
+      const secs = totalSecs % 60;
+      
+      const parts: string[] = [];
+      if (days > 0) parts.push(`${days} يوم`);
+      if (hours > 0) parts.push(`${hours} ساعة`);
+      if (mins > 0) parts.push(`${mins} دقيقة`);
+      if (secs > 0 || parts.length === 0) parts.push(`${secs} ثانية`);
+      return parts.join(" و ");
+    };
+
+    const durationMs = Date.now() - trade.entryTime;
+    const durationStr = formatDurationArabic(durationMs);
+
+    // MFE (Maximum Favorable Excursion) Calculations
+    let mfePerc = 0;
+    if (trade.highestPrice && trade.highestPrice > 0) {
+      if (trade.type === 'LONG') {
+        mfePerc = ((trade.highestPrice - trade.entryPrice) / trade.entryPrice) * 100;
+      } else {
+        mfePerc = ((trade.entryPrice - trade.highestPrice) / trade.entryPrice) * 100;
+      }
+    }
+    mfePerc = Math.max(0, mfePerc);
+
+    // Candlestick & Excursion Metrics
+    const totalTicksAnalyzed = trade.tickHistory?.length || 0;
+    const totalCandlesAnalyzed = trade.volHistory?.length || 0;
+    const candleClosingTrend = exitPrice > trade.entryPrice 
+      ? "إيجابية صعودية 🟢 (السعر أغلق أعلى من مستوى الدخول)"
+      : "سلبية هبوطية 🔴 (السعر أغلق أدنى من مستوى الدخول)";
+
+    // Institutional Volume & CVD metrics
+    const steel = trade.latestSteelResult;
+    const isSteel = !!steel;
+    const takerRatioVal = steel?.takerRatio || trade.latestAdaptiveResult?.metrics?.takerRatio || 1.0;
+    const currentVolVal = trade.latestAdaptiveResult?.metrics?.volume || (trade.volHistory && trade.volHistory.length > 0 ? trade.volHistory[trade.volHistory.length - 1] : 0);
+    
+    // CVD Status & Interpretation
+    let cvdClassification = "توازن نسبي في تدفقات العرض والطلب (CVD متذبذب ومستقر) ⚖️";
+    if (takerRatioVal > 1.10) {
+      cvdClassification = "ضغط شراء حاد ونشط من صناع السوق والحيتان (CVD إيجابي متصاعد) 🔥🟢";
+    } else if (takerRatioVal > 1.02) {
+      cvdClassification = "تراكم شرائي خفيف من الحيتان (CVD إيجابي خفيف) 🟢";
+    } else if (takerRatioVal < 0.90) {
+      cvdClassification = "ضغط بيع حاد وتصريف مباشر (CVD سلبي متراجع) 📉🔴";
+    } else if (takerRatioVal < 0.98) {
+      cvdClassification = "بدء نفاد قوى الشراء ومبيعات ماركت خفيفة (CVD سلبي خفيف) 🔴";
+    }
+
+    const approxTakerBuyPct = (takerRatioVal / (1 + takerRatioVal)) * 100;
+    const approxTakerSellPct = 100 - approxTakerBuyPct;
+
+    // Cumulative changes during the life of the trade
+    const initialOI = trade.oiHistory && trade.oiHistory.length > 0 ? trade.oiHistory[0] : 0;
+    const lastOI = trade.oiHistory && trade.oiHistory.length > 0 ? trade.oiHistory[trade.oiHistory.length - 1] : 0;
+    const totalOIChangePerc = initialOI > 0 ? ((lastOI - initialOI) / initialOI) * 100 : 0;
+
+    const initialVol = trade.volHistory && trade.volHistory.length > 0 ? trade.volHistory[0] : 0;
+    const lastVol = currentVolVal || 0;
+    const totalVolChangePerc = initialVol > 0 ? ((lastVol - initialVol) / initialVol) * 100 : 0;
+
+    // Build complete Glossary / Handbook to be attached dynamically
+    const arabicGlossaryGuide = `
+📕 [دليل كبار المتداولين للمصطلحات والمؤشرات المؤسساتية المتطورة]:
+--------------------------------------------------
+1️⃣ معامل CVD التراكمي (Cumulative Volume Delta Proxy):
+   • يقيس الفرق الصافي بين حجم الشراء وحجم البيع المنفذ عبر صفقات الماركت الفورية (Taker Orders).
+   • عندما يكون إيجابياً بشكل متزايد (Taker Ratio > 1.0)، فإنه يظهر اندفاع الحيتان للشراء ماركت دون خطة ليميت.
+2️⃣ مؤشر MFE لتقييم الكفاءة (Maximum Favorable Excursion):
+   • يعكس أقصى نسبة مئوية حققتها الصفقة في الاتجاه الصحيح قبل إغلاقها.
+   • يفيد المتداول في رصد نسبة جباية الأرباح الضائعة وقياس مدى كفاءة أهداف الخروج المفعلة.
+3️⃣ الفائدة المفتوحة العميقة (Open Interest Dynamics):
+   • تمثل إجمالي عقود المشتقات والفيوتشرز المغطاة بأموال حقيقية والمعلقة في المنصة.
+   • تزايدها الملحوظ مع حركة السعر يعني تدفق أموال مؤسسية جديدة لتعزيز الاتجاه (شراء أو بيع).
+4️⃣ نسبة التيكر الصافي (Taker Buyer/Seller Ratio):
+   • تعبر عن توازن قوى السوق الفورية. القيمة 1.0 تمثل حياد تام، ما فوق ذلك تكتل للمشترين وما دون تكتل للبائعين.
+`.trim();
+
+    let finalReport = "";
+    if (isSteel) {
+      const takerStr = steel.takerRatio?.toFixed(3) || "N/A";
+      const oiChangeStr = (steel.oiChange > 0 ? "+" : "") + steel.oiChange?.toFixed(2) + "%";
+      const fundingRateStr = (steel.fundingRate * 100).toFixed(4) + "%";
+      const confidenceStr = steel.confidence?.toFixed(0) + "%";
+
+      finalReport = `
+🚨 [تقرير مقارنة البيانات والتحليل المؤسساتي الكامل لخروج الصفقة] 🚨
+==================================================
+📐 معطيات الدخول والخروج والربحية:
+• اتجاه المركز الاستثماري: ${trade.type === 'LONG' ? "LONG 🟢" : "SHORT 🔴"} (المصدر الأصلي: ${trade.source || 'CORE'})
+• سعر الدخول المرجعي: $${trade.entryPrice.toFixed(4)} 🡪 سعر التصفية والإغلاق: $${exitPrice.toFixed(4)}
+• نسبة التغير السعري الصافي: ${priceChangePerc > 0 ? "+" : ""}${priceChangePerc.toFixed(3)}%
+• العائد المالي الإجمالي المحقق: $${finalPnl.toFixed(2)} (${trade.pnlPerc?.toFixed(2)}% ROE)
+• عمولات صفقة التداول بالكامل (ذهاب وإياب): $${totalFees.toFixed(3)} (${(totalFeeRate * 100).toFixed(2)}%)
+--------------------------------------------------
+⏱️ الفترة الزمنية وتحليل عمر الصفقة:
+• إجمالي وقت الحيازة الفعلي: ${durationStr}
+• عدد التحديات والشموع التي تم رصدها: ${totalCandlesAnalyzed} شمعة / ${totalTicksAnalyzed} حركة سعرية دقيقة
+• متوسط اتجاه إغلاق الشموع النهائي: ${candleClosingTrend}
+• أقصى انحراف ربحي نظرى محقق (MFE): ${mfePerc.toFixed(3)}%
+--------------------------------------------------
+📊 مؤشرات تدفق السيولة والاهتمام المؤسساتي لحظة الإغلاق:
+• نسبة ضغط التيكر الصافي (Taker Ratio): ${takerStr}
+• اتجاه دلتا السيولة التراكمي (CVD State): ${cvdClassification}
+• تفصيل قوة توازن السوق الفوري: مبيعات ماركت صانعي السوق (${approxTakerSellPct.toFixed(1)}%) vs مشتريات ماركت (${approxTakerBuyPct.toFixed(1)}%)
+• التراكم الكلي للفائدة المفتوحة منذ الدخول (OI Growth): ${totalOIChangePerc > 0 ? "+" : ""}${totalOIChangePerc.toFixed(2)}% (تحديث أخير: ${oiChangeStr})
+• التراكم الكلي لحجم التداول منذ الدخول (Volume Growth): ${totalVolChangePerc > 0 ? "+" : ""}${totalVolChangePerc.toFixed(2)}%
+• الرسوم التمويلية المباشرة لعقود التداول (Funding Rate): ${fundingRateStr}
+• القوة التماسكية الإجمالية لاتخاذ القرار الفولاذي: ${confidenceStr}
+--------------------------------------------------
+🛡️ بوابة القرار الفعال ومبررات الإغلاق المفسرة:
+• بوابة ومحفز الخروج الأساسي: ${reason}
+• الحالة التشغيلية الفعالة: ${steel.currentState}
+• مبررات التفعيل والقرار: ${steel.exitIndicator}
+--------------------------------------------------
+💡 استنتاج تقييمي لعين المتداول:
+${finalPnl > 0 
+  ? "🏆 حصد أرباح ذكي متقدم بموجب التدفقات المالية الذكية لحماية عوائد المحفظة وتجنب تبديد الأرباح أمام تذبذب السوق العشوائي."
+  : "🛡️ تم تفعيل حماية السيولة الأساسية لتفادي انزلاقات سعرية حادة أو إجهاض مصائد تسييل الحسابات التي يفتعلها صناع السوق (Stop-loss Hunt)."}
+==================================================
+${arabicGlossaryGuide}
+      `.trim();
+    } else {
+      finalReport = `
+🚨 [تقرير تصفية المركز ومخرجات الأمان للتداول] 🚨
+==================================================
+📐 معطيات الدخول والخروج والتقييم الحركي للتصفية:
+• اتجاه التداول: ${trade.type}
+• سعر الدخول الأساسي: $${trade.entryPrice.toFixed(4)} 🡪 سعر الإغلاق الحقيقي: $${exitPrice.toFixed(4)}
+• نسبة الانحراف السعري المحسوب: ${priceChangePerc > 0 ? "+" : ""}${priceChangePerc.toFixed(3)}%
+• صافي العائد النهائي المحقق: $${finalPnl.toFixed(2)} (${trade.pnlPerc?.toFixed(2)}% ROE)
+• إجمالي رسوم وعمولات المعاملات: $${totalFees.toFixed(3)}
+--------------------------------------------------
+⏱️ الفترة الزمنية وتحليل عمر الصفقة:
+• إجمالي وقت الحيازة الفعلي: ${durationStr}
+• إحصاء حركة الفاصل الزمني: ${totalCandlesAnalyzed} شمعة مرصودة / ${totalTicksAnalyzed} حركة سعرية
+• اتجاه الشمعة الختامية: ${candleClosingTrend}
+• أقصى انحراف ربحي نظرى محقق (MFE): ${mfePerc.toFixed(3)}%
+--------------------------------------------------
+📊 تدفق السيولة الفورية وحصيلة الحجم:
+• متوسط معامل دلتا (CVD Proxy): ${takerRatioVal.toFixed(3)} [${cvdClassification}]
+• تقسيم قوى ماركت صناع السوق الحية: مشتريات (${approxTakerBuyPct.toFixed(1)}%) مقابل مبيعات (${approxTakerSellPct.toFixed(1)}%)
+• نمو الفائدة المفتوحة الكلي (OI Change): ${totalOIChangePerc > 0 ? "+" : ""}${totalOIChangePerc.toFixed(2)}%
+• نمو حجم التداول الكلي (Volume Change): ${totalVolChangePerc > 0 ? "+" : ""}${totalVolChangePerc.toFixed(2)}%
+--------------------------------------------------
+⚙️ رمز وآلية تصفية المركز:
+• حالة الخروج الفعال ومحرك الدوافع: ${reason}
+==================================================
+${arabicGlossaryGuide}
+      `.trim();
+    }
+
+    trade.exitReason = finalReport;
+
+    // Log the comprehensive report to both local active log with detailed line break formatting
     addLog(
-      `EXIT ${trade.symbol}: $${trade.pnl.toFixed(2)} (${reason})`,
-      trade.pnl > 0 ? "info" : "warn",
+      `📊 تصفية ${trade.symbol} (${trade.type}):\n${finalReport}`,
+      trade.pnl > 0 ? "success" : "warn"
     );
+
+    // Also push a final diagnostic report node to the cascade logs timeline inside trade history
+    if (!trade.adaptiveHistoryLogs) {
+      trade.adaptiveHistoryLogs = [];
+    }
+    trade.adaptiveHistoryLogs.push({
+      id: "EXIT_LOG_" + Date.now(),
+      type: trade.type,
+      entryPrice: trade.entryPrice,
+      currentPrice: exitPrice,
+      decision: "EXIT_NOW",
+      reason: finalReport,
+      score: isSteel ? Math.min(5, Math.max(0, Math.round(steel.confidence / 20))) : 5,
+      time: Date.now(),
+      metrics: {
+        rsi: isSteel ? (trade as any).latestAdaptiveResult?.metrics?.rsi || 50 : 50,
+        openInterest: isSteel ? (trade as any).latestAdaptiveResult?.metrics?.openInterest || 0 : 0,
+        volume: isSteel ? (trade as any).latestAdaptiveResult?.metrics?.volume || 0 : 0,
+        takerRatio: isSteel ? steel.takerRatio : 1.0,
+        fundingRate: isSteel ? steel.fundingRate : 0.0,
+        oiTrend: isSteel ? (trade as any).latestAdaptiveResult?.metrics?.oiTrend || "FLAT" : "FLAT",
+        volTrend: isSteel ? (trade as any).latestAdaptiveResult?.metrics?.volTrend || "FLAT" : "FLAT",
+        takerTrend: isSteel ? (steel.takerRatio > 1.05 ? "BULLISH" : steel.takerRatio < 0.95 ? "BEARISH" : "NEUTRAL") : "NEUTRAL"
+      }
+    });
+
+    if (trade.adaptiveHistoryLogs.length > 50) {
+      trade.adaptiveHistoryLogs.shift();
+    }
+
+    // Console tracking log
     console.log(
-      `[SNIPER] ${reason}: Trade Closed on ${trade.symbol}. Final PnL: $${trade.pnl.toFixed(2)}`,
+      `[SNIPER] ${reason}: Trade Closed on ${trade.symbol}. Final PnL: $${trade.pnl.toFixed(2)}`
     );
     this.activeTrades.delete(trade.symbol);
     this.tradeHistory.unshift({ ...trade }); // Add to beginning of history

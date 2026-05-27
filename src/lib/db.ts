@@ -33,7 +33,8 @@ export const initDB = () => {
           pnlPerc REAL,
           score INTEGER NOT NULL,
           isBreakeven INTEGER DEFAULT 0,
-          source TEXT DEFAULT 'CORE'
+          source TEXT DEFAULT 'CORE',
+          exitReason TEXT
         )
       `);
       
@@ -247,14 +248,15 @@ export const initDB = () => {
       db.run(`ALTER TABLE trades ADD COLUMN leverage REAL DEFAULT 10`, () => {});
       db.run(`ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'CORE'`, () => {});
       db.run(`ALTER TABLE trades ADD COLUMN adaptiveHistory TEXT`, () => {});
+      db.run(`ALTER TABLE trades ADD COLUMN exitReason TEXT`, () => {});
     });
   });
 };
 
 export function saveTrade(t: Trade) {
   const query = `
-    INSERT INTO trades (id, symbol, type, mode, entryPrice, entryTime, amount, leverage, sl, initialSl, tp1, tp2, status, exitPrice, exitTime, pnl, pnlPerc, score, isBreakeven, source, adaptiveHistory) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (id, symbol, type, mode, entryPrice, entryTime, amount, leverage, sl, initialSl, tp1, tp2, status, exitPrice, exitTime, pnl, pnlPerc, score, isBreakeven, source, adaptiveHistory, exitReason) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET 
       sl=excluded.sl, 
       status=excluded.status, 
@@ -264,7 +266,8 @@ export function saveTrade(t: Trade) {
       pnlPerc=excluded.pnlPerc, 
       isBreakeven=excluded.isBreakeven,
       source=excluded.source,
-      adaptiveHistory=excluded.adaptiveHistory
+      adaptiveHistory=excluded.adaptiveHistory,
+      exitReason=excluded.exitReason
   `;
   
   const adaptiveHistoryStr = JSON.stringify(t.adaptiveHistoryLogs || []);
@@ -272,7 +275,7 @@ export function saveTrade(t: Trade) {
   db.serialize(() => {
     db.run(query, [
       t.id, t.symbol, t.type, t.mode, t.entryPrice, t.entryTime, t.amount, t.leverage || 10, t.sl, t.initialSl, t.tp1, t.tp2, t.status, 
-      t.exitPrice || null, t.exitTime || null, t.pnl || 0, t.pnlPerc || 0, t.score, t.isBreakeven ? 1 : 0, t.source || 'CORE', adaptiveHistoryStr
+      t.exitPrice || null, t.exitTime || null, t.pnl || 0, t.pnlPerc || 0, t.score, t.isBreakeven ? 1 : 0, t.source || 'CORE', adaptiveHistoryStr, t.exitReason || null
     ], (err) => {
       if (err) console.error('[DB ERROR] Failed to save trade:', err.message);
     });

@@ -1199,7 +1199,7 @@ export default function App() {
                                    {/* Reason / Narrative */}
                                    <div className="text-xs text-slate-300 leading-relaxed font-sans text-right">
                                       <span className="text-slate-500 block text-[10px] mb-0.5 font-bold uppercase">السبب والتحليل المبرر للقرار:</span>
-                                      <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-800 text-slate-300 font-bold leading-normal">
+                                      <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-800 text-slate-300 font-bold leading-normal whitespace-pre-wrap">
                                          {log.reason || "لا يوجد توصيف متاح."}
                                       </div>
                                    </div>
