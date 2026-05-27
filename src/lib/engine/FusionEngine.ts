@@ -34,8 +34,8 @@ export class FusionEngine {
     details.push(`Fund: ${fundingScore.toFixed(0)}%`);
 
     // 3. Volume / Momentum Component
-    // RVOL > 1.5 is strong. RVOL > 3.0 is institutional.
-    const volScore = this.evaluateVolume(metrics.rvol, sensitivity);
+    // RVOL > 1.5 is strong. RVOL > 3.0 is institutional (with dynamic thresholds).
+    const volScore = this.evaluateVolume(metrics.rvol, sensitivity, metrics.volCoefVar);
     totalScore += volScore * weights.vol;
     details.push(`Vol: ${volScore.toFixed(0)}%`);
 
@@ -68,9 +68,14 @@ export class FusionEngine {
     return 50;
   }
 
-  private static evaluateVolume(rvol: number, sensitivity: number): number {
-    if (rvol > 3.0 * (1 / sensitivity)) return 100; // Institutional surge
-    if (rvol > 1.5) return 75; // Strong momentum
+  private static evaluateVolume(rvol: number, sensitivity: number, volCoefVar?: number): number {
+    const vc = volCoefVar ?? 0.2;
+    // Dynamic thresholds driven by volume stability
+    const extremeThreshold = Math.max(1.75, Math.min(3.75, 1.0 + 3.8 * vc)) * (1 / sensitivity);
+    const strongThreshold = Math.max(1.35, Math.min(2.15, 1.0 + 2.4 * vc));
+
+    if (rvol > extremeThreshold) return 100; // Institutional surge
+    if (rvol > strongThreshold) return 75; // Strong momentum
     if (rvol > 1.0) return 50;
     return 20;
   }

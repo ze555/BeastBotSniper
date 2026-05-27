@@ -48,8 +48,13 @@ export class RegimeEngine {
     if (fakeRate > 0.40) {
       return { regime: MarketRegime.TRAP_MODE, decision: 'WAIT' };
     }
+    // Calculate dynamic RVOL thresholds using volume stability (volCoefVar)
+    const volCoefVar = metrics.volCoefVar ?? 0.2;
+    const dynamicDeadZoneThreshold = Math.max(0.85, Math.min(1.35, 0.75 + 1.8 * volCoefVar));
+    const dynamicTrendExpansionThreshold = Math.max(1.1, Math.min(1.85, 1.0 + 2.0 * volCoefVar));
+
     // 1. Extreme Dead Zone (Only sleep if both ADX and RVOL are dead)
-    if (metrics.adx < 12 && metrics.rvol < 1.1) {
+    if (metrics.adx < 12 && metrics.rvol < dynamicDeadZoneThreshold) {
       return { regime: MarketRegime.DEAD_CHOP, decision: 'SLEEP' };
     }
 
@@ -64,7 +69,7 @@ export class RegimeEngine {
     }
 
     // 4. Trend Expansion
-    if (metrics.adx > 25 && metrics.rvol > 1.3) {
+    if (metrics.adx > 25 && metrics.rvol > dynamicTrendExpansionThreshold) {
       return { regime: MarketRegime.TREND_EXPANSION, decision: 'TRADE' };
     }
 

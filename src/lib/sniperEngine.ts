@@ -1044,8 +1044,8 @@ export class SniperEngine {
         }
       }
 
-      // 4. Standard hard boundaries (Stop Loss & Take Profit) if NOT in HOLD_FOR_MOON status
-      if (steelDecision.decision !== 'HOLD_FOR_MOON') {
+      // 4. Standard hard boundaries (Stop Loss & Take Profit) if NOT in HOLD_FOR_MOON status and NOT in steelMaxLossMode
+      if (steelDecision.decision !== 'HOLD_FOR_MOON' && !this.settings.steelMaxLossMode) {
         // Stop Loss
         const hitSl = trade.type === 'LONG' ? currentPrice <= trade.sl : currentPrice >= trade.sl;
         if (hitSl) {

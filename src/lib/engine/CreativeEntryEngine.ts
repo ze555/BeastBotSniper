@@ -40,6 +40,7 @@ export interface CreativeEngineData {
   cvdFlippingPositive: boolean;
   cvdFlippingNegative: boolean;
   rvol: number;
+  volCoefVar?: number;
   fundingExtremeNegative: boolean;
   fundingExtremePositive: boolean;
   shortLiquidations: boolean;
@@ -254,11 +255,15 @@ export class CreativeEntryEngine {
   public detectMarketState(data: CreativeEngineData): 
     'BULLISH_TREND' | 'BEARISH_TREND' | 'SHORT_SQUEEZE' | 'LONG_SQUEEZE' | 'ACCUMULATION' | 'UNKNOWN' {
     
-    if (data.priceUp && data.oiUp && data.cvdPositive && data.rvol > 1.8) {
+    // Astute dynamic threshold: based on the volume stability coefficient, we determine if rvol stands out
+    const volCoefVar = data.volCoefVar ?? 0.15;
+    const dynamicTrendingThreshold = Math.max(1.55, Math.min(2.35, 1.0 + 2.8 * volCoefVar));
+
+    if (data.priceUp && data.oiUp && data.cvdPositive && data.rvol > dynamicTrendingThreshold) {
       return 'BULLISH_TREND';
     }
 
-    if (data.priceDown && data.oiUp && data.cvdNegative && data.rvol > 1.8) {
+    if (data.priceDown && data.oiUp && data.cvdNegative && data.rvol > dynamicTrendingThreshold) {
       return 'BEARISH_TREND';
     }
 
@@ -632,6 +637,22 @@ export class CreativeEntryEngine {
     const avgVol = volSum / volLookback;
     const rvol = avgVol > 0 ? v0 / avgVol : 1.0;
 
+    // Calculate Coefficient of Variation of volume based on previous candles
+    let volSqrDiffSum = 0;
+    for (let i = len - volLookback - 1; i < len - 1; i++) {
+      const vol = parseFloat(klines[i][5]);
+      volSqrDiffSum += Math.pow(vol - avgVol, 2);
+    }
+    const volStdDev = Math.sqrt(volSqrDiffSum / volLookback);
+    const volCoefVar = avgVol > 0 ? (volStdDev / avgVol) : 0.15;
+
+    // Dynamic RVOL thresholds driven by volume stability:
+    // If volume has been highly stable (low volCoefVar), even a small volume change (e.g., 1.15) suggests an institutional presence.
+    // If volume has been spiky (high volCoefVar), higher multipliers (e.g., 1.7) are needed to prove true breakouts.
+    const rvolBaseThreshold = Math.max(1.15, Math.min(1.45, 1.0 + 1.2 * volCoefVar));
+    const rvolStrongThreshold = Math.max(1.35, Math.min(1.95, 1.0 + 2.4 * volCoefVar));
+    const rvolExtremeThreshold = Math.max(1.75, Math.min(2.75, 1.0 + 3.8 * volCoefVar));
+
     // ATR expanding / exploding / volatility compressed
     let recentAtrs: number[] = [];
     for (let j = len - 5; j < len; j++) {
@@ -721,10 +742,10 @@ export class CreativeEntryEngine {
       oiVelocity = prevOi > 0 ? lastOi / prevOi : 1.0;
     } else {
       // Simulate/approximate Open Interest movement based on Volume/Taker activity 
-      if (rvol > 1.2) {
+      if (rvol > rvolBaseThreshold) {
         oiUp = true;
         oiSlowlyIncreasing = true;
-        if (rvol > 2.5) {
+        if (rvol > rvolExtremeThreshold) {
           oiIncreasingFast = true;
         }
         oiFlat = false;
@@ -765,7 +786,7 @@ export class CreativeEntryEngine {
       }
     } else {
       // Approximate signals from volume spike
-      if (rvol > 2.5) {
+      if (rvol > rvolExtremeThreshold) {
         if (c0 > o0 * 1.012) {
           shortLiquidations = true;
           shortLiquidationsIncreasing = true;
@@ -877,9 +898,9 @@ export class CreativeEntryEngine {
 
     // --- DELTA & ORDERFLOW ABSORPTION CHANNEL SYSTEM (Gap 4) ---
     // Bid Absorption: heavy market sells BUT delta negative AND price not dropping
-    const bidAbsorption = rvol > 1.4 && takerRatio < 0.94 && (c0 >= c1 || lowerRejection || (c0 - l0)/(h0 - l0) > 0.4);
+    const bidAbsorption = rvol > rvolStrongThreshold && takerRatio < 0.94 && (c0 >= c1 || lowerRejection || (c0 - l0)/(h0 - l0) > 0.4);
     // Ask Absorption: heavy market buys BUT delta positive AND price not jumping
-    const askAbsorption = rvol > 1.4 && takerRatio > 1.06 && (c0 <= c1 || rejectionWick || (h0 - c0)/(h0 - l0) > 0.4);
+    const askAbsorption = rvol > rvolStrongThreshold && takerRatio > 1.06 && (c0 <= c1 || rejectionWick || (h0 - c0)/(h0 - l0) > 0.4);
 
     const footprintImbalance = takerRatio; // simplified footprint flow representation
 
@@ -911,14 +932,14 @@ export class CreativeEntryEngine {
     if (c0 >= liquidityAbove * 0.998) {
       liquidityConsumedRateAbove = Math.min(98, Math.round(50 + (takerRatio - 1.0) * 120));
     } else if (distanceToLiquidityAbove < 0.5) {
-      liquidityConsumedRateAbove = Math.min(75, Math.round(30 + (rvol > 1.5 ? 25 : 10)));
+      liquidityConsumedRateAbove = Math.min(75, Math.round(30 + (rvol > rvolStrongThreshold ? 25 : 10)));
     }
 
     let liquidityConsumedRateBelow = 0;
     if (c0 <= liquidityBelow * 1.002) {
       liquidityConsumedRateBelow = Math.min(98, Math.round(50 + (1.0 - takerRatio) * 120));
     } else if (distanceToLiquidityBelow < 0.5) {
-      liquidityConsumedRateBelow = Math.min(75, Math.round(30 + (rvol > 1.5 ? 25 : 10)));
+      liquidityConsumedRateBelow = Math.min(75, Math.round(30 + (rvol > rvolStrongThreshold ? 25 : 10)));
     }
 
     // --- GAP 3: LIQUIDATION MAP ESTIMATIONS ---
@@ -978,6 +999,7 @@ export class CreativeEntryEngine {
       cvdFlippingPositive,
       cvdFlippingNegative,
       rvol,
+      volCoefVar,
       fundingExtremeNegative,
       fundingExtremePositive,
       shortLiquidations,

@@ -122,6 +122,10 @@ export class CoreEngine {
         }
     }
 
+    // Calculate dynamic RVOL thresholds based on historical volume volatility
+    const volCoefVar = metrics.volCoefVar ?? 0.2;
+    const dynamicContinuationThreshold = Math.max(1.6, Math.min(2.8, 1.0 + 2.5 * volCoefVar));
+
     // Opportunity 2: Trap Detection (for non-SlyFox mode)
     const isTrapOpp = (trap === TrapType.LONG_TRAP && directionalBias === 'SHORT') || 
                       (trap === TrapType.SHORT_TRAP && directionalBias === 'LONG');
@@ -132,7 +136,7 @@ export class CoreEngine {
        confidence = 0.95;
     } 
     // Opportunity 3: Trend Continuation
-    else if (metrics.rvol > 2.0 && regimeStatus.regime === MarketRegime.TRENDING) {
+    else if (metrics.rvol > dynamicContinuationThreshold && regimeStatus.regime === MarketRegime.TRENDING) {
        const isPriceAlign = (metrics.rsi > 55 && directionalBias === 'LONG') || (metrics.rsi < 45 && directionalBias === 'SHORT');
        if (isPriceAlign && (settings?.layerBiasEnabled || !settings?.layerBiasEnabled)) {
            action = 'ATTACK';
@@ -142,8 +146,9 @@ export class CoreEngine {
     }
     // Opportunity 4: Beast Strike (Aggressive Momentum)
     else if (settings?.beastMode) {
-        const minRvol = settings.beastMinRvol ?? 1.2;
-        const rvolPass = settings.beastConfirmWithVolume ? metrics.rvol >= minRvol : metrics.rvol >= 1.2;
+        const dynamicBaseThreshold = Math.max(1.15, Math.min(1.5, 1.0 + 1.2 * volCoefVar));
+        const minRvol = settings.beastMinRvol ?? dynamicBaseThreshold;
+        const rvolPass = settings.beastConfirmWithVolume ? metrics.rvol >= minRvol : metrics.rvol >= dynamicBaseThreshold;
         
         let smcPass = true;
         let beastIntention: 'LONG' | 'SHORT' = metrics.rsi > 50 ? 'LONG' : 'SHORT'; // Fast fallback

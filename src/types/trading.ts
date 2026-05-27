@@ -142,6 +142,7 @@ export interface MarketMetrics {
   oiChange?: number;
   takerRatio?: number;
   isChop: boolean;
+  volCoefVar?: number;
 }
 
 export interface GlobalContext {
@@ -338,4 +339,7 @@ export interface BotSettings {
   steelLiquidityWeight?: number;        // وزن تأثير المغناطيس للسيولة القريبة (Liquidity proximity)
   steelHtfTrendWeight?: number;          // وزن محاذاة الفريم الأكبر لاتجاه الدخول (HTF Alignment)
   steelAdaptiveSlTp?: boolean;          // ضبط تكيّفي مرن للأهداف والوقف بناءً على درجة الاحتمالية والتقلب
+  steelMaxLossMode?: boolean;           // تفعيل وضع تعظيم الخسائر والحد الأقصى للتراجع
+  steelReboundSensitivity?: number;     // مدى الارتداد للتصفية الفورية
+  steelMinProfitTake?: number;          // الحد الأدنى لجني الأرباح السريع
 }

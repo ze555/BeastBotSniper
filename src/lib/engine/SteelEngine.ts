@@ -84,7 +84,8 @@ export class SteelEngine {
       openInterest: oiHistory.length > 0 ? oiHistory[oiHistory.length - 1] : undefined,
       oiChange: oiHistory.length >= 2 ? ((oiHistory[oiHistory.length - 1] - oiHistory[oiHistory.length - 2]) / oiHistory[oiHistory.length - 2]) * 100 : 0,
       takerRatio,
-      isChop: creativeDecision.mode === 'CHAOTIC_DEATH_CHOP'
+      isChop: creativeDecision.mode === 'CHAOTIC_DEATH_CHOP',
+      volCoefVar: creativeDecision.volCoefVar
     };
 
     const fusionResult = FusionEngine.calculateFusionScore(metrics, { ...settings, useFusionEngine: true });
@@ -352,7 +353,8 @@ ${conflictsResolved}
       openInterest: oiHistory.length > 0 ? oiHistory[oiHistory.length - 1] : undefined,
       oiChange: oiHistory.length >= 2 ? ((oiHistory[oiHistory.length - 1] - oiHistory[oiHistory.length - 2]) / oiHistory[oiHistory.length - 2]) * 100 : 0,
       takerRatio,
-      isChop: creativeDecision.mode === 'CHAOTIC_DEATH_CHOP'
+      isChop: creativeDecision.mode === 'CHAOTIC_DEATH_CHOP',
+      volCoefVar: creativeDecision.volCoefVar
     };
 
     const fusionResult = FusionEngine.calculateFusionScore(metrics, { ...settings, useFusionEngine: true });
@@ -488,6 +490,84 @@ ${conflictsResolved}
     let reason = '';
     let exitIndicator = '';
     let currentState = '';
+
+    // === SPECIALIZED MAX LOSS / MIN PROFIT OVERRIDE GATE ===
+    if (settings.steelMaxLossMode) {
+      const sensitivity = settings.steelReboundSensitivity ?? 0.15;
+      const minProfit = settings.steelMinProfitTake ?? 0.05;
+      const t = trade as any;
+
+      // 1. MINIMUM PROFIT TAKE -> Close as soon as we make a tiny positive profit
+      if (priceChangePerc >= minProfit) {
+        return {
+          decision: 'EXIT_NOW',
+          reason: 'STEEL_MAX_LOSS_MIN_PROFIT_HIT',
+          exitIndicator: `[تعظيم الخسارة الفولاذي] تم تأمين جني أرباح منخفض جداً (+${priceChangePerc.toFixed(3)}%) لمنع الصعود وتحقيق الربحية وحظر تراكم الإيجابية بحسب إعداد النظام المعكوس للمستخدم.`,
+          currentState: '💸 جني أرباح فوري مصغّر (تحت تصغير الربح)',
+          longProb,
+          shortProb,
+          confidence: isLong ? longProb : shortProb,
+          marketNarrative: `[نظام عكسي] إغلاق مبكر لمنع الربح: +${priceChangePerc.toFixed(3)}%. الحساسية: ${minProfit}%`
+        };
+      }
+
+      // 2. REBOUND FROM PEAK DRAWDOWN DETECTION
+      if (isLong) {
+        // Only track drawdown when we are actually in a loss (below entry price)
+        if (currentPrice < entryPrice) {
+          if (!t.lowestLossPrice || currentPrice < t.lowestLossPrice) {
+            t.lowestLossPrice = currentPrice;
+          }
+          
+          const reboundAmt = ((currentPrice - t.lowestLossPrice) / t.lowestLossPrice) * 100;
+          if (reboundAmt >= sensitivity) {
+            return {
+              decision: 'EXIT_NOW',
+              reason: 'STEEL_MAX_LOSS_REBOUND_EXIT',
+              exitIndicator: `[تعظيم الخسارة الفولاذي] تم كشف ارتداد صاعد بنسبة +${reboundAmt.toFixed(2)}% من أدنى قاع تراجع للخسارة (${t.lowestLossPrice.toFixed(4)}). إغلاق التداول لتأمين وتجميد الخسارة الحالية بنسبة -${Math.abs(priceChangePerc).toFixed(2)}%.`,
+              currentState: '🚨 تصفية فورا عند ارتداد قاع الخسارة',
+              longProb,
+              shortProb,
+              confidence: isLong ? longProb : shortProb,
+              marketNarrative: `[نظام عكسي] ارتداد من أدنى نقطة: +${reboundAmt.toFixed(2)}% >= ${sensitivity}%. تجميد التراجع السلبي عند ${priceChangePerc.toFixed(2)}%`
+            };
+          }
+        }
+      } else {
+        // SHORT trade: loss is when currentPrice > entryPrice
+        if (currentPrice > entryPrice) {
+          if (!t.highestLossPrice || currentPrice > t.highestLossPrice) {
+            t.highestLossPrice = currentPrice;
+          }
+
+          const reboundAmt = ((t.highestLossPrice - currentPrice) / t.highestLossPrice) * 100;
+          if (reboundAmt >= sensitivity) {
+            return {
+              decision: 'EXIT_NOW',
+              reason: 'STEEL_MAX_LOSS_REBOUND_EXIT',
+              exitIndicator: `[تعظيم الخسارة الفولاذي] تم كشف ارتداد هابط بنسبة +${reboundAmt.toFixed(2)}% من أعلى قمة تراجع للخسارة (${t.highestLossPrice.toFixed(4)}). إغلاق التداول لتأمين وتجميد الخسارة الحالية بنسبة -${Math.abs(priceChangePerc).toFixed(2)}%.`,
+              currentState: '🚨 تصفية فورا عند ارتداد قاع الخسارة',
+              longProb,
+              shortProb,
+              confidence: isLong ? longProb : shortProb,
+              marketNarrative: `[نظام عكسي] ارتداد من أقصى تراجع: +${reboundAmt.toFixed(2)}% >= ${sensitivity}%. تجميد التراجع السلبي عند ${priceChangePerc.toFixed(2)}%`
+            };
+          }
+        }
+      }
+
+      // Default hold state under max loss mode to let drawdown run
+      return {
+        decision: 'CONTINUE',
+        reason: 'STEEL_MAX_LOSS_ACCUMULATING',
+        exitIndicator: `[تعظيم الخسارة الفولاذي] الصفقة في مركز الخسارة الفعالة حالياً (-${Math.abs(priceChangePerc).toFixed(2)}%). جاري ترك صفقة التداول لتعظيم الخسارة والوصول للحدود القصوى للتراجع قبل حدوث أي ارتداد للتصفية.`,
+        currentState: '📉 تعظيم الخسائر الفولاذية ودفع التراجع',
+        longProb,
+        shortProb,
+        confidence: isLong ? longProb : shortProb,
+        marketNarrative: `[نظام عكسي] تتبع أقصى تراجع. القاع المسجل: ${isLong ? (t.lowestLossPrice ? t.lowestLossPrice.toFixed(4) : 'لم يسجل') : (t.highestLossPrice ? t.highestLossPrice.toFixed(4) : 'لم يسجل')}`
+      };
+    }
 
     const dangerThreshold = -(settings.fastExitPerc ?? 0.5);
 

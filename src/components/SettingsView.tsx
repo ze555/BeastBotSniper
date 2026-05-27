@@ -376,6 +376,66 @@ export function SettingsView({
 
                     </div>
 
+                    {/* خيار نظام تعظيم الخسارة والربح الأدنى الفولاذي */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-rose-500/10 pb-4 gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-rose-500/20 text-rose-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">نظام الأبحاث المعكوسة</span>
+                        </div>
+                        <h5 className="font-extrabold text-white text-sm flex items-center gap-2 justify-end">
+                          وضع تعظيم الخسائر الفولاذي والارتداد المعكوس (Max Loss Mode)
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                        </h5>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-sans mt-2 text-right">
+                        صُمم هذا الوضع الثوري لتمكين فحص الأنظمة والمعادلات المعكوسة. بدلاً من جني الأرباح التقليدي وحماية الوقف المبكرة، يقوم النظام العكسي بترك صفقة التداول تسجل أقصى خسارة ممكنة، ويراقب التراجع اللحظي باستمرار، فإذا حصل ارتداد صاعد أو هابط من قاع الخسارة بنسبة محددة يتم تصفية الصفقة فوراً لتجميد الخسارة عند أعلى مستوياتها، طالما يحظر النظام أي أرباح إيجابية متراكمة ويغلقها فور تخطي حد الربح المصغر.
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                        <div className="flex items-center justify-between p-4 bg-slate-950/60 rounded-xl border border-slate-800">
+                          <input 
+                            type="checkbox" 
+                            checked={!!settings.steelMaxLossMode} 
+                            onChange={e => setSettings({...settings, steelMaxLossMode: e.target.checked})} 
+                            className="w-5 h-5 accent-rose-500 cursor-pointer" 
+                          />
+                          <span className="text-xs text-slate-300 font-bold">تفعيل تعظيم الخسائر المعكوس</span>
+                        </div>
+
+                        <div className="bg-slate-950/30 border border-slate-800 p-4 rounded-xl space-y-2 text-right">
+                          <div className="flex justify-between text-xs font-bold text-slate-300">
+                            <span className="text-rose-400 font-mono">%{(settings.steelReboundSensitivity ?? 0.15).toFixed(2)}</span>
+                            <span>مدى ارتداد قاع الخسارة للإغلاق</span>
+                          </div>
+                          <input 
+                            type="range" 
+                            min="0.05" 
+                            max="1.5" 
+                            step="0.05" 
+                            className="w-full h-1 bg-slate-800 rounded-lg accent-rose-500" 
+                            value={settings.steelReboundSensitivity ?? 0.15} 
+                            onChange={e => setSettings({...settings, steelReboundSensitivity: parseFloat(e.target.value)})} 
+                          />
+                        </div>
+
+                        <div className="bg-slate-950/30 border border-slate-800 p-4 rounded-xl space-y-2 text-right">
+                          <div className="flex justify-between text-xs font-bold text-slate-300">
+                            <span className="text-emerald-400 font-mono">%{(settings.steelMinProfitTake ?? 0.05).toFixed(2)}</span>
+                            <span>الحد الأدنى لجني الأرباح السريع</span>
+                          </div>
+                          <input 
+                            type="range" 
+                            min="0.01" 
+                            max="0.5" 
+                            step="0.01" 
+                            className="w-full h-1 bg-slate-800 rounded-lg accent-emerald-500" 
+                            value={settings.steelMinProfitTake ?? 0.05} 
+                            onChange={e => setSettings({...settings, steelMinProfitTake: parseFloat(e.target.value)})} 
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Bilateral Explainer Footnote */}
                     <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-4 text-xs text-indigo-450 text-right leading-relaxed font-sans">
                       💡 <strong>التدفق العصبي الفولاذي:</strong> بحال وجود تعارض اتجاهي بين المحركات (مثال: محرك Bollinger يفضل الشراء ومحرك SMC يفضل البيع)، لن يتم تفويت الصفقة أو حدوث تضارب، بل يقوم المحرك بحساب معادلات الاحتمالية الصارمة ودراسة ضغط صانع السوق (Taker Buy/Sell ratio) وسرعة تزايد العقود المفتوحة لتحديد وتسمية الاتجاه بدقة نهائية وحسمه لجهة المنتصر فورا.
