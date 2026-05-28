@@ -22,7 +22,7 @@ export function SettingsView({
   STRATEGY_TEMPLATES: any[], 
   intensity: any 
 }) {
-  const [activeTab, setActiveTab] = React.useState<'account' | 'risk' | 'entry' | 'exit' | 'tuning'>('account');
+  const [activeTab, setActiveTab] = React.useState<'account' | 'risk' | 'entry' | 'exit' | 'tuning' | 'beast'>('account');
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{success: boolean, message: string} | null>(null);
   const [serverIp, setServerIp] = React.useState<string | null>(null);
@@ -111,6 +111,7 @@ export function SettingsView({
             <TabButton id="risk" label="إدارة المخاطر" icon={ShieldCheck} />
             <TabButton id="entry" label="محركات الدخول" icon={Zap} />
             <TabButton id="exit" label="دروع الخروج" icon={Shield} />
+            <TabButton id="beast" label="الوحش الذكي" icon={Flame} />
             <TabButton id="tuning" label="المعايرة الفنية" icon={Gauge} />
           </div>
 
@@ -729,6 +730,281 @@ export function SettingsView({
                         <input type="number" step="0.1" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-blue-400 font-mono text-sm text-left" value={settings.smartTpUsd ?? 1.5} onChange={e => setSettings({...settings, smartTpUsd: parseFloat(e.target.value)})} />
                       </div>
                    </div>
+                </div>
+              </div>
+            )}
+
+            {/* 4.5. Beast Mode AI (الوحش الذكي) */}
+            {activeTab === 'beast' && (
+              <div className="space-y-10 animate-in slide-in-from-left-4 duration-300 text-right">
+                
+                {/* Main Hero Card for Beast Mode */}
+                <div className="bg-gradient-to-l from-slate-900 via-slate-950 to-rose-950/40 border-2 border-rose-500/50 rounded-3xl p-8 space-y-8 overflow-hidden relative shadow-[0_0_30px_rgba(244,63,94,0.15)]">
+                  <div className="absolute top-0 right-0 p-2 opacity-5"><Skull className="w-40 h-40 text-rose-500 rotate-12" /></div>
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-rose-500/20 pb-6 relative z-10 gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-rose-500/10 rounded-2xl border border-rose-500/30 text-rose-400">
+                        <Flame className="w-8 h-8 animate-pulse text-rose-500" />
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">نظام الذكاء الهجومي</span>
+                           <h4 className="font-black text-rose-350 text-xl">نظام الوحش المدمّر والمخترق الرياضي (Beast Mode AI)</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2 font-sans max-w-2xl">
+                          محرك عصبوني قائم على اقتناص الانحرافات العنيفة، استغلال انزلاقات السيولة وضرب استوبات الجمهور. يعمل الوحش بكامل طاقته التشغيلية بتوجيه ذكي من مصفوفات التحليل لتنفيذ مراكز استباقية سريعة بنسب كفاءة عالية ومخاطر مضبوطة.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 self-end md:self-center ml-0 mr-auto">
+                      {settings.beastMode && (
+                        <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-3 py-1.5 rounded-xl font-bold animate-pulse">BEAST_ENGINE_ACTIVE 🐺</span>
+                      )}
+                      <input 
+                         type="checkbox" 
+                         checked={!!settings.beastMode} 
+                         onChange={e => setSettings({...settings, beastMode: e.target.checked})} 
+                         className="w-8 h-8 accent-rose-500 cursor-pointer" 
+                      />
+                    </div>
+                  </div>
+
+                  {/* Sub cards details */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-xs text-white justify-end">
+                        صيد التذبذبات الشاذة
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                        يبحث بشكل متسارع عن الحركات غير الطبيعية وعشوائيات الشارت لاقتناص اللحظات التذبذبية بدقة متناهية.
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-xs text-white justify-end">
+                        التفوق على انزلاق الأسعار
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                        يتعامل مع فخاخ صناع السوق وتدفقات السيولة السائبة لضمان أفضل سعر تنفيذ وتفادي انزلاقات الاستوبات.
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-xs text-white justify-end">
+                        تحسين المعامل الفوري
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+                        عبر التقييم الرياضي لمعدلات مبيعات ومشتريات الماركت (CVD) وضغوط حيتان المنصة.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 1: المفاتيح الهجومية للعمليات الخاطفة */}
+                <div className="bg-slate-950/40 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6">
+                  <h3 className="text-lg font-black text-white flex items-center gap-2 border-b border-slate-800 pb-4">
+                    <Zap className="w-5 h-5 text-rose-500" />
+                    المفاتيح الهجومية للعمليات الخاطفة
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Nightmare Mode Toggle */}
+                    <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1 pl-4">
+                        <h4 className="text-sm font-black text-rose-450">وضع الكابوس المدمر (Nightmare Mode) 🔥</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          نهج مضاعف العدوانية للغاية. يركز على تفتيت مستويات الدعم والمقاومة واختراق حواجز التداول دون انتظار تراجع هادئ.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.isNightmareMode} 
+                        onChange={e => setSettings({...settings, isNightmareMode: e.target.checked})} 
+                        className="w-6 h-6 accent-rose-600 cursor-pointer shrink-0" 
+                      />
+                    </div>
+
+                    {/* Slippage & Trap Exploit Toggle */}
+                    <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1 pl-4">
+                        <h4 className="text-sm font-black text-rose-450">استغلال انزلاق السيولة وفخاخ التسييل 🛡️</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          تحديد مستويات تسييل الجمهور والأوردر بلوك الهابطة لضرب مراكز قصيرة/طويلة معاكسة بسرعة البرق.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.beastSlippageExploit} 
+                        onChange={e => setSettings({...settings, beastSlippageExploit: e.target.checked})} 
+                        className="w-6 h-6 accent-rose-600 cursor-pointer shrink-0" 
+                      />
+                    </div>
+
+                    {/* Low Cap Hunting Toggle */}
+                    <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1 pl-4">
+                        <h4 className="text-sm font-black text-rose-450">صيد الأصول ضعيفة السيولة (Low Cap Scavenger) 🪙</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          السماح بمسح العملات ذات القيمة السوقية المنخفضة ورصد حركات المضاربة الحادة واشتقاق الأرباح من طفراتها.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.beastLowCapHunting} 
+                        onChange={e => setSettings({...settings, beastLowCapHunting: e.target.checked})} 
+                        className="w-6 h-6 accent-rose-600 cursor-pointer shrink-0" 
+                      />
+                    </div>
+
+                    {/* Auto Adapt Toggle */}
+                    <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1 pl-4">
+                        <h4 className="text-sm font-black text-rose-450">المعايرة الذاتية المستمرة للاعدادات 🧠</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          يقوم الذكاء الاصطناعي بدراسة نتائج الصفقات التاريخية لضبط معامل العنف وفترات الحيازة ذاتياً دون تدخل يدوي.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.beastAutoAdapt} 
+                        onChange={e => setSettings({...settings, beastAutoAdapt: e.target.checked})} 
+                        className="w-6 h-6 accent-rose-600 cursor-pointer shrink-0" 
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: مرشحات وفلاتر الحماية المؤسساتية للوحش */}
+                <div className="bg-slate-950/40 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6">
+                  <h3 className="text-lg font-black text-white flex items-center gap-2 border-b border-slate-800 pb-4">
+                    <ShieldCheck className="w-5 h-5 text-rose-500" />
+                    مرشحات وفلاتر الحماية المؤسساتية للوحش
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* SMC Confirmation Toggle */}
+                    <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1 pl-4">
+                        <h4 className="text-sm font-black text-emerald-400">تأكيد هيكل السوق المؤسساتي (SMC Structure) 🏛️</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          يمنع الاستباق المتهور عبر فرض مطابقة شروط هيكل السوق الذكي لكشف قمم/قيعان حقيقية وتأكيد رغبة صناع السوق.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.beastConfirmWithSMC} 
+                        onChange={e => setSettings({...settings, beastConfirmWithSMC: e.target.checked})} 
+                        className="w-6 h-6 accent-emerald-600 cursor-pointer shrink-0" 
+                      />
+                    </div>
+
+                    {/* Volume Confirmation Toggle */}
+                    <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1 pl-4">
+                        <h4 className="text-sm font-black text-emerald-400">بوابة فلترة وقوة زخم السيولة (RVOL Gate) 📊</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          تعطيل الدخول في وضع الراحة أو التذبذب الضعيف، لضمان مرافقة الشموع ذات الأحجام الضخمة والشرارة الحية.
+                        </p>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.beastConfirmWithVolume} 
+                        onChange={e => setSettings({...settings, beastConfirmWithVolume: e.target.checked})} 
+                        className="w-6 h-6 accent-emerald-600 cursor-pointer shrink-0" 
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: المكونات والمعايرة الحركية الدقيقة للوحش */}
+                <div className="bg-slate-950/40 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6">
+                  <h3 className="text-lg font-black text-white flex items-center gap-2 border-b border-slate-800 pb-4">
+                    <Gauge className="w-5 h-5 text-rose-500" />
+                    المكونات والمعايرة الحركية الدقيقة للاستباق والتعلم
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {/* Beast Learn Rate */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">معدل التعلم من الخسائر (%)</label>
+                      <input 
+                        type="number" 
+                        step="1" 
+                        min="1" 
+                        max="100" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-rose-450 font-mono text-left" 
+                        value={settings.beastLearnRate ?? 50} 
+                        onChange={e => setSettings({...settings, beastLearnRate: parseInt(e.target.value)})} 
+                      />
+                      <p className="text-[8px] text-slate-500">حساسية معالجة النتائج السلبية لترميم العتبات لامتصاص الخسائر.</p>
+                    </div>
+
+                    {/* Beast Institutional Strength */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">القوة المؤسساتية المطلوبة (0.1 - 1.0)</label>
+                      <input 
+                        type="number" 
+                        step="0.05" 
+                        min="0.1" 
+                        max="1.0" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-rose-450 font-mono text-left" 
+                        value={settings.beastInstitutionalStrength ?? 0.4} 
+                        onChange={e => setSettings({...settings, beastInstitutionalStrength: parseFloat(e.target.value)})} 
+                      />
+                      <p className="text-[8px] text-slate-500">معدل فارق الماركت الصافي وسيطرة التيكر المطلوبة لبدء الإطلاق.</p>
+                    </div>
+
+                    {/* Beast Min RVOL */}
+                    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">أدنى حجم إطلاق نسبي (RVOL)</label>
+                      <input 
+                        type="number" 
+                        step="0.1" 
+                        min="0.5" 
+                        max="5.0" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-rose-450 font-mono text-left" 
+                        value={settings.beastMinRvol ?? 1.2} 
+                        onChange={e => setSettings({...settings, beastMinRvol: parseFloat(e.target.value)})} 
+                      />
+                      <p className="text-[8px] text-slate-500">تضاعف الحجم الحالي مقابل المتوسط التاريخي لإعطاء الإذن.</p>
+                    </div>
+
+                    {/* Quantum Beast Aggression */}
+                    <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <label className="text-[10px] text-slate-500 font-black uppercase">عدوانية وحش الكم (1.0 - 2.0)</label>
+                      <input 
+                        type="number" 
+                        step="0.1" 
+                        min="1.0" 
+                        max="2.0" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-rose-450 font-mono text-left" 
+                        value={settings.quantumBeastAggression ?? 1.5} 
+                        onChange={e => setSettings({...settings, quantumBeastAggression: parseFloat(e.target.value)})} 
+                      />
+                      <p className="text-[8px] text-slate-500">مضاعف الحركية لملاحقة واستهداف الصفقات بنطاق كمي متناهي الصغر.</p>
+                    </div>
+                  </div>
+
+                  {/* Quantum Beast Toggle inside calibration */}
+                  <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl mt-4">
+                    <div className="space-y-1 pl-4">
+                      <h4 className="text-sm font-black text-rose-450">التكامل الفائق لنسب وحش الكم (Quantum Beast Aggressive Tuning) 🌀</h4>
+                      <p className="text-[10px] text-slate-500 leading-relaxed">
+                        عند التفيعل، سيقوم المحرك الإحصائي بتسريع الاستشعارات وتجاوز عوائق حيادية السوق لتعزيز الصفقات في الاتجاهات الفورية المشتعلة.
+                      </p>
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      checked={!!settings.quantumBeastMode} 
+                      onChange={e => setSettings({...settings, quantumBeastMode: e.target.checked})} 
+                      className="w-6 h-6 accent-rose-600 cursor-pointer shrink-0" 
+                    />
+                  </div>
                 </div>
               </div>
             )}
