@@ -388,6 +388,44 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     takeProfitMode: 'FUSION_CASCADE',
     takeProfitValue: 4.5,
     createdAt: '2026-05-29T18:20:00Z'
+  },
+  {
+    id: 'rapid_scalp_momentum_hunter',
+    name: 'قناص السكالبينج السريع (Hyper-Frequency Scalper Pro)',
+    description: 'توليفة سريعة جداً بحدود شروط مرنة وسهلة التحقق لفتح صفقات سكالبينج متكررة. تهدف لتخفيف قيود التصفية بتقليل عتبة الحجم النشط والزخم، مع إيقاف تفعيل ربط البيتكوين لتوليد صفقات مستمرة على مدار اليوم وتقليل فترة الانتظار الطويلة.',
+    creator: 'مجمع سنايبر الكمي',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'rsm1',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.15, // Low barrier volume (15% higher than average is enough)
+        timeframe: '5m',
+        sensitivity: 0.8
+      },
+      {
+        id: 'rsm2',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.005, // Slightly positive buyer taker ratio
+        timeframe: '5m',
+        sensitivity: 0.7
+      }
+    ],
+    action: 'LONG',
+    allowedRegimes: ['TRENDING', 'TREND_EXPANSION', 'VIOLENT_VOLATILITY', 'LIQUIDITY_SWEEP', 'TRAP_MODE', 'COMPRESSION'],
+    btcAlignmentRequired: false, // Low bottleneck
+    minMarketConfidence: 45, // Less strict global confidence threshold
+    leverage: 8, // Safety leverage
+    riskPerTrade: 0.8, // 0.8% conservative risk due to high trade frequency
+    stopLossMode: 'ATR_DYNAMIC',
+    stopLossValue: 1.2, // Tighter stop loss
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 1.8, // Faster, easily achievable TP target
+    createdAt: '2026-05-29T18:30:00Z'
   }
 ];
 
