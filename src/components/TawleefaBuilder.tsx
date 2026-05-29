@@ -270,6 +270,8 @@ export function TawleefaBuilder() {
   const [takeProfitMode, setTakeProfitMode] = useState<'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE'>('TRAILING_MOMENTUM');
   const [takeProfitValue, setTakeProfitValue] = useState(2.0);
 
+  const [activeOnLiveBotId, setActiveOnLiveBotId] = useState<string | null>(null);
+
   // Selector for simulation settings
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>('bull_trap_reversal');
   const [simulationRunning, setSimulationRunning] = useState(false);
@@ -281,6 +283,19 @@ export function TawleefaBuilder() {
 
   // Load Tawleefas from local storage on mount
   useEffect(() => {
+    // Check which Tawleefa is active on server
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.useTawleefaEngine && data.activeTawleefaJson) {
+          try {
+            const parsed = JSON.parse(data.activeTawleefaJson);
+            setActiveOnLiveBotId(parsed.id);
+          } catch (e) {}
+        }
+      })
+      .catch(() => {});
+
     const stored = localStorage.getItem('cust_tawleefas_v1');
     if (stored) {
       try {
@@ -302,6 +317,55 @@ export function TawleefaBuilder() {
       loadPresetIntoForm(PRESET_TEMPLATES[0]);
     }
   }, []);
+
+  const handleActivateOnLiveBot = async (t: TawleefaConfig) => {
+    try {
+      const res = await fetch('/api/settings');
+      const settings = await res.json();
+      
+      settings.useTawleefaEngine = true;
+      settings.activeTawleefaJson = JSON.stringify(t);
+
+      const saveRes = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      
+      if (saveRes.ok) {
+        setActiveOnLiveBotId(t.id);
+        alert(`⚡ تم تفعيل التوليفة "${t.name}" بنجاح على محرك البوت الحي!`);
+      } else {
+        alert('خطأ أثناء إرسال الإعدادات إلى السيرفر');
+      }
+    } catch (e: any) {
+      alert(`فشل التفعيل: ${e.message}`);
+    }
+  };
+
+  const handleDeactivateOnLiveBot = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const settings = await res.json();
+      
+      settings.useTawleefaEngine = false;
+
+      const saveRes = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      
+      if (saveRes.ok) {
+        setActiveOnLiveBotId(null);
+        alert('ℹ️ تم إلغاء تفعيل محرك التوليفات؛ سيعود البوت الآن إلى الاستراتيجيات الافتراضية.');
+      } else {
+        alert('خطأ أثناء إرسال الإعدادات إلى السيرفر');
+      }
+    } catch (e: any) {
+      alert(`فشل إلغاء التفعيل: ${e.message}`);
+    }
+  };
 
   const loadTawleefaToForm = (t: TawleefaConfig) => {
     setActiveTawleefa(t);
@@ -963,23 +1027,112 @@ export function TawleefaBuilder() {
             </div>
           </div>
 
-          {/* Quick presets strip */}
-          <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4">
-            <h4 className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-1.5">
-              <Sparkles className="text-amber-400 w-3.5 h-3.5" />
-              نماذج جاهزة هجينة ومؤسساتية جاهزة للتحميل الفوري:
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-              {PRESET_TEMPLATES.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => loadPresetIntoForm(p)}
-                  className="text-right p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-xs hover:bg-slate-850/80 transition-all text-slate-300"
-                >
-                  <div className="font-bold text-slate-100 text-right text-xs truncate">{p.name}</div>
-                  <div className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{p.creator}</div>
-                </button>
-              ))}
+          {/* Quick presets strip & Custom Saved Library */}
+          <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3">
+            <div>
+              <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Sparkles className="text-amber-400 w-3.5 h-3.5" />
+                نماذج جاهزة هجينة ومؤسساتية جاهزة للتحميل الفوري:
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                {PRESET_TEMPLATES.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => loadPresetIntoForm(p)}
+                    className="text-right p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-xs hover:bg-slate-850/85 transition-all text-slate-300"
+                  >
+                    <div className="font-bold text-slate-100 text-right text-xs truncate">{p.name}</div>
+                    <div className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{p.creator}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Saved Library Section */}
+            <div className="border-t border-slate-800/80 pt-3">
+              <h4 className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Cpu className="text-emerald-400 w-3.5 h-3.5" />
+                  مكتبة توليفاتك المخصصة والربط السحابي الفوري:
+                </span>
+                {activeOnLiveBotId && (
+                  <button 
+                    onClick={handleDeactivateOnLiveBot}
+                    className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 text-[10px] font-bold px-2 py-0.5 rounded border border-rose-500/20 transition-all"
+                  >
+                    إيقاف المحرك المخصص ✕
+                  </button>
+                )}
+              </h4>
+              
+              <div className="grid grid-cols-1 gap-2 mt-2">
+                {tawleefas.length === 0 ? (
+                  <div className="text-center py-2 text-[10px] text-slate-500 bg-slate-900/40 rounded border border-slate-850">
+                    لا توجد توليفات مخصصة محفوظة في الذاكرة بعد. قم بحفظ التوليفة الحالية لتظهر هنا.
+                  </div>
+                ) : (
+                  tawleefas.map(t => {
+                    const isActiveOnLive = activeOnLiveBotId === t.id;
+                    const isSelected = activeTawleefa?.id === t.id;
+                    return (
+                      <div 
+                        key={t.id}
+                        className={`p-3 rounded-lg border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all ${
+                          isActiveOnLive 
+                            ? 'bg-emerald-950/20 border-emerald-500/40' 
+                            : isSelected
+                            ? 'bg-slate-900 border-slate-700'
+                            : 'bg-slate-950/40 border-slate-850 hover:border-slate-800'
+                        }`}
+                      >
+                        <button
+                          onClick={() => loadTawleefaToForm(t)}
+                          className="flex-1 text-right flex flex-col gap-0.5"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-200 text-xs text-right hover:text-emerald-400 transition-all">
+                              {t.name}
+                            </span>
+                            {isActiveOnLive && (
+                              <span className="bg-emerald-500/10 text-emerald-400 text-[8px] px-1.5 py-0.5 rounded-full border border-emerald-500/20 animate-pulse font-bold font-sans">
+                                ● البث النشط حيّاً
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-500 line-clamp-1">{t.description || 'لا يوجد وصف مضاف'}</p>
+                        </button>
+                        
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          {isActiveOnLive ? (
+                            <button
+                              onClick={handleDeactivateOnLiveBot}
+                              className="bg-emerald-500 text-slate-950 hover:bg-emerald-400 text-[10px] px-3 py-1.5 rounded-lg font-bold transition-all shadow-sm flex items-center gap-1"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              تعطيل البث الحي
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleActivateOnLiveBot(t)}
+                              className="bg-emerald-600/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 text-[10px] px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5"
+                            >
+                              <Zap className="w-3 h-3 fill-current" />
+                              تفعيل على السيرفر
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteTawleefa(t.id)}
+                            className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 p-1.5 rounded-lg border border-rose-500/10 hover:border-rose-500/20 transition-all"
+                            title="حذف التوليفة من الذاكرة المحليّة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
 

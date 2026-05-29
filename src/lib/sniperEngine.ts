@@ -492,21 +492,58 @@ export class SniperEngine {
    */
   private async executeTrade(cond: MarketCondition, source?: string) {
     const entryPrice = cond.price;
-    const leverage = this.settings.leverage || 10;
     const maxTrades = this.settings.maxConcurrentTrades || 10;
+    
+    let leverage = this.settings.leverage || 10;
     let sl = 0;
+    let tp1 = 0;
+    let tp2 = 0;
 
-    // 1. Stop Loss Placement: Prioritize ATR for dynamic protection
-    if (cond.atr && cond.atr > 0 && this.settings.useStrategyVolatilityRule) {
-      let atrMultiplier = this.settings.strategyAtrMultiplier ?? 1.5;
-      if (this.settings.beastMode) atrMultiplier += 0.5;
-      sl =
-        cond.type === "LONG"
-          ? entryPrice - cond.atr * atrMultiplier
-          : entryPrice + cond.atr * atrMultiplier;
+    let tawleefa: any = null;
+    if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
+      try {
+        tawleefa = JSON.parse(this.settings.activeTawleefaJson);
+      } catch (err) {}
+    }
+
+    if (tawleefa) {
+      leverage = tawleefa.leverage || leverage;
+      const slVal = tawleefa.stopLossValue ?? 1.5;
+      if (tawleefa.stopLossMode === 'ATR_DYNAMIC' && cond.atr) {
+        sl = cond.type === "LONG" ? entryPrice - cond.atr * slVal : entryPrice + cond.atr * slVal;
+      } else if (tawleefa.stopLossMode === 'FIXED') {
+        sl = cond.type === "LONG" ? entryPrice * (1 - (slVal / 100)) : entryPrice * (1 + (slVal / 100));
+      } else {
+        sl = cond.type === "LONG" ? entryPrice * 0.98 : entryPrice * 1.02; // 2% fallback
+      }
+
+      const tpVal = tawleefa.takeProfitValue ?? 2.0;
+      const slDistance = Math.abs(entryPrice - sl);
+      if (tawleefa.takeProfitMode === 'FIXED_R') {
+        tp1 = cond.type === "LONG" ? entryPrice + slDistance * tpVal * 0.5 : entryPrice - slDistance * tpVal * 0.5;
+        tp2 = cond.type === "LONG" ? entryPrice + slDistance * tpVal : entryPrice - slDistance * tpVal;
+      } else {
+        tp1 = cond.type === "LONG" ? entryPrice * (1 + (tpVal / 200)) : entryPrice * (1 - (tpVal / 200));
+        tp2 = cond.type === "LONG" ? entryPrice * (1 + (tpVal / 100)) : entryPrice * (1 - (tpVal / 100));
+      }
     } else {
-      sl =
-        cond.type === "LONG" ? cond.support * 0.999 : cond.resistance * 1.001;
+      if (cond.atr && cond.atr > 0 && this.settings.useStrategyVolatilityRule) {
+        let atrMultiplier = this.settings.strategyAtrMultiplier ?? 1.5;
+        if (this.settings.beastMode) atrMultiplier += 0.5;
+        sl =
+          cond.type === "LONG"
+            ? entryPrice - cond.atr * atrMultiplier
+            : entryPrice + cond.atr * atrMultiplier;
+      } else {
+        sl =
+          cond.type === "LONG" ? cond.support * 0.999 : cond.resistance * 1.001;
+      }
+
+      const riskDist = Math.abs(entryPrice - sl);
+      tp1 =
+        cond.type === "LONG" ? entryPrice + riskDist * 0.8 : entryPrice - riskDist * 0.8;
+      tp2 =
+        cond.type === "LONG" ? entryPrice + riskDist * 2.5 : entryPrice - riskDist * 2.5;
     }
 
     // 2. Risk Engine Validation
@@ -525,12 +562,12 @@ export class SniperEngine {
     }
 
     // 3. Position Sizing
-    
-    // Compute dynamic elements for Risk position sizing
     const testConfidence = cond.score ? cond.score * 10 : 70;
     const testVolatility = cond.atr !== undefined ? cond.atr : 1.0;
     const testStability = RegimeEngine.getRecentTrendRespect();
     const testLiquidity = cond.isLiquidityGood ? 1.3 : 0.7;
+
+    const riskPerc = tawleefa ? (tawleefa.riskPerTrade ?? 1.0) : (this.settings.riskPerTradePerc || 1);
 
     const positionSizeUsd = this.risk.calculatePositionSize(
       this.settings.portfolioSize,
@@ -538,7 +575,7 @@ export class SniperEngine {
       sl,
       leverage,
       maxTrades,
-      this.settings.riskPerTradePerc || 1,
+      riskPerc,
       testConfidence,
       testVolatility,
       testStability,
@@ -552,13 +589,6 @@ export class SniperEngine {
       return;
     }
 
-    // 4. Take Profits
-    const risk = Math.abs(entryPrice - sl);
-    const tp1 =
-      cond.type === "LONG" ? entryPrice + risk * 0.8 : entryPrice - risk * 0.8;
-    const tp2 =
-      cond.type === "LONG" ? entryPrice + risk * 2.5 : entryPrice - risk * 2.5;
-
     const trade: Trade = {
       id: Date.now().toString(),
       symbol: cond.symbol,
@@ -567,14 +597,14 @@ export class SniperEngine {
       entryPrice,
       entryTime: Date.now(),
       amount: positionSizeUsd,
-      leverage: this.settings.leverage || 10,
+      leverage,
       sl,
       initialSl: sl,
       tp1,
       tp2,
       status: "OPEN",
       score: cond.score,
-      source: source || "CORE",
+      source: source || (tawleefa ? `TAWLEEFA:${tawleefa.name}` : "CORE"),
       isBreakeven: false,
       pnl: 0,
       pnlPerc: 0,

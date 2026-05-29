@@ -343,4 +343,8 @@ export interface BotSettings {
   steelMaxLossMode?: boolean;           // تفعيل وضع تعظيم الخسائر والحد الأقصى للتراجع
   steelReboundSensitivity?: number;     // مدى الارتداد للتصفية الفورية
   steelMinProfitTake?: number;          // الحد الأدنى لجني الأرباح السريع
+
+  // Custom Tawleefa (التوليفة المخصصة)
+  useTawleefaEngine?: boolean;          // تفعيل محرك التوليفات المخصصة بالقرارات
+  activeTawleefaJson?: string;          // ملف التوليفة النشطة المشفر بصيغة JSON
 }

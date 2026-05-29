@@ -95,6 +95,106 @@ export class CoreEngine {
     // --- AGGREGATION & ATTACK LOGIC ---
 
     if (!layer1Passed) return { regime: MarketRegime.VIOLENT_VOLATILITY, bias: 'NEUTRAL', trap: TrapType.NONE, confidence: 0, action: 'SLEEP', reason: 'LAYER_1_CLOUD_REJECTION' };
+
+    // --- EVALUATE CUSTOM TAWLEEFA ENGINE IF ENABLED ---
+    if (settings?.useTawleefaEngine) {
+      if (settings?.activeTawleefaJson) {
+        try {
+          const tawleefa = JSON.parse(settings.activeTawleefaJson);
+          if (tawleefa && Array.isArray(tawleefa.conditions) && tawleefa.conditions.length > 0) {
+            const conditionsEvaluation = tawleefa.conditions.map((cond: any) => {
+              let actualVal = 0;
+              switch (cond.metric) {
+                case 'PRICE': actualVal = metrics.price; break;
+                case 'OPEN_INTEREST': actualVal = metrics.openInterest ?? 0; break;
+                case 'CVD': actualVal = metrics.takerRatio ?? 1; break; // Live CVD helper
+                case 'RVOL': actualVal = metrics.rvol; break;
+                case 'TAKER_RATIO': actualVal = metrics.takerRatio ?? 1.0; break;
+                case 'FUNDING_RATE': actualVal = metrics.fundingRate ?? 0; break;
+                case 'RSI': actualVal = metrics.rsi; break;
+                case 'ADX': actualVal = metrics.adx; break;
+                default: actualVal = metrics.price;
+              }
+
+              let isTrue = false;
+              if (cond.operator === 'GREATER_THAN') {
+                isTrue = actualVal > cond.valueNumber;
+              } else if (cond.operator === 'LESS_THAN') {
+                isTrue = actualVal < cond.valueNumber;
+              } else if (cond.operator === 'CROSSES_ABOVE') {
+                isTrue = actualVal >= cond.valueNumber;
+              } else if (cond.operator === 'CROSSES_BELOW') {
+                isTrue = actualVal <= cond.valueNumber;
+              } else if (cond.operator === 'SPIKE') {
+                if (cond.metric === 'OPEN_INTEREST') {
+                  isTrue = (metrics.oiChange !== undefined && metrics.oiChange > 5);
+                } else if (cond.metric === 'RVOL') {
+                  isTrue = metrics.rvol > 2.5;
+                } else {
+                  isTrue = actualVal > cond.valueNumber;
+                }
+              } else if (cond.operator === 'DIVERGENCING') {
+                isTrue = (metrics.takerRatio !== undefined && ((metrics.takerRatio > 1.2 && metrics.rsi < 45) || (metrics.takerRatio < 0.8 && metrics.rsi > 55)));
+              } else if (cond.operator === 'SWEEP_LOW_HIGH' || cond.operator === 'EXHAUSTION') {
+                isTrue = metrics.rsi > 70 || metrics.rsi < 30;
+              } else {
+                isTrue = actualVal > cond.valueNumber;
+              }
+              return isTrue;
+            });
+
+            let triggerSignal = false;
+            if (tawleefa.gate === 'AND') {
+              triggerSignal = conditionsEvaluation.every((v: boolean) => v);
+            } else {
+              triggerSignal = conditionsEvaluation.some((v: boolean) => v);
+            }
+
+            // Regime filtering
+            const allowedRegimes = tawleefa.allowedRegimes || [];
+            const currentRegimeName = regimeStatus.regime;
+            const regimeMatch = allowedRegimes.length === 0 || allowedRegimes.includes(currentRegimeName) || allowedRegimes.includes('ANY');
+
+            if (triggerSignal && regimeMatch) {
+              const botBias: 'LONG' | 'SHORT' | 'NEUTRAL' = tawleefa.action === 'LONG' ? 'LONG' : (tawleefa.action === 'SHORT' ? 'SHORT' : 'NEUTRAL');
+              if (botBias !== 'NEUTRAL') {
+                console.log(`[⭐ TAWLEEFA ENGINE] Attack signal triggered via "${tawleefa.name}" for ${metrics.symbol}`);
+                return {
+                  regime: regimeStatus.regime,
+                  bias: botBias,
+                  trap: trap,
+                  confidence: (tawleefa.minMarketConfidence ?? 60) / 100,
+                  action: 'ATTACK',
+                  reason: `TAWLEEFA:${tawleefa.name}`
+                };
+              }
+            }
+
+            // If we are here, custom engine is active but conditions are not met
+            return {
+              regime: regimeStatus.regime,
+              bias: 'NEUTRAL',
+              trap: TrapType.NONE,
+              confidence: 0,
+              action: 'WAIT',
+              reason: `TAWLEEFA:${tawleefa.name}_WAITING_FOR_TRIGGER`
+            };
+          }
+        } catch (err) {
+          console.error("[TAWLEEFA] Error executing active custom tawleefa:", err);
+        }
+      }
+
+      // Fallback if useTawleefaEngine is true but activeTawleefaJson is invalid/empty/unset
+      return {
+        regime: regimeStatus.regime,
+        bias: 'NEUTRAL',
+        trap: TrapType.NONE,
+        confidence: 0,
+        action: 'WAIT',
+        reason: 'TAWLEEFA_ACTIVE_BUT_EMPTY_OR_INVALID'
+      };
+    }
     
     // If not using SlyFox, and regime/momentum rejected
     if (!settings?.useSlyFox) {
