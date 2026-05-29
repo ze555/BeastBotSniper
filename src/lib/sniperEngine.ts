@@ -410,16 +410,35 @@ export class SniperEngine {
     htfKlines: any[],
     global?: GlobalContext,
   ): Promise<void> {
+    // Calculate ATR if missing
+    let atrVal = condition.atr || 0;
+    if (!atrVal && klines && klines.length > 1) {
+      const trVals: number[] = [];
+      const period = Math.min(14, klines.length - 1);
+      for (let i = klines.length - period; i < klines.length; i++) {
+        if (i <= 0) continue;
+        const h = parseFloat(klines[i][2]);
+        const l = parseFloat(klines[i][3]);
+        const pc = parseFloat(klines[i - 1][4]);
+        const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(pc - l));
+        trVals.push(tr);
+      }
+      if (trVals.length > 0) {
+        atrVal = trVals.reduce((sum, val) => sum + val, 0) / trVals.length;
+      }
+    }
+    condition.atr = atrVal;
+
     // 1. Map MarketCondition to MarketMetrics
     const metrics: MarketMetrics = {
       symbol: condition.symbol,
       price: condition.price,
       adx: 25, // TODO: calculate accurately
-      atr: condition.atr || 0,
-      atrPerc: condition.atr ? (condition.atr / condition.price) * 100 : 0,
+      atr: atrVal,
+      atrPerc: atrVal ? (atrVal / condition.price) * 100 : 0,
       rsi: 50, // TODO: calculate accurately
       volume: condition.vol24h || 0,
-      rvol: condition.isMomentumHigh ? 2 : 1, // mapping RVOL roughly
+      rvol: (condition.rvol && condition.rvol > 0) ? condition.rvol : (condition.isMomentumHigh ? 2 : 1),
       spread: condition.spread || 0,
       fundingRate: condition.fundingRate,
       openInterest: condition.oi,
@@ -453,6 +472,11 @@ export class SniperEngine {
     console.log(
       `[CORE] 🔥 ATTACK TRIGGERED on ${condition.symbol} | Regime: ${decision.regime} | Trap: ${decision.trap} | Confidence: ${decision.confidence * 100}%`,
     );
+
+    // Apply decision bias to type first if valid
+    if (decision.bias && decision.bias !== "NEUTRAL") {
+      condition.type = decision.bias;
+    }
 
     // We override direction if a Trap is detected
     if (decision.trap === TrapType.LONG_TRAP) {

@@ -293,6 +293,51 @@ export async function runTradeLoop() {
                          // Default to 1.0 if Binance Taker endpoint fails
                      }
 
+                     if (settings.useTawleefaEngine) {
+                         const currentPx = parseFloat(klines[klines.length - 1][4]);
+                         
+                         const condition: MarketCondition = {
+                             symbol: coin.symbol,
+                             price: currentPx,
+                             type: 'LONG', // will be evaluated and updated by evaluateSignal
+                             score: coin.score,
+                             isRanging: coin.trend === 'FLAT',
+                             isBreakout: coin.trend !== 'FLAT',
+                             isRetestOrHold: false,
+                             isLiquidityGood: true,
+                             isMomentumHigh: coin.rvol >= 1.5,
+                             isOrderBookClear: true,
+                             support: 0,
+                             resistance: 0,
+                             takerBuySellRatio: takerRatio,
+                             atr: 0,
+                             vol24h: coin.volume,
+                             spread: coin.spread,
+                             oi: undefined,
+                             fundingRate: parseFloat((coin as any).fundingRate || 0)
+                         };
+
+                         try {
+                             const oiRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 });
+                             if (oiRes.data && oiRes.data.openInterest) {
+                                 condition.oi = parseFloat(oiRes.data.openInterest);
+                             }
+                         } catch (e) {
+                             // Ignore
+                         }
+
+                         await sniper.evaluateSignal(condition, klines, klines, globalContext);
+                         
+                         if (sniper.getActiveTrades().has(coin.symbol)) {
+                             signalFoundInThisLoop = true;
+                         } else {
+                             rejectedCount++;
+                             const label = 'Tawleefa No Signal';
+                             rejectionReasons[label] = (rejectionReasons[label] || 0) + 1;
+                         }
+                         continue;
+                     }
+
                      const decision = settings.useSteelEngine
                         ? steelEngine.analyze(klines, takerRatio, sniper.getSettings(), parseFloat((coin as any).fundingRate || 0))
                         : settings.useCreativeEngine

@@ -247,6 +247,147 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 4.0, // High trailing targets
     createdAt: '2026-05-28T21:20:00Z'
+  },
+  {
+    id: 'steel_clad_cascade',
+    name: 'اتجاه الفولاذ المتدفق والزخم (Steel-Clad Trend Expansion Pro)',
+    description: 'توليفة هجينة ممتازة مستوحاة من محركاتنا الكلاسيكية وعمليات التتبع المستمر للاتجاه الفولاذي، تترقب ارتفاع معدلات ADX والزخم المتسارع بصحبة أحجام تداول قياسية ومعدل تيكر إيجابي للضرب مع اتجاه الاتجاه بقوة.',
+    creator: 'مجمع سنايبر الكمي',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'scc1',
+        metric: 'ADX',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 28,
+        timeframe: '15m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'scc2',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.8,
+        timeframe: '15m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'scc3',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.03,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    action: 'LONG',
+    allowedRegimes: ['TRENDING', 'TREND_EXPANSION', 'VIOLENT_VOLATILITY'],
+    btcAlignmentRequired: true,
+    minMarketConfidence: 70,
+    leverage: 10,
+    riskPerTrade: 1.0,
+    stopLossMode: 'ATR_DYNAMIC',
+    stopLossValue: 1.5,
+    takeProfitMode: 'FUSION_CASCADE',
+    takeProfitValue: 3.5,
+    createdAt: '2026-05-29T18:00:00Z'
+  },
+  {
+    id: 'hyper_reversion_fusion',
+    name: 'ارتباط الانحدار العكسي والاتزان الفائق (Hyper-Reversion Fusion)',
+    description: 'توليفة متطورة لصيد الارتدادات من مستويات التشبع البيعي الفائقة جداً (RSI) المصحوبة بمعدلات تمويل سالبة استثنائية (Negative Funding Rate) لتوقع انكسار موجات الهبوط العنيفة والتحول السريع للصعود.',
+    creator: 'مجمع سنايبر الكمي',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'hrf1',
+        metric: 'RSI',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 25,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'hrf2',
+        metric: 'FUNDING_RATE',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: -0.02,
+        timeframe: '15m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'hrf3',
+        metric: 'CVD',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    action: 'LONG',
+    allowedRegimes: ['LIQUIDITY_SWEEP', 'VIOLENT_VOLATILITY', 'TRAP_MODE'],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 60,
+    leverage: 15,
+    riskPerTrade: 1.2,
+    stopLossMode: 'EXHAUSTION_CLOSE',
+    stopLossValue: 0.5,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 3.0,
+    createdAt: '2026-05-29T18:10:00Z'
+  },
+  {
+    id: 'bear_trap_liquidity_cluster',
+    name: 'مصيدة الدببة وعنقود السيولة الذكي (Liquidity Cluster & Bear Trap)',
+    description: 'تقتنص مستويات السيولة المؤسساتية العميقة عندما تكون هناك تصفية كاذبة للمستثمرين (Sweep Low) مع تمركز سيولة متراكمة عريضة، لتنشيط صفقات LONG واقتناص الهبوط العبثي السريع.',
+    creator: 'مجمع سنايبر الكمي',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'btlc1',
+        metric: 'LIQUIDITY_CLUSTER',
+        operator: 'SPIKE',
+        valueType: 'NUMBER',
+        valueNumber: 2.0,
+        timeframe: '15m',
+        sensitivity: 1.5
+      },
+      {
+        id: 'btlc2',
+        metric: 'PRICE',
+        operator: 'SWEEP_LOW_HIGH',
+        valueType: 'NUMBER',
+        valueNumber: 3,
+        timeframe: '5m',
+        sensitivity: 1.2
+      },
+      {
+        id: 'btlc3',
+        metric: 'OPEN_INTEREST',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 5.0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    action: 'LONG',
+    allowedRegimes: ['LIQUIDITY_SWEEP', 'TRAP_MODE', 'COMPRESSION'],
+    btcAlignmentRequired: true,
+    minMarketConfidence: 65,
+    leverage: 12,
+    riskPerTrade: 1.5,
+    stopLossMode: 'SWEEP_LOW_BOUND',
+    stopLossValue: 0.1,
+    takeProfitMode: 'FUSION_CASCADE',
+    takeProfitValue: 4.5,
+    createdAt: '2026-05-29T18:20:00Z'
   }
 ];
 
@@ -300,9 +441,16 @@ export function TawleefaBuilder() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        setTawleefas(parsed);
-        if (parsed.length > 0) {
-          loadTawleefaToForm(parsed[0]);
+        const parsedIds = new Set(parsed.map((p: any) => p.id));
+        const missingPresets = PRESET_TEMPLATES.filter(p => !parsedIds.has(p.id));
+        let updatedList = [...parsed];
+        if (missingPresets.length > 0) {
+          updatedList = [...updatedList, ...missingPresets];
+          localStorage.setItem('cust_tawleefas_v1', JSON.stringify(updatedList));
+        }
+        setTawleefas(updatedList);
+        if (updatedList.length > 0) {
+          loadTawleefaToForm(updatedList[0]);
         } else {
           loadPresetIntoForm(PRESET_TEMPLATES[0]);
         }
@@ -325,6 +473,8 @@ export function TawleefaBuilder() {
       
       settings.useTawleefaEngine = true;
       settings.activeTawleefaJson = JSON.stringify(t);
+      settings.useSteelEngine = false;
+      settings.useCreativeEngine = false;
 
       const saveRes = await fetch('/api/settings', {
         method: 'POST',
