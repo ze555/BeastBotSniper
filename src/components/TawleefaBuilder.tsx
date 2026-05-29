@@ -426,6 +426,71 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 1.8, // Faster, easily achievable TP target
     createdAt: '2026-05-29T18:30:00Z'
+  },
+  {
+    id: 'institutional_hybrid_hunter',
+    name: 'Institutional Hybrid Hunter',
+    description: 'محرك هجومي مؤسساتي ذكي يدمج صيد السيولة مع تأكيد تدفق المؤسسات والزخم الحقيقي لتقليل الفخاخ وزيادة الاستمرارية التشغيلية.',
+    creator: 'مجمع سنايبر الكمي',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'trend_strength',
+        metric: 'ADX',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 22,
+        timeframe: '15m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'liquidity_sweep',
+        metric: 'PRICE',
+        operator: 'SWEEP_LOW_HIGH',
+        valueType: 'NUMBER',
+        valueNumber: 3,
+        timeframe: '5m',
+        sensitivity: 0.85
+      },
+      {
+        id: 'institutional_absorption',
+        metric: 'CVD',
+        operator: 'DIVERGENCING',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 0.9
+      },
+      {
+        id: 'aggressive_buying',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.08,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'volume_confirmation',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.4,
+        timeframe: '15m',
+        sensitivity: 1.0
+      }
+    ],
+    action: 'LONG',
+    allowedRegimes: ['LIQUIDITY_SWEEP', 'VIOLENT_VOLATILITY', 'TREND_EXPANSION', 'TRAP_MODE'],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 62,
+    leverage: 8,
+    riskPerTrade: 1.0,
+    stopLossMode: 'SWEEP_LOW_BOUND',
+    stopLossValue: 0.25,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 3.0,
+    createdAt: '2026-05-29T21:30:00Z'
   }
 ];
 
