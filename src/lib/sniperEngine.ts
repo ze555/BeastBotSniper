@@ -1970,6 +1970,21 @@ export class SniperEngine {
   }
 
   public async wiseExit(symbol: string, currentPrice: number, klines: any[]) {
+    const isFierceExitActive = !!this.settings.useFierceExitEngine || (() => {
+      if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
+        try {
+          const tawleefa = JSON.parse(this.settings.activeTawleefaJson);
+          return (tawleefa.takeProfitMode === 'FUSION_CASCADE' || tawleefa.takeProfitMode === 'TRAILING_MOMENTUM');
+        } catch (e) {}
+      }
+      return false;
+    })();
+
+    if (isFierceExitActive) {
+      console.log(`[WISE EXIT] Bypassed for ${symbol} because Fierce Exit is active.`);
+      return;
+    }
+
     if (this.settings.overrideAllWithAdaptive) {
       console.log(`[WISE EXIT] Bypassed for ${symbol} because Hegemony is active.`);
       return;
@@ -2040,6 +2055,27 @@ export class SniperEngine {
   }
 
   private async closeTrade(trade: Trade, exitPrice: number, reason: string) {
+    // Absolute override: if Fierce Exit is active, cancel and abort ANY non-fierce exit decision!
+    const isFierceExitActive = !!this.settings.useFierceExitEngine || (() => {
+      if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
+        try {
+          const tawleefa = JSON.parse(this.settings.activeTawleefaJson);
+          return (tawleefa.takeProfitMode === 'FUSION_CASCADE' || tawleefa.takeProfitMode === 'TRAILING_MOMENTUM');
+        } catch (e) {}
+      }
+      return false;
+    })();
+
+    if (isFierceExitActive) {
+      const isFierceReason = reason.includes("SLY_FOX_ESCAPE") || 
+                             reason.includes("FIERCE_") || 
+                             reason.includes("SAVAGE_");
+      if (!isFierceReason) {
+        console.log(`[FIERCE OVERRIDE] ⚠️ BLOCKED non-fierce exit decision: "${reason}" for ${trade.symbol}. Fierce Exit has exclusive authority.`);
+        return;
+      }
+    }
+
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
         // [INVERSE LOGIC] لإغلاق الصفقة المعكوسة، نستخدم نفس اتجاه القرار الأصلي
