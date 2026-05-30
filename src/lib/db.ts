@@ -136,7 +136,10 @@ export const initDB = () => {
           overrideAllWithAdaptive INTEGER DEFAULT 0, useSteelEngine INTEGER DEFAULT 0, steelMinProbability REAL DEFAULT 65, steelInfluenceCreative REAL DEFAULT 0.35, steelInfluenceQuantum REAL DEFAULT 0.35, steelInfluenceFusion REAL DEFAULT 0.30, steelTakerWeight REAL DEFAULT 1.5, steelOiWeight REAL DEFAULT 1.2, steelFundingWeight REAL DEFAULT 1.0, steelLiquidityWeight REAL DEFAULT 1.3, steelHtfTrendWeight REAL DEFAULT 1.4, steelAdaptiveSlTp INTEGER DEFAULT 1,
           creativeUseAdaptiveExit INTEGER DEFAULT 0,
           useTawleefaEngine INTEGER DEFAULT 0,
-          activeTawleefaJson TEXT DEFAULT null
+          activeTawleefaJson TEXT DEFAULT null,
+          useFierceExitEngine INTEGER DEFAULT 0,
+          fierceTakeProfitValue REAL DEFAULT 1.5,
+          fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'
         )
       `);
       
@@ -237,7 +240,10 @@ export const initDB = () => {
         "steelReboundSensitivity REAL DEFAULT 0.15",
         "steelMinProfitTake REAL DEFAULT 0.05",
         "useTawleefaEngine INTEGER DEFAULT 0",
-        "activeTawleefaJson TEXT DEFAULT null"
+        "activeTawleefaJson TEXT DEFAULT null",
+        "useFierceExitEngine INTEGER DEFAULT 0",
+        "fierceTakeProfitValue REAL DEFAULT 1.5",
+        "fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'"
       ];
       
       let pending = newCols.length;
@@ -369,9 +375,9 @@ export function saveSettingsToDB(settings: any) {
       isNightmareMode, marketPanicThreshold,
       useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine, creativeUseAdaptiveExit, disableConsecutiveLoss,
       useSteelEngine, steelMinProbability, steelInfluenceCreative, steelInfluenceQuantum, steelInfluenceFusion, steelTakerWeight, steelOiWeight, steelFundingWeight, steelLiquidityWeight, steelHtfTrendWeight, steelAdaptiveSlTp, steelMaxLossMode, steelReboundSensitivity, steelMinProfitTake,
-      useTawleefaEngine, activeTawleefaJson
+      useTawleefaEngine, activeTawleefaJson, useFierceExitEngine, fierceTakeProfitValue, fierceTakeProfitMode
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
       riskPerTradePerc=excluded.riskPerTradePerc,
@@ -482,7 +488,10 @@ export function saveSettingsToDB(settings: any) {
       steelReboundSensitivity=excluded.steelReboundSensitivity,
       steelMinProfitTake=excluded.steelMinProfitTake,
       useTawleefaEngine=excluded.useTawleefaEngine,
-      activeTawleefaJson=excluded.activeTawleefaJson
+      activeTawleefaJson=excluded.activeTawleefaJson,
+      useFierceExitEngine=excluded.useFierceExitEngine,
+      fierceTakeProfitValue=excluded.fierceTakeProfitValue,
+      fierceTakeProfitMode=excluded.fierceTakeProfitMode
   `;
 
   const values = [
@@ -534,7 +543,10 @@ export function saveSettingsToDB(settings: any) {
     settings.steelReboundSensitivity ?? 0.15,
     settings.steelMinProfitTake ?? 0.05,
     settings.useTawleefaEngine ? 1 : 0,
-    settings.activeTawleefaJson || null
+    settings.activeTawleefaJson || null,
+    settings.useFierceExitEngine ? 1 : 0,
+    settings.fierceTakeProfitValue ?? 1.5,
+    settings.fierceTakeProfitMode || 'FUSION_CASCADE'
   ];
 
   db.run(query, values, (err) => {
@@ -594,6 +606,9 @@ export function loadSettingsFromDB(): Promise<any> {
         row.useSteelEngine = row.useSteelEngine === 1;
         row.useTawleefaEngine = row.useTawleefaEngine === 1;
         row.activeTawleefaJson = row.activeTawleefaJson || null;
+        row.useFierceExitEngine = row.useFierceExitEngine === 1;
+        if (row.fierceTakeProfitValue === undefined) row.fierceTakeProfitValue = 1.5;
+        if (row.fierceTakeProfitMode === undefined) row.fierceTakeProfitMode = 'FUSION_CASCADE';
         row.steelAdaptiveSlTp = row.steelAdaptiveSlTp === 1;
         row.steelMaxLossMode = row.steelMaxLossMode === 1;
         if (row.steelReboundSensitivity === undefined) row.steelReboundSensitivity = 0.15;

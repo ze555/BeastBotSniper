@@ -1131,6 +1131,16 @@ export class SniperEngine {
           return; // Handoff complete: position has been closed or thoroughly updated!
         }
       }
+    } else if (this.settings.useFierceExitEngine) {
+      // Create independent target config from global fierce setting parameters
+      const independentConfig = {
+        takeProfitValue: this.settings.fierceTakeProfitValue ?? 1.5,
+        takeProfitMode: this.settings.fierceTakeProfitMode ?? 'FUSION_CASCADE'
+      };
+      const handledByFierce = await this.executeFierceExitEngine(trade, currentPrice, independentConfig, indicators, currentTakerRatio);
+      if (handledByFierce) {
+        return; // Handoff complete: position has been closed or thoroughly updated!
+      }
     }
 
     // --- SPECIAL HANDLING: CREATIVE POSITION STATE MACHINE (Gap 6 / Point 6) ---

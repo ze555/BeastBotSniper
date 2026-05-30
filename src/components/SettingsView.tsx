@@ -731,6 +731,62 @@ export function SettingsView({
                       </div>
                    </div>
                 </div>
+
+                {/* 🦅 Savage & Fierce Exit Engine (محرك الخروج الشرس المستقل) */}
+                <div className="md:col-span-2 bg-gradient-to-l from-slate-950 via-slate-900/40 to-amber-950/20 border border-amber-500/30 rounded-2xl p-8 space-y-6 text-right">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                    <div className="flex items-center gap-3">
+                      <Flame className="w-6 h-6 text-amber-500 animate-pulse animate-duration-1000" />
+                      <div className="text-right">
+                        <div className="flex items-center gap-2 justify-end">
+                          <span className="bg-amber-500 text-slate-955 text-[9px] font-black px-1.5 py-0.5 rounded-full">محرك مستقل فائق القوة</span>
+                          <h4 className="font-black text-white text-sm uppercase">محرك الخروج الشرس (Fierce & Savage Exit Engine)</h4>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">تأمين مجهري مستميت وحماية لحظية للمكاسب متطابقة مع آلية الخروج في التوليفة</p>
+                      </div>
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      checked={!!settings.useFierceExitEngine} 
+                      onChange={e => setSettings({...settings, useFierceExitEngine: e.target.checked})} 
+                      className="w-6 h-6 accent-amber-500 cursor-pointer" 
+                    />
+                  </div>
+
+                  <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 transition-all duration-305 ${!settings.useFierceExitEngine ? 'opacity-20 grayscale pointer-events-none' : ''}`}>
+                    <div className="space-y-2 text-right">
+                      <label className="text-[10px] text-amber-400 font-black uppercase">وضعية ملاحقة السقف وجني الأرباح (Exit Mode)</label>
+                      <select 
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs font-black text-amber-300 outline-none focus:border-amber-500 text-right"
+                        value={settings.fierceTakeProfitMode ?? 'FUSION_CASCADE'}
+                        onChange={e => setSettings({...settings, fierceTakeProfitMode: e.target.value as any})}
+                      >
+                        <option value="FUSION_CASCADE">FUSION_CASCADE (التسييل التراكمي وتأمين الدخول الصارم)</option>
+                        <option value="TRAILING_MOMENTUM">TRAILING_MOMENTUM (ملاحقة الزخم ومطاردة السقوف والقمم)</option>
+                      </select>
+                      <p className="text-[9px] text-slate-500 mt-1">
+                        {settings.fierceTakeProfitMode === 'FUSION_CASCADE' 
+                          ? 'تسييل مجهري تدريجي للمراكز بمعدل 0.15% لكل صعود، مع سحب الاستوب لوس فوراً لتأمين تكاليف التداول ومنع الخسائر.' 
+                          : 'المطاردة اللحظية لقمة السلوك السعري، وتوفير مرونة بمجرد استنفاد الزخم بالكامل للتصفية في الأعلى.'
+                        }
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 text-right">
+                      <label className="text-[10px] text-amber-400 font-black uppercase">الهدف المرجو لجني الأرباح الشرس (Take Profit %): {settings.fierceTakeProfitValue ?? 1.5}%</label>
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="range" min="0.3" max="5.0" step="0.1" 
+                          className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500" 
+                          value={settings.fierceTakeProfitValue ?? 1.5} 
+                          onChange={e => setSettings({...settings, fierceTakeProfitValue: parseFloat(e.target.value)})} 
+                        />
+                        <span className="font-mono text-sm text-amber-400 font-bold">{settings.fierceTakeProfitValue ?? 1.5}%</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 font-black tracking-tight mt-1">يمثل الحد الأدنى لتفعيل التسييل المتتابع أو بداية التتبع اللحظي الذكي.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

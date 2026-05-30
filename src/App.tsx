@@ -53,6 +53,9 @@ export default function App() {
     quantumMomentumVol: 1.5,
     minPositionSizePerc: 20,
     useCreativeEngine: true,
+    useFierceExitEngine: false,
+    fierceTakeProfitValue: 1.5,
+    fierceTakeProfitMode: "FUSION_CASCADE" as "FUSION_CASCADE" | "TRAILING_MOMENTUM",
   });
   const [savingSettings, setSavingSettings] = useState(false);
 

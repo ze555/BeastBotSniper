@@ -347,4 +347,9 @@ export interface BotSettings {
   // Custom Tawleefa (التوليفة المخصصة)
   useTawleefaEngine?: boolean;          // تفعيل محرك التوليفات المخصصة بالقرارات
   activeTawleefaJson?: string;          // ملف التوليفة النشطة المشفر بصيغة JSON
+
+  // 🦅 Savage & Fierce Exit Engine (محرك الخروج الشرس المستقل)
+  useFierceExitEngine?: boolean;        // تفعيل محرك الخروج الشرس المستقل لأي محرك دخول
+  fierceTakeProfitValue?: number;       // هدف جني الأرباح المأمول لمحرك الخروج الشرس (مثل 1.5%)
+  fierceTakeProfitMode?: 'FUSION_CASCADE' | 'TRAILING_MOMENTUM'; // وضعية ملاحقة السقف وجني الأرباح للتثبيت الشرس
 }
