@@ -532,18 +532,32 @@ export class SniperEngine {
 
     if (tawleefa) {
       leverage = tawleefa.leverage || leverage;
-      const slVal = tawleefa.stopLossValue ?? 1.5;
-      if (tawleefa.stopLossMode === 'ATR_DYNAMIC' && cond.atr) {
+      
+      const currentRegimeName = cond.decision?.regime;
+      let targetConfig = tawleefa;
+      let usingProfile = false;
+      
+      if (currentRegimeName && Array.isArray(tawleefa.dynamicRegimeProfiles) && tawleefa.dynamicRegimeProfiles.length > 0) {
+        const matchedProfile = tawleefa.dynamicRegimeProfiles.find((p: any) => p.regime === currentRegimeName);
+        if (matchedProfile) {
+          targetConfig = matchedProfile;
+          usingProfile = true;
+          console.log(`[⭐ TAWLEEFA EXECUTION] Setting up SL/TP using specific regime profile: ${currentRegimeName}`);
+        }
+      }
+
+      const slVal = targetConfig.stopLossValue ?? 1.5;
+      if (targetConfig.stopLossMode === 'ATR_DYNAMIC' && cond.atr) {
         sl = cond.type === "LONG" ? entryPrice - cond.atr * slVal : entryPrice + cond.atr * slVal;
-      } else if (tawleefa.stopLossMode === 'FIXED') {
+      } else if (targetConfig.stopLossMode === 'FIXED') {
         sl = cond.type === "LONG" ? entryPrice * (1 - (slVal / 100)) : entryPrice * (1 + (slVal / 100));
       } else {
         sl = cond.type === "LONG" ? entryPrice * 0.98 : entryPrice * 1.02; // 2% fallback
       }
 
-      const tpVal = tawleefa.takeProfitValue ?? 2.0;
+      const tpVal = targetConfig.takeProfitValue ?? 2.0;
       const slDistance = Math.abs(entryPrice - sl);
-      if (tawleefa.takeProfitMode === 'FIXED_R') {
+      if (targetConfig.takeProfitMode === 'FIXED_R') {
         tp1 = cond.type === "LONG" ? entryPrice + slDistance * tpVal * 0.5 : entryPrice - slDistance * tpVal * 0.5;
         tp2 = cond.type === "LONG" ? entryPrice + slDistance * tpVal : entryPrice - slDistance * tpVal;
       } else {

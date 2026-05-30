@@ -57,6 +57,17 @@ export interface ConditionRow {
   sensitivity: number; // For advanced items like sweep, divergence, exhaustion
 }
 
+export interface RegimeProfile {
+  regime: string;
+  gate: LogicGate;
+  conditions: ConditionRow[];
+  action: RuleAction;
+  stopLossMode: 'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE';
+  stopLossValue: number;
+  takeProfitMode: 'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE';
+  takeProfitValue: number;
+}
+
 export interface TawleefaConfig {
   id: string;
   name: string;
@@ -79,6 +90,9 @@ export interface TawleefaConfig {
   takeProfitMode: 'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE';
   takeProfitValue: number; // multiplier or percentage
   
+  // Dynamic regime specific profiles mapping
+  dynamicRegimeProfiles?: RegimeProfile[];
+
   createdAt: string;
 }
 
@@ -107,6 +121,207 @@ interface SimulatorScenario {
 
 // Professional preset templates that the user can start with or modify
 const PRESET_TEMPLATES: TawleefaConfig[] = [
+  {
+    id: 'adaptive_regime_intelligence_engine',
+    name: 'Adaptive Regime Intelligence Engine',
+    description: 'محرك ذكي متكيف يغيّر سلوك الدخول تلقائياً حسب طبيعة السوق والسيولة والزخم المؤسسي، مع تفعيل توليفات فرعية مخصصة لكل ريجيم بشكل أوتوماتيكي.',
+    creator: 'مجمع سنايبر الكمي',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'default_c1',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.3,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'default_c2',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.05,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    action: 'LONG',
+    allowedRegimes: ['TRENDING', 'LIQUIDITY_SWEEP', 'COMPRESSION', 'TRAP_MODE'],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 58,
+    leverage: 8,
+    riskPerTrade: 1.0,
+    stopLossMode: 'ATR_DYNAMIC',
+    stopLossValue: 1.2,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 2.0,
+    dynamicRegimeProfiles: [
+      {
+        regime: 'TRENDING',
+        gate: 'AND',
+        conditions: [
+          {
+            id: 'trend_c1',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 26,
+            timeframe: '15m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'trend_c2',
+            metric: 'PRICE',
+            operator: 'CROSSES_ABOVE',
+            valueType: 'NUMBER',
+            valueNumber: 0,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'trend_c3',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.6,
+            timeframe: '15m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'trend_c4',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.1,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        action: 'LONG',
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 1.4,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 3.5
+      },
+      {
+        regime: 'LIQUIDITY_SWEEP',
+        gate: 'AND',
+        conditions: [
+          {
+            id: 'liq_c1',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 3,
+            timeframe: '5m',
+            sensitivity: 0.85
+          },
+          {
+            id: 'liq_c2',
+            metric: 'CVD',
+            operator: 'DIVERGENCING',
+            valueType: 'NUMBER',
+            valueNumber: 0,
+            timeframe: '5m',
+            sensitivity: 0.9
+          },
+          {
+            id: 'liq_c3',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.08,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        action: 'LONG',
+        stopLossMode: 'SWEEP_LOW_BOUND',
+        stopLossValue: 0.25,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 2.8
+      },
+      {
+        regime: 'COMPRESSION',
+        gate: 'AND',
+        conditions: [
+          {
+            id: 'comp_c1',
+            metric: 'RVOL',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 20,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'comp_c2',
+            metric: 'PRICE',
+            operator: 'CROSSES_ABOVE',
+            valueType: 'NUMBER',
+            valueNumber: 0,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'comp_c3',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 12,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        action: 'LONG',
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 1.2,
+        takeProfitMode: 'FUSION_CASCADE',
+        takeProfitValue: 4.0
+      },
+      {
+        regime: 'TRAP_MODE',
+        gate: 'AND',
+        conditions: [
+          {
+            id: 'trap_c1',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '1m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'trap_c2',
+            metric: 'CVD',
+            operator: 'DIVERGENCING',
+            valueType: 'NUMBER',
+            valueNumber: 0,
+            timeframe: '1m',
+            sensitivity: 0.8
+          },
+          {
+            id: 'trap_c3',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.3,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        action: 'LONG',
+        stopLossMode: 'FIXED',
+        stopLossValue: 0.35,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 2.0
+      }
+    ],
+    createdAt: '2026-05-30T08:35:00Z'
+  },
   {
     id: 'smc_sweep_hunter',
     name: 'صيد السيولة واقتناص عتبات القيعان (SMC Sweep & Absorb)',
@@ -524,6 +739,7 @@ export function TawleefaBuilder() {
   const [displayedTicks, setDisplayedTicks] = useState<any[]>([]);
   const [displayedLogs, setDisplayedLogs] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [activeProfileTab, setActiveProfileTab] = useState<string>('TRENDING');
 
   // Load Tawleefas from local storage on mount
   useEffect(() => {
@@ -954,7 +1170,33 @@ export function TawleefaBuilder() {
     
     // Evaluate entire run beforehand
     const logs: string[] = [`[بداية المحاكاة] تشغيل سيناريو: ${scenario.name}...`];
-    logs.push(`[تفسير التوليفة] جاري فحص الشروط مستعيناً بالبوابة [${gate}] وتحديد اتجاه الدخول [${action}]...`);
+    
+    // Resolve dynamic regime configuration profile if present:
+    let activeConditions = conditions;
+    let activeGate = gate;
+    let activeAction = action;
+    let activeStopLossMode = stopLossMode;
+    let activeStopLossValue = stopLossValue;
+    let activeTakeProfitMode = takeProfitMode;
+    let activeTakeProfitValue = takeProfitValue;
+    let usingProfile = false;
+
+    if (activeTawleefa && Array.isArray(activeTawleefa.dynamicRegimeProfiles) && activeTawleefa.dynamicRegimeProfiles.length > 0) {
+      const matchedProfile = activeTawleefa.dynamicRegimeProfiles.find((p: any) => p.regime === scenario.regime);
+      if (matchedProfile) {
+        activeConditions = matchedProfile.conditions;
+        activeGate = matchedProfile.gate;
+        activeAction = matchedProfile.action;
+        activeStopLossMode = matchedProfile.stopLossMode;
+        activeStopLossValue = matchedProfile.stopLossValue;
+        activeTakeProfitMode = matchedProfile.takeProfitMode;
+        activeTakeProfitValue = matchedProfile.takeProfitValue;
+        usingProfile = true;
+        logs.push(`[⭐ نظام متكيف] تم التعرف على ريجيم السوق المالي المفعّل [${scenario.regime}] تلقائياً وتحويل المحرك إلى التوليفة الفرعية المطابقة بنجاح! ⚡`);
+      }
+    }
+
+    logs.push(`[تفسير التوليفة] جاري فحص الشروط مستعيناً بالبوابة [${activeGate}] وتحديد اتجاه الدخول [${activeAction}]...`);
     
     let position: 'LONG' | 'SHORT' | null = null;
     let entryPrice = 0;
@@ -983,7 +1225,7 @@ export function TawleefaBuilder() {
       const momentumExhaustion = index > 4 ? evaluateExhaustion(history) : false;
 
       // Map values of custom inputs dynamically
-      let conditionsEvaluation = conditions.map(cond => {
+      let conditionsEvaluation = activeConditions.map(cond => {
         let actualVal = 0;
         let isTrue = false;
         
@@ -1042,7 +1284,7 @@ export function TawleefaBuilder() {
       // Filter out conditions if empty
       let triggerSignal = false;
       if (conditionsEvaluation.length > 0) {
-        if (gate === 'AND') {
+        if (activeGate === 'AND') {
           triggerSignal = conditionsEvaluation.every(c => c.isTrue);
         } else {
           triggerSignal = conditionsEvaluation.some(c => c.isTrue);
@@ -1050,7 +1292,7 @@ export function TawleefaBuilder() {
       }
 
       // Check regime whitelist mapping
-      const regimeMatch = allowedRegimes.length === 0 || allowedRegimes.includes(scenario.regime);
+      const regimeMatch = usingProfile || allowedRegimes.length === 0 || allowedRegimes.includes(scenario.regime);
       if (triggerSignal && !regimeMatch) {
         triggerSignal = false; // blocked by lifestyle/environment regime
       }
@@ -1061,27 +1303,27 @@ export function TawleefaBuilder() {
       
       if (!position && triggerSignal) {
         // Trigger position entry!
-        position = action === 'LONG' || action === 'SHORT' ? (action as 'LONG' | 'SHORT') : 'LONG';
+        position = activeAction === 'LONG' || activeAction === 'SHORT' ? (activeAction as 'LONG' | 'SHORT') : 'LONG';
         entryPrice = tick.price;
         resultStatus = 'ACTIVE';
         
         // Calculate SL TP based on selected modes
-        if (stopLossMode === 'ATR_DYNAMIC') {
-          slPrice = position === 'LONG' ? entryPrice - (tick.atr * stopLossValue) : entryPrice + (tick.atr * stopLossValue);
-        } else if (stopLossMode === 'FIXED') {
-          slPrice = position === 'LONG' ? entryPrice * (1 - (stopLossValue / 100)) : entryPrice * (1 + (stopLossValue / 100));
-        } else if (stopLossMode === 'SWEEP_LOW_BOUND') {
+        if (activeStopLossMode === 'ATR_DYNAMIC') {
+          slPrice = position === 'LONG' ? entryPrice - (tick.atr * activeStopLossValue) : entryPrice + (tick.atr * activeStopLossValue);
+        } else if (activeStopLossMode === 'FIXED') {
+          slPrice = position === 'LONG' ? entryPrice * (1 - (activeStopLossValue / 100)) : entryPrice * (1 + (activeStopLossValue / 100));
+        } else if (activeStopLossMode === 'SWEEP_LOW_BOUND') {
           slPrice = position === 'LONG' ? entryPrice - 0.5 : entryPrice + 0.5; // Sweep relative
         } else {
           slPrice = position === 'LONG' ? entryPrice - 1.2 : entryPrice + 1.2;
         }
 
-        if (takeProfitMode === 'FIXED_R') {
+        if (activeTakeProfitMode === 'FIXED_R') {
           const slDistance = Math.abs(entryPrice - slPrice);
-          tpPrice = position === 'LONG' ? entryPrice + (slDistance * takeProfitValue) : entryPrice - (slDistance * takeProfitValue);
+          tpPrice = position === 'LONG' ? entryPrice + (slDistance * activeTakeProfitValue) : entryPrice - (slDistance * activeTakeProfitValue);
         } else {
           // Dynamic trail or progressive exit targets
-          tpPrice = position === 'LONG' ? entryPrice * (1 + (takeProfitValue / 100)) : entryPrice * (1 - (takeProfitValue / 100));
+          tpPrice = position === 'LONG' ? entryPrice * (1 + (activeTakeProfitValue / 100)) : entryPrice * (1 - (activeTakeProfitValue / 100));
         }
 
         eventMsg = `🎯 [إشارة تميز] تفعيل صفقة ${position} بسعرEntry: ${entryPrice} $ ! شروط البث متطابقة بالبوابة المتكاملة! 🚀`;
@@ -1412,6 +1654,71 @@ export function TawleefaBuilder() {
               />
             </div>
           </div>
+
+          {activeTawleefa?.dynamicRegimeProfiles && activeTawleefa.dynamicRegimeProfiles.length > 0 && (
+            <div className="bg-slate-950/80 border border-emerald-500/20 p-4 rounded-xl space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg text-xs leading-none font-bold">⚡ قالب متكيف ديناميكياً (Adaptive Multi-Regime Profile):</span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-sans">
+                يتعرف هذا المحرك تلقائياً على بنية وريجيم السوق، ويقوم بتفعيل شروط الدخول وبلوكات التصفية والهدف المالي لكل ريجيم بشكل مستقل تماماً.
+              </p>
+              
+              {/* Tabs for Profiles */}
+              <div className="flex gap-1 overflow-x-auto p-1 bg-slate-900 rounded-lg border border-slate-800">
+                {activeTawleefa.dynamicRegimeProfiles.map(profile => (
+                  <button
+                    key={profile.regime}
+                    type="button"
+                    onClick={() => setActiveProfileTab(profile.regime)}
+                    className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all whitespace-nowrap ${
+                      activeProfileTab === profile.regime
+                        ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-950/60'
+                    }`}
+                  >
+                    📈 {profile.regime}
+                  </button>
+                ))}
+              </div>
+
+              {/* Active Profile Render Details */}
+              {(() => {
+                const targetProfile = activeTawleefa.dynamicRegimeProfiles.find(p => p.regime === activeProfileTab);
+                if (!targetProfile) return null;
+                return (
+                  <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 space-y-2.5 text-right font-sans">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400 font-bold">بوابة الدمج المنطقي: <span className="text-emerald-400 font-mono">[{targetProfile.gate}]</span></span>
+                      <span className="text-slate-400 font-bold">الاتجاه المعتمد: <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">[{targetProfile.action}]</span></span>
+                    </div>
+
+                    <div className="border-t border-slate-800/85 pt-2.5 space-y-1.5">
+                      <div className="text-[10px] text-slate-400 font-bold mb-1">شروط الدخول المحددة في هذا الريجيم:</div>
+                      {targetProfile.conditions.map((c, i) => (
+                        <div key={c.id || i} className="text-[10px] text-slate-300 bg-slate-950/60 px-2 py-1.5 rounded border border-slate-850/80 flex items-center justify-between font-mono">
+                          <span className="text-emerald-400">#{i + 1}</span>
+                          <span className="text-slate-200">{c.metric} {c.operator === 'GREATER_THAN' ? 'أكبر من' : (c.operator === 'LESS_THAN' ? 'أصغر من' : (c.operator === 'CROSSES_ABOVE' ? 'يخترق صعوداً' : c.operator))} {c.valueNumber === 0 ? '' : c.valueNumber}</span>
+                          <span className="text-slate-500">[{c.timeframe}]</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-slate-800/85 pt-2.5 grid grid-cols-2 gap-2 text-[10px]">
+                      <div className="bg-slate-950/40 p-2 rounded border border-slate-850/40">
+                        <span className="text-slate-500 block mb-0.5">وقف خسارة الريجيم (SL)</span>
+                        <span className="text-slate-200 font-bold font-mono">{targetProfile.stopLossMode} ({targetProfile.stopLossValue})</span>
+                      </div>
+                      <div className="bg-slate-950/40 p-2 rounded border border-slate-850/40">
+                        <span className="text-slate-500 block mb-0.5">جني أرباح الريجيم (TP)</span>
+                        <span className="text-slate-200 font-bold font-mono">{targetProfile.takeProfitMode} ({targetProfile.takeProfitValue})</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Decision Gating & Conditions Header */}
           <div className="space-y-4">
