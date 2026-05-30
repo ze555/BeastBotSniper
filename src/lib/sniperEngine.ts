@@ -402,6 +402,160 @@ export class SniperEngine {
   }
 
   /**
+   * Savage & Fierce Exit Engine: Ultra-proactive hazard reduction and cascading momentum locks.
+   * "محرك خروج شرس ومفترس يلتهم الأرباح مجهرياً ويؤمن الدخول الصارم لمنع أي خسارة"
+   */
+  private async executeFierceExitEngine(
+    trade: Trade,
+    currentPrice: number,
+    targetConfig: any,
+    indicators?: any,
+    currentTakerRatio?: number
+  ): Promise<boolean> {
+    const symbol = trade.symbol;
+    let updated = false;
+
+    // 1. Calculate Core Price Changes
+    const entryPrice = trade.entryPrice;
+    const isLong = trade.type === 'LONG';
+    const priceChangePerc = isLong
+      ? ((currentPrice - entryPrice) / entryPrice) * 100
+      : ((entryPrice - currentPrice) / entryPrice) * 100;
+
+    // Track historical highwater marks
+    if (!trade.highestPrice || (isLong ? currentPrice > trade.highestPrice : currentPrice < trade.highestPrice)) {
+      trade.highestPrice = currentPrice;
+      updated = true;
+    }
+
+    const highestPrice = trade.highestPrice || entryPrice;
+
+    // 2. ULTRA-FAST BREAKEVEN GUARD (التأمين الفولاذي اللحظي المستميت)
+    const lockThreshold = 0.20; 
+    if (!trade.isBreakeven && priceChangePerc >= lockThreshold) {
+      const buffer = 1.0006; // Secure 0.06% above entry price to safeguard trading commissions
+      trade.sl = isLong ? entryPrice * buffer : entryPrice * (2 - buffer);
+      trade.isBreakeven = true;
+      updated = true;
+      console.log(`[SAVAGE ENG] 🛡️ Ultra-Fast Breakeven Lock activated for ${symbol}. New SL: ${trade.sl.toFixed(4)}`);
+      addLog(`🛡️ تأمين الاقتناص الشرس: نقل الوقف تلقائياً وسحب الصفقات لمنطقة الأمان المضمونة لـ ${symbol} عند ${trade.sl.toFixed(4)} | عتبة الحركة: +${priceChangePerc.toFixed(2)}%`, 'success');
+    }
+
+    // 3. CASCADING PARTIAL TAKE PROFIT (جني الأرباح المتدرج الصارم)
+    const rawTpGoal = targetConfig.takeProfitValue ?? 1.5;
+    const tp1Goal = rawTpGoal * 0.45; // Secure fast returns
+    if (trade.status === 'OPEN' && priceChangePerc >= tp1Goal) {
+      if (!trade.isPartialProfitTaken) {
+        trade.isPartialProfitTaken = true;
+        trade.status = 'TP1_HIT';
+        
+        // Liquidate 50% of active value
+        const partialPnl = (trade.pnl || 0) * 0.5;
+        trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+        trade.amount = trade.amount * 0.5;
+
+        // Secure Entry tightly plus lock a fragment of profits (0.15% profit cushion)
+        const profitCushion = 1.0015;
+        trade.sl = isLong ? entryPrice * profitCushion : entryPrice * (2 - profitCushion);
+        
+        updated = true;
+        console.log(`[SAVAGE ENG] 💸 Quick Cascading Partial TP1 Hit for ${symbol}. Remaining Amount: ${trade.amount}$`);
+        addLog(`💸 جني جزئي شرس وجبار: ${symbol} تم تسييل 50% من الرصيد والحد من خطر التسييل كلياً عند ربح +${priceChangePerc.toFixed(2)}%! نقل الوقف إلى المنطقة الآمنة والربحية الاستثنائية!`, 'success');
+        
+        if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
+          try {
+            const side = isLong ? 'sell' : 'buy';
+            const roundedAmount = this.exchange.amountToPrecision(symbol, (trade.amount / currentPrice));
+            console.log(`[BINANCE] 🔄 Savage Partial Order: sending ${side.toUpperCase()} for 50% of size | Qty: ${roundedAmount}`);
+            await this.exchange.createOrder(symbol, 'market', side, roundedAmount);
+          } catch (e: any) {
+            console.error(`[BINANCE] Partial Order placement failed: ${e.message}`);
+          }
+        }
+      }
+    }
+
+    // 4. PRE-EMPTIVE SLY FOX ESCAPE HATCH (التصفية الاستباقية الفورية قبل الارتداد الزخمي)
+    if (priceChangePerc >= 0.1) {
+      let triggerEscape = false;
+      let escapeReason = "";
+
+      const ratio = currentTakerRatio !== undefined ? currentTakerRatio : 1.0;
+      if (isLong && ratio < 0.94) {
+        triggerEscape = true;
+        escapeReason = `Taker Orderflow Sell shock (Ratio: ${ratio.toFixed(2)})`;
+      } else if (!isLong && ratio > 1.06) {
+        triggerEscape = true;
+        escapeReason = `Taker Orderflow Buy shock (Ratio: ${ratio.toFixed(2)})`;
+      }
+
+      if (indicators && indicators.rsi) {
+        const rsi = indicators.rsi;
+        if (isLong && rsi > 70 && rsi < 67) {
+          triggerEscape = true;
+          escapeReason = `RSI Extreme exhaustion of long momentum (RSI: ${rsi})`;
+        } else if (!isLong && rsi < 30 && rsi > 33) {
+          triggerEscape = true;
+          escapeReason = `RSI Extreme exhaustion of short momentum (RSI: ${rsi})`;
+        }
+      }
+
+      if (triggerEscape) {
+        console.log(`[SAVAGE ENG] 🦊 Sly Fox Escape Hatch triggered for ${symbol}. Reason: ${escapeReason}`);
+        addLog(`🦊 مخرج ثعلب الذهب الاستباقي: إغلاق ${symbol} وتأمين الربح العائم بمعدل +${priceChangePerc.toFixed(2)}% فوراً بسبب تلاشي السيولة الداعمة! [${escapeReason}]`, 'warn');
+        await this.closeTrade(trade, currentPrice, `🦊 SLY_FOX_ESCAPE: ${escapeReason}`);
+        return true; 
+      }
+    }
+
+    // 5. SAVAGE TRAILING SQUEEZE (ملاحقة السقف المجهري المطاطي للمكاسب الكبيرة)
+    const targetTpVal = targetConfig.takeProfitValue ?? 2.0;
+    const isSubstantiallyInProfit = priceChangePerc >= targetTpVal * 0.6;
+    if (isSubstantiallyInProfit && highestPrice > 0) {
+      const dropFromPeak = isLong
+        ? ((highestPrice - currentPrice) / highestPrice) * 100
+        : ((currentPrice - highestPrice) / highestPrice) * 100;
+      
+      const squeezeLimit = targetConfig.takeProfitMode === 'FUSION_CASCADE' ? 0.15 : 0.22;
+      if (dropFromPeak >= squeezeLimit) {
+        console.log(`[SAVAGE ENG] 🦅 Trailing Squeeze triggered for ${symbol}. Drop: ${dropFromPeak.toFixed(3)}% >= Squeeze limit: ${squeezeLimit}%`);
+        addLog(`🦅 اقتناص الحافة الشرسة (Trailing Squeeze): إغلاق ${symbol} على قمة الزخم وحصد الأقرب لقمتها عند ربح حاسم +${priceChangePerc.toFixed(2)}% | الارتداد من ذروة الصعود: ${dropFromPeak.toFixed(2)}%`, 'success');
+        await this.closeTrade(trade, currentPrice, `🦅 FIERCE_TRAIL_SQUEEZE_HIT`);
+        return true; 
+      }
+    }
+
+    // 6. Hard safety check against final target limits (TP2/SL)
+    const hitHardSL = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+    if (hitHardSL) {
+      const isProfitHit = trade.isBreakeven || trade.isPartialProfitTaken;
+      console.log(`[SAVAGE ENG] 🛑 Hard SL/Breakeven Triggered for ${symbol} at ${currentPrice}`);
+      addLog(isProfitHit 
+        ? `🔐 إغلاق آمن لـ ${symbol} عند قفل الدخول المأمون بقيمة ${trade.sl.toFixed(4)}. حمي المحرك المكاسب المحققة من الاندثار!` 
+        : `🛑 ضرب وقف الخسارة للتوليفة لـ ${symbol} عند سعر ${trade.sl.toFixed(4)}. تفادى المحرك انزلاقات أعمق!`, 
+        isProfitHit ? 'info' : 'warn'
+      );
+      await this.closeTrade(trade, currentPrice, isProfitHit ? `🔐 SAVAGE_BREAKEVEN_HIT` : `🛑 SAVAGE_STOP_LOSS_HIT`);
+      return true; 
+    }
+
+    const hardTp2Price = isLong ? entryPrice * (1 + (rawTpGoal / 100)) : entryPrice * (1 - (rawTpGoal / 100));
+    const hitTpPrice = isLong ? currentPrice >= hardTp2Price : currentPrice <= hardTp2Price;
+    if (hitTpPrice) {
+      console.log(`[SAVAGE ENG] 🏆 Golden Target TP2 Hit for ${symbol} at ${currentPrice}`);
+      addLog(`🏆 النصر الذهبي للتوليفة: تسييل كامل صفقات ${symbol} عند الهدف ${currentPrice.toFixed(4)} بربح إجمالي مذهل +${priceChangePerc.toFixed(2)}% !!! ⭐`, 'success');
+      await this.closeTrade(trade, currentPrice, `🏆 SAVAGE_TP2_CLIMAX_HIT`);
+      return true; 
+    }
+
+    if (updated) {
+      saveTrade(trade);
+      this.activeTrades.set(symbol, trade);
+    }
+    return false; 
+  }
+
+  /**
    * Evaluate a symbol against the new 7-layer architecture
    */
   public async evaluateSignal(
@@ -946,6 +1100,36 @@ export class SniperEngine {
       trade.adaptiveHistoryLogs.push(logEntry);
       if (trade.adaptiveHistoryLogs.length > 50) {
         trade.adaptiveHistoryLogs.shift();
+      }
+    }
+
+    // --- 000. FIERCE/SAVAGE RELENTLESS ESCAPE & EXIT ENGINE OVERRIDE ---
+    // If Tawleefa engine is active, and the preset takeProfitMode is FUSION_CASCADE or TRAILING_MOMENTUM,
+    // we bypass standard rules and execute the hyper-proactive Fierce Exit system.
+    let tawleefa: any = null;
+    if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
+      try {
+        tawleefa = JSON.parse(this.settings.activeTawleefaJson);
+      } catch (err) {}
+    }
+
+    if (tawleefa) {
+      let targetConfig = tawleefa;
+      const currentRegimeName = adaptiveEval.decision || "TRENDING";
+      
+      if (Array.isArray(tawleefa.dynamicRegimeProfiles) && tawleefa.dynamicRegimeProfiles.length > 0) {
+        const matchedProfile = tawleefa.dynamicRegimeProfiles.find((p: any) => p.regime === currentRegimeName);
+        if (matchedProfile) {
+          targetConfig = matchedProfile;
+        }
+      }
+
+      const activeTpMode = targetConfig.takeProfitMode;
+      if (activeTpMode === 'FUSION_CASCADE' || activeTpMode === 'TRAILING_MOMENTUM') {
+        const handledByFierce = await this.executeFierceExitEngine(trade, currentPrice, targetConfig, indicators, currentTakerRatio);
+        if (handledByFierce) {
+          return; // Handoff complete: position has been closed or thoroughly updated!
+        }
       }
     }
 

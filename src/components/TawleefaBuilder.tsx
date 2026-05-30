@@ -740,6 +740,7 @@ export function TawleefaBuilder() {
   const [displayedLogs, setDisplayedLogs] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [activeProfileTab, setActiveProfileTab] = useState<string>('TRENDING');
+  const [dynamicRegimeProfiles, setDynamicRegimeProfiles] = useState<RegimeProfile[] | undefined>(undefined);
 
   // Load Tawleefas from local storage on mount
   useEffect(() => {
@@ -852,6 +853,7 @@ export function TawleefaBuilder() {
     setStopLossValue(t.stopLossValue ?? 1.5);
     setTakeProfitMode(t.takeProfitMode ?? 'TRAILING_MOMENTUM');
     setTakeProfitValue(t.takeProfitValue ?? 2.0);
+    setDynamicRegimeProfiles(t.dynamicRegimeProfiles || undefined);
   };
 
   const loadPresetIntoForm = (t: TawleefaConfig) => {
@@ -870,6 +872,7 @@ export function TawleefaBuilder() {
     setStopLossValue(t.stopLossValue ?? 1.5);
     setTakeProfitMode(t.takeProfitMode ?? 'TRAILING_MOMENTUM');
     setTakeProfitValue(t.takeProfitValue ?? 2.0);
+    setDynamicRegimeProfiles(t.dynamicRegimeProfiles || undefined);
   };
 
   const addConditionRow = () => {
@@ -921,6 +924,7 @@ export function TawleefaBuilder() {
       stopLossValue,
       takeProfitMode,
       takeProfitValue,
+      dynamicRegimeProfiles,
       createdAt: activeTawleefa?.createdAt || new Date().toISOString()
     };
 
@@ -976,7 +980,8 @@ export function TawleefaBuilder() {
         stopLossMode,
         stopLossValue,
         takeProfitMode,
-        takeProfitValue
+        takeProfitValue,
+        dynamicRegimeProfiles
       }
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(raw, null, 2));
@@ -1010,6 +1015,7 @@ export function TawleefaBuilder() {
           setStopLossValue(cfg.stopLossValue || 1.5);
           setTakeProfitMode(cfg.takeProfitMode || 'TRAILING_MOMENTUM');
           setTakeProfitValue(cfg.takeProfitValue || 2.0);
+          setDynamicRegimeProfiles(cfg.dynamicRegimeProfiles || undefined);
           setActiveTawleefa(null);
           alert('تم استيراد التوليفة ومواصفات الفلو بنجاح! يمكنك مراجعتها وحفظها.');
         } else {
@@ -1181,8 +1187,10 @@ export function TawleefaBuilder() {
     let activeTakeProfitValue = takeProfitValue;
     let usingProfile = false;
 
-    if (activeTawleefa && Array.isArray(activeTawleefa.dynamicRegimeProfiles) && activeTawleefa.dynamicRegimeProfiles.length > 0) {
-      const matchedProfile = activeTawleefa.dynamicRegimeProfiles.find((p: any) => p.regime === scenario.regime);
+    // Use currentProfiles state if activeTawleefa doesn't contain it yet
+    const currentProfiles = activeTawleefa?.dynamicRegimeProfiles || dynamicRegimeProfiles;
+    if (currentProfiles && Array.isArray(currentProfiles) && currentProfiles.length > 0) {
+      const matchedProfile = currentProfiles.find((p: any) => p.regime === scenario.regime);
       if (matchedProfile) {
         activeConditions = matchedProfile.conditions;
         activeGate = matchedProfile.gate;
@@ -1207,6 +1215,9 @@ export function TawleefaBuilder() {
     let maxDrawdown = 0;
     let pnl = 0;
     let tradeHistory: any[] = [];
+    let isBreakeven = false;
+    let isPartialProfitTaken = false;
+    let peakPrice = 0;
     
     const processedTicks = scenario.ticks.map((tick, index) => {
       // Calculate indicators/features based on rolling slice
@@ -1306,6 +1317,9 @@ export function TawleefaBuilder() {
         position = activeAction === 'LONG' || activeAction === 'SHORT' ? (activeAction as 'LONG' | 'SHORT') : 'LONG';
         entryPrice = tick.price;
         resultStatus = 'ACTIVE';
+        isBreakeven = false;
+        isPartialProfitTaken = false;
+        peakPrice = entryPrice;
         
         // Calculate SL TP based on selected modes
         if (activeStopLossMode === 'ATR_DYNAMIC') {
@@ -1326,14 +1340,26 @@ export function TawleefaBuilder() {
           tpPrice = position === 'LONG' ? entryPrice * (1 + (activeTakeProfitValue / 100)) : entryPrice * (1 - (activeTakeProfitValue / 100));
         }
 
-        eventMsg = `🎯 [إشارة تميز] تفعيل صفقة ${position} بسعرEntry: ${entryPrice} $ ! شروط البث متطابقة بالبوابة المتكاملة! 🚀`;
+        eventMsg = `🎯 [إشارة تميز] تفعيل صفقة ${position} بسعر Entry: ${entryPrice} $ ! شروط البث متطابقة بالبوابة المتكاملة! 🚀`;
       } else if (position) {
         // Evaluate exits (TP or SL)
         const currentPrice = tick.price;
-        // PNL calculation based on leverage
-        const priceChangePerc = ((currentPrice - entryPrice) / entryPrice) * 100;
-        tickPnL = position === 'LONG' ? priceChangePerc * leverage : -priceChangePerc * leverage;
+        const isLong = position === 'LONG';
         
+        // Maintain peak price for trailing:
+        if (isLong) {
+          peakPrice = Math.max(peakPrice, currentPrice);
+        } else {
+          if (peakPrice === 0) peakPrice = currentPrice;
+          peakPrice = Math.min(peakPrice, currentPrice);
+        }
+
+        // PNL calculation based on leverage
+        const priceChangePerc = isLong
+          ? ((currentPrice - entryPrice) / entryPrice) * 100
+          : ((entryPrice - currentPrice) / entryPrice) * 100;
+
+        tickPnL = priceChangePerc * leverage;
         peakPnL = Math.max(peakPnL, tickPnL);
         maxDrawdown = Math.min(maxDrawdown, tickPnL);
         pnl = tickPnL;
@@ -1341,25 +1367,94 @@ export function TawleefaBuilder() {
         // Check if hit SL or TP
         let hitSL = false;
         let hitTP = false;
+        let closedBySavage = false;
 
-        if (position === 'LONG') {
-          if (currentPrice <= slPrice) hitSL = true;
-          if (currentPrice >= tpPrice) hitTP = true;
-        } else {
-          if (currentPrice >= slPrice) hitSL = true;
-          if (currentPrice <= tpPrice) hitTP = true;
+        const isSavageExitMode = activeTakeProfitMode === 'FUSION_CASCADE' || activeTakeProfitMode === 'TRAILING_MOMENTUM';
+
+        // 1. ULTRA-FAST BREAKEVEN GUARD (التأمين الفولاذي اللحظي المستميت)
+        if (isSavageExitMode && !isBreakeven && priceChangePerc >= 0.20) {
+          const buffer = 1.0006;
+          slPrice = isLong ? entryPrice * buffer : entryPrice * (2 - buffer);
+          isBreakeven = true;
+          eventMsg = `🛡️ [تأمين الدخول الشرس] تم سحب طوارئ وقف الخسارة تلقائياً لتأمين العمولات وتجنب انعكاس الحركة!`;
         }
 
-        if (hitSL) {
-          eventMsg = `🛑 [وقف الخسارة] تم ضرب وقف الخسارة الديناميكي عند سعر ${currentPrice} $. خسارة محققة: ${tickPnL.toFixed(2)}% !`;
-          pnl = position === 'LONG' ? -Math.abs(slPrice - entryPrice)/entryPrice * 100 * leverage : -Math.abs(slPrice - entryPrice)/entryPrice * 100 * leverage;
-          resultStatus = 'STOPPED_OUT';
-          position = null;
-        } else if (hitTP) {
-          eventMsg = `💚 [جني الأرباح] نجاح ساحق! تم تحقيق الهدف الفني المستهدف عند ${currentPrice} $. ربح محقق بقوة التوليفة: +${tickPnL.toFixed(2)}% !!! ⭐`;
-          pnl = tickPnL;
-          resultStatus = 'SUCCESS';
-          position = null;
+        // 2. CASCADING PARTIAL TAKE PROFIT (جني الأرباح المتدرج الصارم)
+        const tp1Goal = activeTakeProfitValue * 0.45;
+        if (isSavageExitMode && !isPartialProfitTaken && priceChangePerc >= tp1Goal) {
+          isPartialProfitTaken = true;
+          eventMsg = `💸 [جني جزئي شرس] تسييل 50% من العقود لتثبيت الأرباح بمعدل +${priceChangePerc.toFixed(2)}%! سحب الوقف لـ +0.15% أرباح مأمونة!`;
+          const profitCushion = 1.0015;
+          slPrice = isLong ? entryPrice * profitCushion : entryPrice * (2 - profitCushion);
+        }
+
+        // 3. SLY FOX PRE-EMPTIVE REVERSAL ESCAPE (مخرج الطوارئ الزخمي الاستباقي)
+        if (isSavageExitMode && !closedBySavage && priceChangePerc >= 0.1) {
+          let triggerEscape = false;
+          let escapeReason = "";
+
+          if (isLong && tick.takerRatio < 0.94) {
+            triggerEscape = true;
+            escapeReason = "تراجع الشراء المؤسساتي (Taker < 0.94)";
+          } else if (!isLong && tick.takerRatio > 1.06) {
+            triggerEscape = true;
+            escapeReason = "عكس الزخم وتكالب البائعين (Taker > 1.06)";
+          }
+
+          if (tick.rsi && ((isLong && tick.rsi > 70) || (!isLong && tick.rsi < 30))) {
+            triggerEscape = true;
+            escapeReason = "إنهاك مؤشر القوة النسبية القصوى (RSI Peak)";
+          }
+
+          if (triggerEscape) {
+            closedBySavage = true;
+            eventMsg = `🦊 [مخرج ثعلب الذهب] تصفية استباقية وتأمين المكسب الفعلي +${priceChangePerc.toFixed(2)}% لعروض طافية! [${escapeReason}]`;
+            pnl = tickPnL;
+            resultStatus = 'SUCCESS';
+            position = null;
+          }
+        }
+
+        // 4. SAVAGE TRAILING SQUEEZE (ملاحقة السقف المجهري المطاطي للمكاسب الكبيرة)
+        if (isSavageExitMode && !closedBySavage && priceChangePerc >= activeTakeProfitValue * 0.6) {
+          const dropFromPeak = isLong
+            ? ((peakPrice - currentPrice) / peakPrice) * 100
+            : ((currentPrice - peakPrice) / peakPrice) * 100;
+          
+          const squeezeLimit = activeTakeProfitMode === 'FUSION_CASCADE' ? 0.15 : 0.22;
+          if (dropFromPeak >= squeezeLimit) {
+            closedBySavage = true;
+            eventMsg = `🦅 [اقتناص الحافة الشرسة] تسييل كامل الباقي من الصفقة بعد ارتداد السعر بمقدار ${dropFromPeak.toFixed(2)}% من أعلى ذروة! ربح محقق: +${priceChangePerc.toFixed(2)}%!`;
+            pnl = tickPnL;
+            resultStatus = 'SUCCESS';
+            position = null;
+          }
+        }
+
+        // 5. Hard boundary conditions if not closed already
+        if (!closedBySavage) {
+          if (isLong) {
+            if (currentPrice <= slPrice) hitSL = true;
+            if (currentPrice >= tpPrice) hitTP = true;
+          } else {
+            if (currentPrice >= slPrice) hitSL = true;
+            if (currentPrice <= tpPrice) hitTP = true;
+          }
+
+          if (hitSL) {
+            const isProfitHedged = isBreakeven || isPartialProfitTaken;
+            eventMsg = isProfitHedged
+              ? `🔐 [إغلاق بأمان وتأمين أرباح] تم الخرج الآمن عند ${currentPrice} $ برأس مال آمن بالكامل!`
+              : `🛑 [وقف الخسارة] تم ضرب وقف الخسارة الديناميكي عند سعر ${currentPrice} $. خسارة محققة: ${tickPnL.toFixed(2)}% !`;
+            pnl = isProfitHedged ? 0.05 * leverage : -Math.abs(slPrice - entryPrice)/entryPrice * 100 * leverage;
+            resultStatus = isProfitHedged ? 'SUCCESS' : 'STOPPED_OUT';
+            position = null;
+          } else if (hitTP) {
+            eventMsg = `🏆 [النصر الذهبي للتوليفة] تسييل الصفقة بالكامل وتحقيق الهدف الأقصى عند ${currentPrice} $. ربح محقق كلي: +${priceChangePerc.toFixed(2)}% !!! ⭐`;
+            pnl = tickPnL;
+            resultStatus = 'SUCCESS';
+            position = null;
+          }
         }
       }
 
@@ -1371,7 +1466,14 @@ export function TawleefaBuilder() {
         entryPrice: position ? entryPrice : undefined,
         slPrice: position ? slPrice : undefined,
         tpPrice: position ? tpPrice : undefined,
-        regime: scenario.regime
+        regime: scenario.regime,
+        // SAVE EXTRA STATS FOR RICH LOGS:
+        conditionsEvaluation,
+        activeGate,
+        activeAction,
+        triggerSignal,
+        regimeMatch,
+        usingProfile
       };
     });
 
@@ -1386,10 +1488,43 @@ export function TawleefaBuilder() {
           runningTicks.push(currentTick);
           setDisplayedTicks([...runningTicks]);
           
-          if (currentTick.eventMsg) {
-            runLogs.push(`[الخطوة ${currentTick.step}] ${currentTick.eventMsg}`);
-            setDisplayedLogs([...runLogs]);
+          // 1. Log Market Regime and Asset States
+          const regimeAr = currentTick.regime === 'TRENDING' ? 'اتجاهي صاعد (TRENDING)' :
+                           currentTick.regime === 'LIQUIDITY_SWEEP' ? 'صيد سيولة القيعان (LIQUIDITY_SWEEP)' :
+                           currentTick.regime === 'COMPRESSION' ? 'انضغاط سعري/نطاق ضيق (COMPRESSION)' :
+                           currentTick.regime === 'TRAP_MODE' ? 'مصيدة البائعين والمشترين (TRAP_MODE)' : currentTick.regime;
+
+          const metricsStr = `السعر: ${currentTick.price.toFixed(2)}$ | RVOL: ${(currentTick.volume / 300000).toFixed(2)} | RSI: ${currentTick.rsi.toFixed(1)} | CVD: ${currentTick.cvd.toFixed(1)}`;
+          runLogs.push(`[الخطوة ${currentTick.step}] 🌐 ريجيم السوق: ${regimeAr} | 📊 ${metricsStr}`);
+
+          // 2. Format result of conditions evaluation
+          if (currentTick.conditionsEvaluation && currentTick.conditionsEvaluation.length > 0) {
+            const gateChar = currentTick.activeGate === 'AND' ? ' ➕ ' : ' ➖ ';
+            const condsLog = currentTick.conditionsEvaluation.map((c: any) => {
+              const marker = c.isTrue ? '✅' : '❌';
+              const opSym = c.operator === 'GREATER_THAN' ? 'أكبر من' :
+                            c.operator === 'LESS_THAN' ? 'أصغر من' :
+                            c.operator === 'CROSSES_ABOVE' ? 'يخترق صعوداً' :
+                            c.operator === 'SWEEP_LOW_HIGH' ? 'اختبار قاع/قمة' : c.operator;
+              
+              const valNumStr = c.valueNumber !== 0 ? ` ${c.valueNumber}` : '';
+              return `[${c.metric} ${opSym}${valNumStr} : ${c.actualVal?.toFixed(1) || ''}] ${marker}`;
+            }).join(gateChar);
+            
+            const decisionStr = currentTick.triggerSignal 
+              ? `🔥 تطابق شروط البث بالكامل! القرار: دخول ${currentTick.activeAction}` 
+              : `⏳ القرار: انتظار لعدم اكتمال الشروط`;
+
+            runLogs.push(`   🔍 لوج فحص الشروط (${currentTick.activeGate}): ${condsLog} ⟵ القرار: ${decisionStr}`);
           }
+
+          if (currentTick.eventMsg) {
+            runLogs.push(`   ${currentTick.eventMsg}`);
+          } else if (currentTick.isActive && currentTick.entryPrice) {
+            runLogs.push(`   💼 صفقة نشطة: ${currentTick.activeAction} من سعر ${currentTick.entryPrice.toFixed(2)}$ | الوقف: ${currentTick.slPrice?.toFixed(2)}$ | الهدف: ${currentTick.tpPrice?.toFixed(2)}$ | العائد: ${currentTick.pnl > 0 ? '+' : ''}${currentTick.pnl.toFixed(2)}%`);
+          }
+
+          setDisplayedLogs([...runLogs]);
           return prev + 1;
         } else {
           clearInterval(intervalId);
