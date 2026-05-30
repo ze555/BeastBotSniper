@@ -530,9 +530,11 @@ export class SniperEngine {
     if (hitHardSL) {
       const isProfitHit = trade.isBreakeven || trade.isPartialProfitTaken;
       console.log(`[SAVAGE ENG] 🛑 Hard SL/Breakeven Triggered for ${symbol} at ${currentPrice}`);
+      const isTawleefa = trade.source && trade.source.includes("TAWLEEFA");
+      const engineName = isTawleefa ? "التوليفة" : "محرك الخروج الشرس";
       addLog(isProfitHit 
         ? `🔐 إغلاق آمن لـ ${symbol} عند قفل الدخول المأمون بقيمة ${trade.sl.toFixed(4)}. حمي المحرك المكاسب المحققة من الاندثار!` 
-        : `🛑 ضرب وقف الخسارة للتوليفة لـ ${symbol} عند سعر ${trade.sl.toFixed(4)}. تفادى المحرك انزلاقات أعمق!`, 
+        : `🛑 ضرب وقف الخسارة لـ ${symbol} عند سعر ${trade.sl.toFixed(4)} بواسطة ${engineName}. تفادى المحرك انزلاقات أعمق!`, 
         isProfitHit ? 'info' : 'warn'
       );
       await this.closeTrade(trade, currentPrice, isProfitHit ? `🔐 SAVAGE_BREAKEVEN_HIT` : `🛑 SAVAGE_STOP_LOSS_HIT`);
@@ -543,7 +545,9 @@ export class SniperEngine {
     const hitTpPrice = isLong ? currentPrice >= hardTp2Price : currentPrice <= hardTp2Price;
     if (hitTpPrice) {
       console.log(`[SAVAGE ENG] 🏆 Golden Target TP2 Hit for ${symbol} at ${currentPrice}`);
-      addLog(`🏆 النصر الذهبي للتوليفة: تسييل كامل صفقات ${symbol} عند الهدف ${currentPrice.toFixed(4)} بربح إجمالي مذهل +${priceChangePerc.toFixed(2)}% !!! ⭐`, 'success');
+      const isTawleefa = trade.source && trade.source.includes("TAWLEEFA");
+      const engineName = isTawleefa ? "التوليفة" : "محرك الخروج الشرس";
+      addLog(`🏆 النصر الذهبي لـ ${symbol} عبر ${engineName}: تسييل كامل الصفقة عند الهدف ${currentPrice.toFixed(4)} بربح إجمالي مذهل +${priceChangePerc.toFixed(2)}% !!! ⭐`, 'success');
       await this.closeTrade(trade, currentPrice, `🏆 SAVAGE_TP2_CLIMAX_HIT`);
       return true; 
     }
