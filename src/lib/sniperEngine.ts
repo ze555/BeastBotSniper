@@ -422,6 +422,19 @@ export class SniperEngine {
       ? ((currentPrice - entryPrice) / entryPrice) * 100
       : ((entryPrice - currentPrice) / entryPrice) * 100;
 
+    // Real-time live PnL and ROE updates so that front-end/UI displays latest metrics under Fierce Exit
+    const totalFeeRate = this.settings.tradingFeeRate ?? 0.001;
+    const leverage = trade.leverage || this.settings.leverage || 10;
+    const roePerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
+    
+    let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
+    if (trade.realizedPnl) {
+        currentPnl += trade.realizedPnl;
+    }
+    
+    trade.pnl = currentPnl;
+    trade.pnlPerc = roePerc;
+
     // Track historical highwater marks
     if (!trade.highestPrice || (isLong ? currentPrice > trade.highestPrice : currentPrice < trade.highestPrice)) {
       trade.highestPrice = currentPrice;
@@ -1117,6 +1130,7 @@ export class SniperEngine {
       } catch (err) {}
     }
 
+    let ranFierce = false;
     if (tawleefa) {
       let targetConfig = tawleefa;
       const currentRegimeName = adaptiveEval.decision || "TRENDING";
@@ -1130,10 +1144,8 @@ export class SniperEngine {
 
       const activeTpMode = targetConfig.takeProfitMode;
       if (activeTpMode === 'FUSION_CASCADE' || activeTpMode === 'TRAILING_MOMENTUM') {
-        const handledByFierce = await this.executeFierceExitEngine(trade, currentPrice, targetConfig, indicators, currentTakerRatio);
-        if (handledByFierce) {
-          return; // Handoff complete: position has been closed or thoroughly updated!
-        }
+        await this.executeFierceExitEngine(trade, currentPrice, targetConfig, indicators, currentTakerRatio);
+        ranFierce = true;
       }
     } else if (this.settings.useFierceExitEngine) {
       // Create independent target config from global fierce setting parameters
@@ -1141,10 +1153,12 @@ export class SniperEngine {
         takeProfitValue: this.settings.fierceTakeProfitValue ?? 1.5,
         takeProfitMode: this.settings.fierceTakeProfitMode ?? 'FUSION_CASCADE'
       };
-      const handledByFierce = await this.executeFierceExitEngine(trade, currentPrice, independentConfig, indicators, currentTakerRatio);
-      if (handledByFierce) {
-        return; // Handoff complete: position has been closed or thoroughly updated!
-      }
+      await this.executeFierceExitEngine(trade, currentPrice, independentConfig, indicators, currentTakerRatio);
+      ranFierce = true;
+    }
+
+    if (ranFierce) {
+      return; // Absolute authority complete handoff: positions are managed ONLY by the Fierce Exit Engine, completely ignoring and bypassing all other exit systems!
     }
 
     // --- SPECIAL HANDLING: CREATIVE POSITION STATE MACHINE (Gap 6 / Point 6) ---
