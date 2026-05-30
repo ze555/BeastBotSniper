@@ -698,6 +698,24 @@ export function SettingsView({
                       />
                    </div>
 
+                   <div className="flex items-center justify-between p-5 bg-slate-900/60 border border-slate-800 rounded-2xl">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-black text-rose-450 uppercase">مخرج الأمان الديناميكي (Dynamic Safety Exit) 🛡️</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed max-w-sm">
+                          عند التفعيل، يتدخل النظام لتصفية المركز فوراً إذا رصد ضعفاً ديناميكياً حاداً وتراجعاً في مؤشر قوة الاتجاه (ADX) أو انعكاساً في مؤشر الزخم (RSI / EMA Trend).
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          checked={settings.dynamicSafetyExit !== false} 
+                          onChange={e => setSettings({...settings, dynamicSafetyExit: e.target.checked})} 
+                          className="w-10 h-10 accent-rose-600 cursor-pointer" 
+                        />
+                        <span className="text-[8px] font-black text-rose-500">{settings.dynamicSafetyExit !== false ? 'مخرج أمان نَشِط' : 'مخرج أمان مُعطّل'}</span>
+                      </div>
+                   </div>
+
                    <div className="flex items-center justify-between p-5 bg-indigo-500/5 border border-indigo-500/20 rounded-2xl animate-pulse shadow-lg shadow-indigo-500/5">
                       <div className="space-y-1">
                         <h4 className="text-sm font-black text-indigo-400 uppercase">الهيمنة التكيفية (Adaptive Dominance)</h4>
