@@ -15,6 +15,9 @@ let globalContext: GlobalContext = {
   marketSentiment: 'NEUTRAL'
 };
 
+// Map to track previous Open Interest per symbol to calculate real-time percentage change
+const lastOpenInterestMap = new Map<string, number>();
+
 export function getGlobalMarketContext() {
   return globalContext;
 }
@@ -132,21 +135,16 @@ export async function runTradeLoop() {
 
               try {
                 // Fetch each endpoint in parallel with individual safe catch handlers to prevent cascading failures
-                const [klinesRes, takerVRes, oiRes, premiumRes] = await Promise.all([
+                const [klinesRes, oiRes, premiumRes] = await Promise.all([
                   axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${t.symbol}&interval=${tfs.m5}&limit=35`, { timeout: 4000 })
                     .catch(err => {
                        console.warn(`[BOT RUNNER] Klines fetch backup needed for ${t.symbol}:`, err.message);
                        return { data: [] };
                     }),
-                  axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${t.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 })
-                    .catch(() => {
-                       // Suppress warnings as some low cap/new coins do not support taker buy/sell volume endpoints
-                       return { data: [] };
-                    }),
                   axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${t.symbol}`, { timeout: 3000 })
                     .catch(() => {
                        return { data: null };
-                    }),
+                     }),
                   axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex?symbol=${t.symbol}`, { timeout: 3000 })
                     .catch(() => {
                        return { data: null };
@@ -155,15 +153,20 @@ export async function runTradeLoop() {
                 
                 klines = klinesRes.data;
                 if (klines && klines.length > 0) {
-                  currentVol = parseFloat(klines[klines.length - 1][5]);
+                  const lastK = klines[klines.length - 1];
+                  const totalVol = parseFloat(lastK[5]);
+                  const takerBuyVol = parseFloat(lastK[9]);
+                  const takerSellVol = totalVol - takerBuyVol;
+                  if (takerSellVol > 0) {
+                    currentTakerRatio = takerBuyVol / takerSellVol;
+                  } else {
+                    currentTakerRatio = 1.0;
+                  }
+                  currentVol = totalVol;
                 }
 
                 if (oiRes && oiRes.data && oiRes.data.openInterest) {
                   currentOI = parseFloat(oiRes.data.openInterest);
-                }
-
-                if (takerVRes.data && takerVRes.data.length > 0) {
-                  currentTakerRatio = parseFloat(takerVRes.data[0].buyVol) / parseFloat(takerVRes.data[0].sellVol);
                 }
 
                 if (premiumRes && premiumRes.data && premiumRes.data.lastFundingRate) {
@@ -280,17 +283,16 @@ export async function runTradeLoop() {
                      const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
-                     // Taker ratio fallback: Try to get it but don't fail if endpoint is dead
+                     // Calculate Taker Ratio safely from the last candle of klines
                      let takerRatio = 1.0;
-                     try {
-                        const takerRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/futures/data/takerbuySellVol?symbol=${coin.symbol}&period=${tfs.m5}&limit=1`, { timeout: 3000 });
-                        if (takerRes.data && takerRes.data.length > 0) {
-                            const bv = parseFloat(takerRes.data[0].buyVol);
-                            const sv = parseFloat(takerRes.data[0].sellVol);
-                            if (sv > 0) takerRatio = bv / sv;
-                        }
-                     } catch (e) {
-                         // Default to 1.0 if Binance Taker endpoint fails
+                     if (klines && klines.length > 0) {
+                         const lastK = klines[klines.length - 1];
+                         const totalVol = parseFloat(lastK[5]);
+                         const takerBuyVol = parseFloat(lastK[9]);
+                         const takerSellVol = totalVol - takerBuyVol;
+                         if (takerSellVol > 0) {
+                             takerRatio = takerBuyVol / takerSellVol;
+                         }
                      }
 
                      if (settings.useTawleefaEngine) {
@@ -300,6 +302,8 @@ export async function runTradeLoop() {
                              symbol: coin.symbol,
                              price: currentPx,
                              type: 'LONG', // will be evaluated and updated by evaluateSignal
+                             rvol: coin.rvol,
+                             oiChange24h: 0,
                              score: coin.score,
                              isRanging: coin.trend === 'FLAT',
                              isBreakout: coin.trend !== 'FLAT',
@@ -320,7 +324,13 @@ export async function runTradeLoop() {
                          try {
                              const oiRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 });
                              if (oiRes.data && oiRes.data.openInterest) {
-                                 condition.oi = parseFloat(oiRes.data.openInterest);
+                                 const currentOI = parseFloat(oiRes.data.openInterest);
+                                 condition.oi = currentOI;
+                                 const prevOI = lastOpenInterestMap.get(coin.symbol);
+                                 if (prevOI && prevOI > 0) {
+                                     condition.oiChange24h = ((currentOI - prevOI) / prevOI) * 100;
+                                 }
+                                 lastOpenInterestMap.set(coin.symbol, currentOI);
                              }
                          } catch (e) {
                              // Ignore
@@ -376,6 +386,8 @@ export async function runTradeLoop() {
                               support: decision.type === 'LONG' ? support : 0,
                               resistance: decision.type === 'SHORT' ? resistance : 0,
                               takerBuySellRatio: takerRatio,
+
+
                               atr: 0 
                           };
                           

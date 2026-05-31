@@ -140,6 +140,7 @@ export interface MarketCondition {
   spread?: number;           // Bid/Ask Spread
   fundingRate?: number;      // Current Funding Rate
   takerBuySellRatio?: number; // Active market pressure
+  rvol?: number;             // Real-time relative volume
   decision?: EngineDecision;  // The 7-layer decision core result
 }
 

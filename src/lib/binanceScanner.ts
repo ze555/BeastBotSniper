@@ -7,6 +7,7 @@ import { getTimeframes } from './timeframeUtils.js';
 export interface ScannedCoin {
   symbol: string;
   price: number;
+  priceChange: number; // 24h price change percentage
   volume: number;      // 24h quote volume
   volatility: number;  // % (High-Low)/Low
   rvol: number;        // RVOL
@@ -182,6 +183,7 @@ export async function runBinanceScanner() {
         candidates.push({
             symbol,
             price,
+            priceChange: parseFloat(ticker.priceChangePercent),
             volume,
             volatility,
             rvol,

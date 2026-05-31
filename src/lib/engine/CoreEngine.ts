@@ -121,7 +121,7 @@ export class CoreEngine {
                   let actualVal = 0;
                   switch (cond.metric) {
                     case 'PRICE': actualVal = metricsObj.price; break;
-                    case 'OPEN_INTEREST': actualVal = metricsObj.openInterest ?? 0; break;
+                    case 'OPEN_INTEREST': actualVal = cond.operator === 'SPIKE' ? (metricsObj.oiChange ?? 0) : (metricsObj.openInterest ?? 0); break;
                     case 'CVD': actualVal = metricsObj.takerRatio ?? 1; break; // Live CVD helper
                     case 'RVOL': actualVal = metricsObj.rvol; break;
                     case 'TAKER_RATIO': actualVal = metricsObj.takerRatio ?? 1.0; break;
@@ -142,11 +142,11 @@ export class CoreEngine {
                     isTrue = actualVal <= cond.valueNumber;
                   } else if (cond.operator === 'SPIKE') {
                     if (cond.metric === 'OPEN_INTEREST') {
-                      isTrue = (metricsObj.oiChange !== undefined && metricsObj.oiChange > 5);
+                      isTrue = (metricsObj.oiChange !== undefined && Math.abs(metricsObj.oiChange) >= cond.valueNumber);
                     } else if (cond.metric === 'RVOL') {
-                      isTrue = metricsObj.rvol > 2.5;
+                      isTrue = metricsObj.rvol >= cond.valueNumber;
                     } else {
-                      isTrue = actualVal > cond.valueNumber;
+                      isTrue = actualVal >= cond.valueNumber;
                     }
                   } else if (cond.operator === 'DIVERGENCING') {
                     isTrue = (metricsObj.takerRatio !== undefined && ((metricsObj.takerRatio > 1.2 && metricsObj.rsi < 45) || (metricsObj.takerRatio < 0.8 && metricsObj.rsi > 55)));
