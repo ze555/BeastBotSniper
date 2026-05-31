@@ -706,6 +706,200 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.0,
     createdAt: '2026-05-29T21:30:00Z'
+  },
+  {
+    id: "adaptive_regime_alpha_v1",
+    name: "Adaptive Regime Alpha",
+    description: "نسخة هجومية متوازنة تعتمد على تدفق الأوامر والسيولة المؤسسية.",
+    creator: "ChatGPT",
+    gate: "AND",
+    conditions: [
+      {
+        id: "global_rvol",
+        metric: "RVOL",
+        operator: "GREATER_THAN",
+        valueType: "NUMBER",
+        valueNumber: 1.05,
+        timeframe: "5m",
+        sensitivity: 1
+      }
+    ],
+    action: "LONG",
+    allowedRegimes: [
+      "TREND_EXPANSION",
+      "TRENDING",
+      "MOMENTUM_MODE",
+      "LIQUIDITY_SWEEP",
+      "COMPRESSION"
+    ],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 45,
+    leverage: 5,
+    riskPerTrade: 1.0,
+    stopLossMode: "ATR_DYNAMIC",
+    stopLossValue: 1.3,
+    takeProfitMode: "TRAILING_MOMENTUM",
+    takeProfitValue: 2.8,
+    dynamicRegimeProfiles: [
+      {
+        regime: "TREND_EXPANSION",
+        gate: "AND",
+        conditions: [
+          {
+            id: "te_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.05,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.3,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 3.2
+      },
+      {
+        regime: "TRENDING",
+        gate: "AND",
+        conditions: [
+          {
+            id: "tr_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.03,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.3,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.5
+      },
+      {
+        regime: "MOMENTUM_MODE",
+        gate: "OR",
+        conditions: [
+          {
+            id: "mom_oi",
+            metric: "OPEN_INTEREST",
+            operator: "SPIKE",
+            valueType: "NUMBER",
+            valueNumber: 2,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "mom_cvd",
+            metric: "CVD",
+            operator: "DIVERGENCING",
+            valueType: "NUMBER",
+            valueNumber: 0,
+            timeframe: "5m",
+            sensitivity: 0.8
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.2,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 3.5
+      },
+      {
+        regime: "LIQUIDITY_SWEEP",
+        gate: "OR",
+        conditions: [
+          {
+            id: "ls_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.03,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "ls_cvd",
+            metric: "CVD",
+            operator: "DIVERGENCING",
+            valueType: "NUMBER",
+            valueNumber: 0,
+            timeframe: "5m",
+            sensitivity: 0.8
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "SWEEP_LOW_BOUND",
+        stopLossValue: 0.25,
+        takeProfitMode: "FUSION_CASCADE",
+        takeProfitValue: 3.0
+      },
+      {
+        regime: "COMPRESSION",
+        gate: "OR",
+        conditions: [
+          {
+            id: "comp_oi",
+            metric: "OPEN_INTEREST",
+            operator: "SPIKE",
+            valueType: "NUMBER",
+            valueNumber: 2,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "comp_cvd",
+            metric: "CVD",
+            operator: "DIVERGENCING",
+            valueType: "NUMBER",
+            valueNumber: 0,
+            timeframe: "5m",
+            sensitivity: 0.8
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.2,
+        takeProfitMode: "FUSION_CASCADE",
+        takeProfitValue: 4.0
+      },
+      {
+        regime: "DEAD_CHOP",
+        gate: "AND",
+        conditions: [],
+        action: "ALERT_ONLY",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.0
+      },
+      {
+        regime: "TRAP_MODE",
+        gate: "AND",
+        conditions: [],
+        action: "ALERT_ONLY",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.0
+      },
+      {
+        regime: "VIOLENT_VOLATILITY",
+        gate: "AND",
+        conditions: [],
+        action: "ALERT_ONLY",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.0
+      }
+    ],
+    createdAt: "2026-05-31T20:30:00Z"
   }
 ];
 
