@@ -709,7 +709,12 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
   }
 ];
 
-export function TawleefaBuilder() {
+interface TawleefaBuilderProps {
+  watchlist?: any[];
+  settings?: any;
+}
+
+export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuilderProps) {
   const [tawleefas, setTawleefas] = useState<TawleefaConfig[]>([]);
   const [activeTawleefa, setActiveTawleefa] = useState<TawleefaConfig | null>(null);
   
@@ -2311,6 +2316,211 @@ export function TawleefaBuilder() {
 
         </div>
       </div>
+
+      {/* 🟢 TAWLEEFA REAL-TIME MONITOR & DIAGNOSTICS */}
+      {settings?.useTawleefaEngine && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6 animate-fade-in mt-6" id="tawleefa-realtime-monitor" dir="rtl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-800 pb-4 gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-3.5 w-3.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+              </span>
+              <div>
+                <h3 className="font-bold text-slate-100 font-sans text-lg flex items-center gap-2">
+                  <Activity className="text-emerald-400 w-5 h-5 animate-pulse" />
+                  برنامج رصد وتحليل قرارات التوليفة النشطة (Live Diagnostics Monitor)
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  البث الحي لمخرجات وفحوصات محرك التوليفات الذكي. يساعدك على معرفة تفاصيل تصفية السوق والشروط الدقيقة التي منعت صفقات الرموز من الدخول.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5">
+              <Cpu className="text-emerald-400 w-4 h-4 animate-spin" />
+              <div className="text-right">
+                <div className="text-[9px] text-slate-500 uppercase tracking-wider">التوليفة النشطة حالياً بالتداول المبرمج</div>
+                <div className="text-xs font-black text-amber-300">
+                  {settings.activeTawleefaJson ? JSON.parse(settings.activeTawleefaJson).name : 'غير محددة'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {watchlist && watchlist.length > 0 ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+                <table className="w-full text-right border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900/60 border-b border-slate-800 text-slate-400 font-bold">
+                      <th className="px-4 py-3">الرمز</th>
+                      <th className="px-4 py-3">السعر الحالي والسلوك</th>
+                      <th className="px-4 py-3">الريجيم وحالة الفلترة</th>
+                      <th className="px-4 py-3">قرار المحرك</th>
+                      <th className="px-4 py-3">رصد شروط التوليفة التفصيلي (حالة المطابقة الفورية للقيم)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-900/60 font-medium text-slate-200">
+                    {watchlist.map((coin, idx) => {
+                      const decision = coin.decision;
+                      const report = decision?.tawleefaReport;
+                      const hasDecision = !!decision;
+                      const isAttack = decision?.action === 'ATTACK';
+                      const isWaiting = decision?.action === 'WAIT';
+                      const regime = decision?.regime || coin.trend;
+                      const regimeMatch = report ? report.regimeMatch : true;
+
+                      // Calculate metrics match ratio
+                      const completedConditions = report?.conditions?.filter((c: any) => c.isMet).length || 0;
+                      const totalConditions = report?.conditions?.length || 0;
+
+                      return (
+                        <tr key={idx} className="hover:bg-slate-900/30 transition-all">
+                          {/* Symbol */}
+                          <td className="px-4 py-3">
+                            <div className="font-extrabold text-slate-100 flex items-center gap-2">
+                              <span>{coin.symbol}</span>
+                              {coin.priceChange >= 0 ? (
+                                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-500">منظومة القناص الموزعة</span>
+                          </td>
+
+                          {/* Price & Change */}
+                          <td className="px-4 py-3">
+                            <div className="font-bold font-mono text-emerald-300 text-sm">
+                              ${coin.price?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                            </div>
+                            <div className={`text-[10px] font-bold ${coin.priceChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {coin.priceChange >= 0 ? '+' : ''}{coin.priceChange?.toFixed(2)}%
+                            </div>
+                          </td>
+
+                          {/* Regime and allowed match */}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 font-mono">
+                                {regime}
+                              </span>
+                              {!regimeMatch ? (
+                                <span className="text-[9px] text-rose-400 flex items-center gap-1 font-bold">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-rose-400 animate-pulse" />
+                                  الريجيم غير مفعل بالتوليفة ❌
+                                </span>
+                              ) : (
+                                <span className="text-[9px] text-emerald-400 flex items-center gap-1 font-bold">
+                                  <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
+                                  الريجيم مطابق للتوليفة ✅
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Core Action */}
+                          <td className="px-4 py-3">
+                            {isAttack ? (
+                              <div className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-500/15 border border-emerald-500/30 rounded-lg text-[10px] font-black text-emerald-400 shadow-sm shadow-emerald-500/5 animate-pulse">
+                                <Zap className="w-3 h-3" />
+                                ATTACK 🔥 جاهز للدخول
+                              </div>
+                            ) : isWaiting ? (
+                              <div className="inline-flex items-center gap-1 px-3 py-1 bg-slate-800/80 border border-slate-700/50 rounded-lg text-[10px] font-medium text-slate-400">
+                                <Clock className="w-3 h-3 text-slate-500" />
+                                WAITING 🛡️ انتظار الشرط
+                              </div>
+                            ) : (
+                              <span className="text-slate-600 text-[11px] italic">جاري الفحص المجهري...</span>
+                            )}
+                          </td>
+
+                          {/* Live Checklist */}
+                          <td className="px-4 py-3">
+                            {report && report.conditions && report.conditions.length > 0 ? (
+                              <div className="space-y-1.5 max-w-md">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-[10px] text-slate-500">
+                                    المطابقة الإجمالية للشروط: 
+                                  </span>
+                                  <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded ${
+                                    completedConditions === totalConditions 
+                                      ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50' 
+                                      : 'bg-rose-950/40 text-rose-400 border border-rose-900/50'
+                                  }`}>
+                                    {completedConditions} / {totalConditions} استوفيت
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {report.conditions.map((cond: any, cidx: number) => (
+                                    <div 
+                                      key={cidx} 
+                                      className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-[9px] font-mono select-none ${
+                                        cond.isMet 
+                                          ? 'bg-emerald-950/40 text-emerald-400 border-emerald-900/50' 
+                                          : 'bg-rose-950/20 text-rose-400 border-rose-900/30'
+                                      }`}
+                                      title={`الشرط: ${cond.metric} ${cond.operator} ${cond.threshold}. القيمة المقروءة: ${cond.actualValue}`}
+                                    >
+                                      <span className="font-extrabold">{cond.metric}</span>
+                                      <span className="text-slate-500">
+                                        {cond.operator === 'GREATER_THAN' ? '>' : cond.operator === 'LESS_THAN' ? '<' : cond.operator === 'CROSSES_ABOVE' ? '≥' : cond.operator === 'CROSSES_BELOW' ? '≤' : cond.operator}
+                                      </span>
+                                      <span className="text-slate-300 font-bold">{cond.threshold}</span>
+                                      <span className="text-slate-500">|</span>
+                                      <span className="font-bold underline decoration-dotted text-slate-100">
+                                        {cond.actualValue?.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                                      </span>
+                                      <span>{cond.isMet ? '✅' : '❌'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : hasDecision ? (
+                              <div className="text-[10px] text-slate-500 italic">
+                                تم الفحص ولكن لم تتوافق الشروط المبرمجة مع المعايير الفنية الحالية.
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
+                                جاري التحليل التلقائي وحساب المؤشرات التفصيلية...
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-[11px] text-slate-400 leading-relaxed space-y-2">
+                <span className="font-bold text-amber-400 flex items-center gap-1 mb-1">
+                  <Info className="w-3.5 h-3.5" />
+                  دليل تفصيلي لحل مشكلات عدم جودة دخول الصفقات للتوليفة:
+                </span>
+                <p>
+                  1. 💡 **شرط حجم التداول النسبي (RVOL)**: إنّ تحديد عتبة RVOL أكبر من <span className="font-mono text-amber-400 font-bold">1.3</span> قد يؤدي إلى استبعاد معظم الصفقات في الأوقات التي يميل فيها السوق إلى التهدئة وضغط السيولة. لزيادة وتيرة العمليات وتحسين استثمار الفرص اللحظية، جرّب تحرير القيمة إلى <span className="font-mono text-emerald-400 font-bold">1.0</span> أو <span className="font-mono text-emerald-400 font-bold">1.1</span> في نافذة التوليفة.
+                </p>
+                <p>
+                  2. 💡 **شرط الريجيمات النشطة (Allowed Regimes)**: يرصد البوت ريجيم السوق لكل عملة على حدة بشكل فوري. في حال كانت التوليفة مبرمجة لتعمل فقط في ريجيمات التمدد (<span className="font-mono text-emerald-400 font-bold">TREND_EXPANSION</span>)، وصادف دخول العملات في ريجيم الضغط والسيولة المجهرية (<span className="font-mono text-emerald-400 font-bold">COMPRESSION</span>)، سوف يتم استبعاد الدخول فوراً لحماية رأس المال. يرجى مراجعة وتعديل <span className="text-amber-400 font-bold">"الريجيمات الفنية المسموح بها بالتوليفة"</span> بالأعلى.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-44 bg-slate-950 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-slate-500 gap-3">
+              <RefreshCw className="w-8 h-8 animate-spin text-emerald-400/50" />
+              <div className="text-center">
+                <p className="text-slate-300 font-bold ml-1 text-sm">جاري جلب المؤشرات المتطورة وفحص التوليفة في الوقت الحقيقي...</p>
+                <p className="text-[11px] text-slate-600 mt-1">برجاء الانتظار لتحديث البيانات وبثها فوراً من خوادم بايننس الآجلة.</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

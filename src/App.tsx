@@ -1081,7 +1081,7 @@ export default function App() {
           )}
 
           {activeTab === 'flows' && (
-             <TawleefaBuilder />
+             <TawleefaBuilder watchlist={watchlist} settings={settings} />
           )}
 
           {activeTab === 'settings' && (

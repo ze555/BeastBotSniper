@@ -328,6 +328,9 @@ export async function runTradeLoop() {
 
                          await sniper.evaluateSignal(condition, klines, klines, globalContext);
                          
+                         // Save the full Tawleefa engine decision & live diagnostics onto the coin
+                         (coin as any).decision = condition.decision;
+                         
                          if (sniper.getActiveTrades().has(coin.symbol)) {
                              signalFoundInThisLoop = true;
                          } else {
@@ -343,6 +346,16 @@ export async function runTradeLoop() {
                         : settings.useCreativeEngine
                         ? creativeEngine.analyze(klines, takerRatio, sniper.getSettings())
                         : quantum.analyze(klines, takerRatio, sniper.getSettings());
+
+                     // Saveconventional engine decision in the coin
+                     (coin as any).decision = {
+                         regime: coin.trend === 'FLAT' ? 'COMPRESSION' : 'TREND_EXPANSION',
+                         bias: decision.type,
+                         trap: 'NONE',
+                         confidence: (decision.confidence ?? 60) / 100,
+                         action: decision.shouldEnter ? 'ATTACK' : 'WAIT',
+                         reason: decision.reason || (settings.useSteelEngine ? 'STEEL_NO_EDGE' : settings.useCreativeEngine ? 'CREATIVE_NO_EDGE' : 'QUANTUM_NO_EDGE')
+                     };
 
                      if (decision.shouldEnter) {
                           signalFoundInThisLoop = true;

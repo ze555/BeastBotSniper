@@ -26,6 +26,21 @@ export interface EngineDecision {
   confidence: number; // 0 to 1
   action: 'WAIT' | 'ATTACK' | 'SLEEP';
   reason: string;
+  tawleefaReport?: {
+    name: string;
+    gate: 'AND' | 'OR';
+    allowedRegimes: string[];
+    currentRegime: string;
+    regimeMatch: boolean;
+    conditions: {
+      metric: string;
+      operator: string;
+      threshold: number;
+      actualValue: number;
+      isMet: boolean;
+    }[];
+    triggerSignal: boolean;
+  };
 }
 
 export interface Trade {

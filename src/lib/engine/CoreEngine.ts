@@ -116,7 +116,7 @@ export class CoreEngine {
             }
 
             if (activeConfig && Array.isArray(activeConfig.conditions) && activeConfig.conditions.length > 0) {
-              const evaluateConditions = (conditionsList: any[], metricsObj: MarketMetrics) => {
+              const evaluateConditionsDetailed = (conditionsList: any[], metricsObj: MarketMetrics) => {
                 return conditionsList.map((cond: any) => {
                   let actualVal = 0;
                   switch (cond.metric) {
@@ -155,11 +155,19 @@ export class CoreEngine {
                   } else {
                     isTrue = actualVal > cond.valueNumber;
                   }
-                  return isTrue;
+                  
+                  return {
+                    metric: cond.metric,
+                    operator: cond.operator,
+                    threshold: cond.valueNumber,
+                    actualValue: actualVal,
+                    isMet: isTrue
+                  };
                 });
               };
 
-              const conditionsEvaluation = evaluateConditions(activeConfig.conditions, metrics);
+              const detailedConditions = evaluateConditionsDetailed(activeConfig.conditions, metrics);
+              const conditionsEvaluation = detailedConditions.map(c => c.isMet);
 
               let triggerSignal = false;
               if (activeConfig.gate === 'AND') {
@@ -172,6 +180,16 @@ export class CoreEngine {
               const allowedRegimes = tawleefa.allowedRegimes || [];
               const regimeMatch = usingProfile || allowedRegimes.length === 0 || allowedRegimes.includes(currentRegimeName) || allowedRegimes.includes('ANY');
 
+              const tawleefaReportJson = {
+                name: tawleefa.name,
+                gate: activeConfig.gate || 'AND',
+                allowedRegimes: tawleefa.allowedRegimes || [],
+                currentRegime: currentRegimeName,
+                regimeMatch: regimeMatch,
+                conditions: detailedConditions,
+                triggerSignal: triggerSignal
+              };
+
               if (triggerSignal && regimeMatch) {
                 const botBias: 'LONG' | 'SHORT' | 'NEUTRAL' = activeConfig.action === 'LONG' ? 'LONG' : (activeConfig.action === 'SHORT' ? 'SHORT' : 'NEUTRAL');
                 if (botBias !== 'NEUTRAL') {
@@ -182,7 +200,8 @@ export class CoreEngine {
                     trap: trap,
                     confidence: (tawleefa.minMarketConfidence ?? 60) / 100,
                     action: 'ATTACK',
-                    reason: `TAWLEEFA:${tawleefa.name}${usingProfile ? '_PROFILE_' + currentRegimeName : ''}`
+                    reason: `TAWLEEFA:${tawleefa.name}${usingProfile ? '_PROFILE_' + currentRegimeName : ''}`,
+                    tawleefaReport: tawleefaReportJson
                   };
                 }
               }
@@ -194,7 +213,8 @@ export class CoreEngine {
                 trap: TrapType.NONE,
                 confidence: 0,
                 action: 'WAIT',
-                reason: `TAWLEEFA:${tawleefa.name}_${usingProfile ? 'PROFILE_' + currentRegimeName + '_' : ''}WAITING_FOR_TRIGGER`
+                reason: `TAWLEEFA:${tawleefa.name}_${usingProfile ? 'PROFILE_' + currentRegimeName + '_' : ''}WAITING_FOR_TRIGGER`,
+                tawleefaReport: tawleefaReportJson
               };
             }
           }
