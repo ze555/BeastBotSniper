@@ -1120,32 +1120,145 @@ export class SniperEngine {
       }
     }
 
-    // --- 000. FIERCE/SAVAGE RELENTLESS ESCAPE & EXIT ENGINE OVERRIDE ---
-    // If Tawleefa engine is active, and the preset takeProfitMode is FUSION_CASCADE or TRAILING_MOMENTUM,
-    // we bypass standard rules and execute the hyper-proactive Fierce Exit system.
-    let tawleefa: any = null;
+    // --- 000. EVALUATE CUSTOM TAWLEEFA EXIT ONLY ---
+    // If Tawleefa engine is active, we bypass ALL standard stop losses, take profits, trail lock, and other exit engines.
+    // The trade will only exit when the custom Tawleefa rules evaluate to an EXIT_ALL trigger.
     if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
       try {
-        tawleefa = JSON.parse(this.settings.activeTawleefaJson);
-      } catch (err) {}
-    }
+        const tawleefa = JSON.parse(this.settings.activeTawleefaJson);
+        if (tawleefa) {
+          // Map metrics for Tawleefa condition evaluation
+          const metricsObj = {
+            price: currentPrice,
+            openInterest: currentOI !== undefined ? currentOI : (trade.oiHistory && trade.oiHistory.length > 0 ? trade.oiHistory[trade.oiHistory.length - 1] : 0),
+            oiChange: (trade.oiHistory && trade.oiHistory.length > 1) ? (((currentOI !== undefined ? currentOI : trade.oiHistory[trade.oiHistory.length - 1]) - trade.oiHistory[trade.oiHistory.length - 2]) / trade.oiHistory[trade.oiHistory.length - 2]) * 100 : 0,
+            takerRatio: currentTakerRatio !== undefined ? currentTakerRatio : 1.0,
+            rvol: indicators?.klines && indicators.klines.length >= 20 ? (() => {
+              const last20Vols = indicators.klines.slice(-20).map(k => parseFloat(k[5]));
+              const avgVol20 = last20Vols.reduce((a, b) => a + b, 0) / 20;
+              const lastVol = currentVol !== undefined ? currentVol : parseFloat(indicators.klines[indicators.klines.length - 1][5]);
+              return avgVol20 > 0 ? lastVol / avgVol20 : 1.0;
+            })() : 1.0,
+            fundingRate: fundingRate !== undefined ? fundingRate : (trade.fundingRate || 0),
+            rsi: rsi,
+            adx: adx,
+          };
 
-    let ranFierce = false;
-    if (tawleefa) {
-      let targetConfig = tawleefa;
-      const currentRegimeName = adaptiveEval.decision || "TRENDING";
-      
-      if (Array.isArray(tawleefa.dynamicRegimeProfiles) && tawleefa.dynamicRegimeProfiles.length > 0) {
-        const matchedProfile = tawleefa.dynamicRegimeProfiles.find((p: any) => p.regime === currentRegimeName);
-        if (matchedProfile) {
-          targetConfig = matchedProfile;
+          const evalConditions = (conditionsList: any[]) => {
+            return conditionsList.map((cond: any) => {
+              let actualVal = 0;
+              switch (cond.metric) {
+                case 'PRICE': actualVal = metricsObj.price; break;
+                case 'OPEN_INTEREST': actualVal = cond.operator === 'SPIKE' ? (metricsObj.oiChange ?? 0) : (metricsObj.openInterest ?? 0); break;
+                case 'CVD': actualVal = metricsObj.takerRatio ?? 1; break;
+                case 'RVOL': actualVal = metricsObj.rvol; break;
+                case 'TAKER_RATIO': actualVal = metricsObj.takerRatio ?? 1.0; break;
+                case 'FUNDING_RATE': actualVal = metricsObj.fundingRate ?? 0; break;
+                case 'RSI': actualVal = metricsObj.rsi; break;
+                case 'ADX': actualVal = metricsObj.adx; break;
+                default: actualVal = metricsObj.price;
+              }
+
+              let isTrue = false;
+              if (cond.operator === 'GREATER_THAN') {
+                isTrue = actualVal > cond.valueNumber;
+              } else if (cond.operator === 'LESS_THAN') {
+                isTrue = actualVal < cond.valueNumber;
+              } else if (cond.operator === 'CROSSES_ABOVE') {
+                isTrue = actualVal >= cond.valueNumber;
+              } else if (cond.operator === 'CROSSES_BELOW') {
+                isTrue = actualVal <= cond.valueNumber;
+              } else if (cond.operator === 'SPIKE') {
+                if (cond.metric === 'OPEN_INTEREST') {
+                  isTrue = Math.abs(metricsObj.oiChange) >= cond.valueNumber;
+                } else if (cond.metric === 'RVOL') {
+                  isTrue = metricsObj.rvol >= cond.valueNumber;
+                } else {
+                  isTrue = actualVal >= cond.valueNumber;
+                }
+              } else if (cond.operator === 'DIVERGENCING') {
+                isTrue = (metricsObj.takerRatio > 1.2 && metricsObj.rsi < 45) || (metricsObj.takerRatio < 0.8 && metricsObj.rsi > 55);
+              } else if (cond.operator === 'SWEEP_LOW_HIGH' || cond.operator === 'EXHAUSTION') {
+                isTrue = metricsObj.rsi > 70 || metricsObj.rsi < 30;
+              } else {
+                isTrue = actualVal > cond.valueNumber;
+              }
+              return isTrue;
+            });
+          };
+
+          let activeConfig = tawleefa;
+          const currentRegimeName = adaptiveEval.decision || "TRENDING";
+          if (Array.isArray(tawleefa.dynamicRegimeProfiles) && tawleefa.dynamicRegimeProfiles.length > 0) {
+            const matchedProfile = tawleefa.dynamicRegimeProfiles.find((p: any) => p.regime === currentRegimeName);
+            if (matchedProfile) {
+              activeConfig = matchedProfile;
+            }
+          }
+
+          let exitsTriggered = false;
+
+          if (activeConfig && Array.isArray(activeConfig.conditions) && activeConfig.conditions.length > 0 && activeConfig.action === 'EXIT_ALL') {
+            const conditionsValues = evalConditions(activeConfig.conditions);
+            if (activeConfig.gate === 'OR') {
+              exitsTriggered = conditionsValues.some(v => v);
+            } else {
+              exitsTriggered = conditionsValues.every(v => v);
+            }
+          }
+
+          if (!exitsTriggered && tawleefa.action === 'EXIT_ALL' && Array.isArray(tawleefa.conditions) && tawleefa.conditions.length > 0) {
+            const conditionsValues = evalConditions(tawleefa.conditions);
+            if (tawleefa.gate === 'OR') {
+              exitsTriggered = conditionsValues.some(v => v);
+            } else {
+              exitsTriggered = conditionsValues.every(v => v);
+            }
+          }
+
+          if (!exitsTriggered && Array.isArray(tawleefa.dynamicRegimeProfiles)) {
+            for (const profile of tawleefa.dynamicRegimeProfiles) {
+              if (profile.action === 'EXIT_ALL' && Array.isArray(profile.conditions) && profile.conditions.length > 0) {
+                const conditionsValues = evalConditions(profile.conditions);
+                let triggered = false;
+                if (profile.gate === 'OR') {
+                  triggered = conditionsValues.some(v => v);
+                } else {
+                  triggered = conditionsValues.every(v => v);
+                }
+                if (triggered) {
+                  exitsTriggered = true;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Update basic metrics (current PnL, highest/lowest price, etc.)
+          const managerVerdict = this.manager.manage(trade as any, currentPrice, {
+            strictFastBreakevenPerc: this.settings.strictFastBreakevenPerc,
+            tradingFeeRate: this.settings.tradingFeeRate,
+            leverage: this.settings.leverage
+          });
+
+          if (managerVerdict.updatedTrade) {
+            Object.assign(trade, managerVerdict.updatedTrade);
+            saveTrade(trade);
+            this.activeTrades.set(symbol, trade);
+          }
+
+          if (exitsTriggered) {
+            console.log(`[⭐ TAWLEEFA EXIT_ALL] Triggered exit conditions matching EXIT_ALL for ${symbol}`);
+            addLog(`🚨 خروج التوليفة المطلق: تصفية صفقة ${symbol} بناءً على التوليفة "${tawleefa.name}"`, 'warn');
+            await this.closeTrade(trade, currentPrice, `TAWLEEFA_EXIT_ALL: ${tawleefa.name}`);
+            return;
+          } else {
+            // Bypass standard rules: only rely on Tawleefa EXIT action!
+            return;
+          }
         }
-      }
-
-      const activeTpMode = targetConfig.takeProfitMode;
-      if (activeTpMode === 'FUSION_CASCADE' || activeTpMode === 'TRAILING_MOMENTUM') {
-        await this.executeFierceExitEngine(trade, currentPrice, targetConfig, indicators, currentTakerRatio);
-        ranFierce = true;
+      } catch (err) {
+        console.error("Error executing custom tawleefa exit evaluation:", err);
       }
     } else if (this.settings.useFierceExitEngine) {
       // Create independent target config from global fierce setting parameters
@@ -1154,11 +1267,7 @@ export class SniperEngine {
         takeProfitMode: this.settings.fierceTakeProfitMode ?? 'FUSION_CASCADE'
       };
       await this.executeFierceExitEngine(trade, currentPrice, independentConfig, indicators, currentTakerRatio);
-      ranFierce = true;
-    }
-
-    if (ranFierce) {
-      return; // Absolute authority complete handoff: positions are managed ONLY by the Fierce Exit Engine, completely ignoring and bypassing all other exit systems!
+      return; // Absolute authority complete handoff
     }
 
     // --- SPECIAL HANDLING: CREATIVE POSITION STATE MACHINE (Gap 6 / Point 6) ---
@@ -1955,6 +2064,10 @@ export class SniperEngine {
   }
 
   public async smartExit(symbol: string, currentPrice: number, reason: string) {
+    if (this.settings.useTawleefaEngine) {
+      console.log(`[SMART EXIT] Bypassed for ${symbol} because Tawleefa Engine is active.`);
+      return;
+    }
     if (this.settings.overrideAllWithAdaptive) {
       console.log(`[SMART EXIT] Bypassed for ${symbol} because Hegemony is active.`);
       return;
@@ -1970,15 +2083,11 @@ export class SniperEngine {
   }
 
   public async wiseExit(symbol: string, currentPrice: number, klines: any[]) {
-    const isFierceExitActive = !!this.settings.useFierceExitEngine || (() => {
-      if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
-        try {
-          const tawleefa = JSON.parse(this.settings.activeTawleefaJson);
-          return (tawleefa.takeProfitMode === 'FUSION_CASCADE' || tawleefa.takeProfitMode === 'TRAILING_MOMENTUM');
-        } catch (e) {}
-      }
-      return false;
-    })();
+    if (this.settings.useTawleefaEngine) {
+      console.log(`[WISE EXIT] Bypassed for ${symbol} because Tawleefa Engine is active.`);
+      return;
+    }
+    const isFierceExitActive = !!this.settings.useFierceExitEngine;
 
     if (isFierceExitActive) {
       console.log(`[WISE EXIT] Bypassed for ${symbol} because Fierce Exit is active.`);
@@ -2056,21 +2165,13 @@ export class SniperEngine {
 
   private async closeTrade(trade: Trade, exitPrice: number, reason: string) {
     // Absolute override: if Fierce Exit is active, cancel and abort ANY non-fierce exit decision!
-    const isFierceExitActive = !!this.settings.useFierceExitEngine || (() => {
-      if (this.settings.useTawleefaEngine && this.settings.activeTawleefaJson) {
-        try {
-          const tawleefa = JSON.parse(this.settings.activeTawleefaJson);
-          return (tawleefa.takeProfitMode === 'FUSION_CASCADE' || tawleefa.takeProfitMode === 'TRAILING_MOMENTUM');
-        } catch (e) {}
-      }
-      return false;
-    })();
+    const isFierceExitActive = !!this.settings.useFierceExitEngine;
 
     if (isFierceExitActive) {
       const isFierceReason = reason.includes("SLY_FOX_ESCAPE") || 
                              reason.includes("FIERCE_") || 
                              reason.includes("SAVAGE_");
-      if (!isFierceReason) {
+      if (!isFierceReason && !reason.startsWith("TAWLEEFA_")) {
         console.log(`[FIERCE OVERRIDE] ⚠️ BLOCKED non-fierce exit decision: "${reason}" for ${trade.symbol}. Fierce Exit has exclusive authority.`);
         return;
       }
