@@ -891,6 +891,218 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       }
     ],
     createdAt: "2026-06-01T14:43:00Z"
+  },
+  {
+    id: "sentinel_intel_hybrid_v3",
+    name: "Sentinel Intelligence Hybrid V3",
+    description: "توليفة تكيفية ذكية مدمجة: حماية صارمة لرأس المال عند +1R مع تتبع أرباح طماع ومدروس يصل إلى 5.0R في ظروف الاختراق والضغط السعري.",
+    creator: "Sentinel AI Engine",
+    gate: "AND",
+    conditions: [
+      {
+        id: "global_rvol",
+        metric: "RVOL",
+        operator: "GREATER_THAN",
+        valueType: "NUMBER",
+        valueNumber: 1.22,
+        timeframe: "5m",
+        sensitivity: 1
+      },
+      {
+        id: "global_taker",
+        metric: "TAKER_RATIO",
+        operator: "GREATER_THAN",
+        valueType: "NUMBER",
+        valueNumber: 1.04,
+        timeframe: "5m",
+        sensitivity: 1
+      }
+    ],
+    action: "LONG",
+    allowedRegimes: [
+      "TREND_EXPANSION",
+      "TRENDING",
+      "MOMENTUM_MODE",
+      "LIQUIDITY_SWEEP",
+      "COMPRESSION"
+    ],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 60,
+    leverage: 8,
+    riskPerTrade: 1.0,
+    stopLossMode: "ATR_DYNAMIC",
+    stopLossValue: 1.4,
+    takeProfitMode: "TRAILING_MOMENTUM",
+    takeProfitValue: 3.5,
+    dynamicRegimeProfiles: [
+      {
+        regime: "TREND_EXPANSION",
+        gate: "AND",
+        conditions: [
+          {
+            id: "te_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.08,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "te_oi",
+            metric: "OPEN_INTEREST",
+            operator: "SPIKE",
+            valueType: "NUMBER",
+            valueNumber: 2,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.3,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 4.5
+      },
+      {
+        regime: "TRENDING",
+        gate: "AND",
+        conditions: [
+          {
+            id: "trend_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.06,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "trend_rvol",
+            metric: "RVOL",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.10,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.2,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 3.5
+      },
+      {
+        regime: "MOMENTUM_MODE",
+        gate: "AND",
+        conditions: [
+          {
+            id: "mom_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.18,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "mom_oi",
+            metric: "OPEN_INTEREST",
+            operator: "SPIKE",
+            valueType: "NUMBER",
+            valueNumber: 1.5,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.1,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 4.2
+      },
+      {
+        regime: "LIQUIDITY_SWEEP",
+        gate: "AND",
+        conditions: [
+          {
+            id: "liq_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.10,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "SWEEP_LOW_BOUND",
+        stopLossValue: 0.40,
+        takeProfitMode: "FUSION_CASCADE",
+        takeProfitValue: 3.2
+      },
+      {
+        regime: "COMPRESSION",
+        gate: "AND",
+        conditions: [
+          {
+            id: "comp_oi",
+            metric: "OPEN_INTEREST",
+            operator: "SPIKE",
+            valueType: "NUMBER",
+            valueNumber: 3,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "comp_rvol",
+            metric: "RVOL",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
+            valueNumber: 1.25,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.2,
+        takeProfitMode: "FUSION_CASCADE",
+        takeProfitValue: 5.0
+      },
+      {
+        regime: "TRAP_MODE",
+        gate: "AND",
+        conditions: [],
+        action: "ALERT_ONLY",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.0
+      },
+      {
+        regime: "DEAD_CHOP",
+        gate: "AND",
+        conditions: [],
+        action: "ALERT_ONLY",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.0
+      },
+      {
+        regime: "VIOLENT_VOLATILITY",
+        gate: "AND",
+        conditions: [],
+        action: "ALERT_ONLY",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 2.0
+      }
+    ],
+    createdAt: "2026-06-01T15:02:00Z"
   }
 ];
 
