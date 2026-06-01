@@ -112,6 +112,10 @@ export interface Trade {
     fundingRate: number;
   };
   adaptiveHistoryLogs?: any[];
+  entryRegime?: string;
+  stopMoved?: boolean;
+  partial1Taken?: boolean;
+  partial2Taken?: boolean;
 }
 
 export interface MarketCondition {
