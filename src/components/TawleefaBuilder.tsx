@@ -708,9 +708,9 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     createdAt: '2026-05-29T21:30:00Z'
   },
   {
-    id: "adaptive_regime_alpha_v1",
-    name: "Adaptive Regime Alpha",
-    description: "نسخة هجومية متوازنة تعتمد على تدفق الأوامر والسيولة المؤسسية.",
+    id: "adaptive_regime_alpha_v2",
+    name: "Adaptive Regime Alpha V2",
+    description: "نسخة محسنة لرفع جودة الدخول وتقليل ضربات الوقف مع الحفاظ على تدفق الصفقات.",
     creator: "ChatGPT",
     gate: "AND",
     conditions: [
@@ -719,7 +719,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: "RVOL",
         operator: "GREATER_THAN",
         valueType: "NUMBER",
-        valueNumber: 1.05,
+        valueNumber: 1.15,
         timeframe: "5m",
         sensitivity: 1
       }
@@ -733,13 +733,13 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       "COMPRESSION"
     ],
     btcAlignmentRequired: false,
-    minMarketConfidence: 45,
+    minMarketConfidence: 58,
     leverage: 5,
     riskPerTrade: 1.0,
     stopLossMode: "ATR_DYNAMIC",
-    stopLossValue: 1.3,
+    stopLossValue: 1.4,
     takeProfitMode: "TRAILING_MOMENTUM",
-    takeProfitValue: 2.8,
+    takeProfitValue: 3.0,
     dynamicRegimeProfiles: [
       {
         regime: "TREND_EXPANSION",
@@ -750,6 +750,35 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: "TAKER_RATIO",
             operator: "GREATER_THAN",
             valueType: "NUMBER",
+            valueNumber: 1.08,
+            timeframe: "5m",
+            sensitivity: 1
+          },
+          {
+            id: "te_oi",
+            metric: "OPEN_INTEREST",
+            operator: "SPIKE",
+            valueType: "NUMBER",
+            valueNumber: 2,
+            timeframe: "5m",
+            sensitivity: 1
+          }
+        ],
+        action: "LONG",
+        stopLossMode: "ATR_DYNAMIC",
+        stopLossValue: 1.5,
+        takeProfitMode: "TRAILING_MOMENTUM",
+        takeProfitValue: 4.0
+      },
+      {
+        regime: "TRENDING",
+        gate: "AND",
+        conditions: [
+          {
+            id: "trend_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
+            valueType: "NUMBER",
             valueNumber: 1.05,
             timeframe: "5m",
             sensitivity: 1
@@ -757,51 +786,22 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         ],
         action: "LONG",
         stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.3,
+        stopLossValue: 1.4,
         takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 3.2
-      },
-      {
-        regime: "TRENDING",
-        gate: "AND",
-        conditions: [
-          {
-            id: "tr_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.03,
-            timeframe: "5m",
-            sensitivity: 1
-          }
-        ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.3,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.5
+        takeProfitValue: 2.8
       },
       {
         regime: "MOMENTUM_MODE",
-        gate: "OR",
+        gate: "AND",
         conditions: [
           {
-            id: "mom_oi",
-            metric: "OPEN_INTEREST",
-            operator: "SPIKE",
+            id: "mom_taker",
+            metric: "TAKER_RATIO",
+            operator: "GREATER_THAN",
             valueType: "NUMBER",
-            valueNumber: 2,
+            valueNumber: 1.2,
             timeframe: "5m",
             sensitivity: 1
-          },
-          {
-            id: "mom_cvd",
-            metric: "CVD",
-            operator: "DIVERGENCING",
-            valueType: "NUMBER",
-            valueNumber: 0,
-            timeframe: "5m",
-            sensitivity: 0.8
           }
         ],
         action: "LONG",
@@ -812,36 +812,27 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       },
       {
         regime: "LIQUIDITY_SWEEP",
-        gate: "OR",
+        gate: "AND",
         conditions: [
           {
-            id: "ls_taker",
+            id: "liq_taker",
             metric: "TAKER_RATIO",
             operator: "GREATER_THAN",
             valueType: "NUMBER",
-            valueNumber: 1.03,
+            valueNumber: 1.08,
             timeframe: "5m",
             sensitivity: 1
-          },
-          {
-            id: "ls_cvd",
-            metric: "CVD",
-            operator: "DIVERGENCING",
-            valueType: "NUMBER",
-            valueNumber: 0,
-            timeframe: "5m",
-            sensitivity: 0.8
           }
         ],
         action: "LONG",
         stopLossMode: "SWEEP_LOW_BOUND",
-        stopLossValue: 0.25,
+        stopLossValue: 0.35,
         takeProfitMode: "FUSION_CASCADE",
         takeProfitValue: 3.0
       },
       {
         regime: "COMPRESSION",
-        gate: "OR",
+        gate: "AND",
         conditions: [
           {
             id: "comp_oi",
@@ -853,23 +844,23 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             sensitivity: 1
           },
           {
-            id: "comp_cvd",
-            metric: "CVD",
-            operator: "DIVERGENCING",
+            id: "comp_rvol",
+            metric: "RVOL",
+            operator: "GREATER_THAN",
             valueType: "NUMBER",
-            valueNumber: 0,
+            valueNumber: 1.2,
             timeframe: "5m",
-            sensitivity: 0.8
+            sensitivity: 1
           }
         ],
         action: "LONG",
         stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.2,
+        stopLossValue: 1.3,
         takeProfitMode: "FUSION_CASCADE",
         takeProfitValue: 4.0
       },
       {
-        regime: "DEAD_CHOP",
+        regime: "TRAP_MODE",
         gate: "AND",
         conditions: [],
         action: "ALERT_ONLY",
@@ -879,7 +870,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         takeProfitValue: 2.0
       },
       {
-        regime: "TRAP_MODE",
+        regime: "DEAD_CHOP",
         gate: "AND",
         conditions: [],
         action: "ALERT_ONLY",
@@ -899,7 +890,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         takeProfitValue: 2.0
       }
     ],
-    createdAt: "2026-05-31T20:30:00Z"
+    createdAt: "2026-06-01T14:43:00Z"
   }
 ];
 
