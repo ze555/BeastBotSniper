@@ -1172,236 +1172,183 @@ export class SniperEngine {
           }
 
           //--------------------------------
-          // 1. Capital Protection (حماية رأس المال)
-          //--------------------------------
-          if (profitR >= 1.0 && !trade.stopMoved) {
-            trade.sl = trade.entryPrice;
-            trade.stopMoved = true;
-            trade.isBreakeven = true;
-            console.log(`[⭐ TAWLEEFA CAP-PROTECT] Moved stop loss to Break Even (${trade.entryPrice}) for ${symbol} at profitR = ${profitR.toFixed(2)}`);
-            addLog(`🔒 حماية رأس المال: تم نقل وقف الخسارة إلى سعر الدخول لصفقة ${symbol} عند تحقيق +1.0R`, 'info');
-            saveTrade(trade);
-            this.activeTrades.set(symbol, trade);
-          }
-
-          //--------------------------------
-          // 2. Partial profit taking (جني أرباح جزئي)
-          //--------------------------------
-          if (profitR >= 1.5 && !trade.partial1Taken) {
-            const reduceFraction = 0.30;
-            const currentPnl = trade.pnl || 0;
-            const chunkPnl = currentPnl * reduceFraction;
-            trade.realizedPnl = (trade.realizedPnl || 0) + chunkPnl;
-            
-            const prevAmount = trade.amount;
-            trade.amount = trade.amount * (1 - reduceFraction);
-            trade.partial1Taken = true;
-            trade.isPartialProfitTaken = true;
-            trade.status = 'TP1_HIT';
-            
-            console.log(`[⭐ TAWLEEFA PARTIAL 1] 💸 Taken 30% partial profit at +1.5R for ${symbol}. Remaining Amount: ${trade.amount}$`);
-            addLog(`💸 جني أرباح جزئي أول (30%): تصفية جزء من صفقة ${symbol} عند تحقيق +1.5R. المتبقي: ${trade.amount.toFixed(2)}$`, 'success');
-            
-            if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
-              try {
-                const side = trade.type === 'LONG' ? 'sell' : 'buy';
-                const quantityToClose = (prevAmount * reduceFraction) / currentPrice;
-                const roundedAmount = this.exchange.amountToPrecision(symbol, quantityToClose);
-                await this.exchange.createOrder(symbol, 'market', side, roundedAmount);
-              } catch (e: any) {
-                console.error(`[BINANCE] Tawleefa Partial 1 Order failed: ${e.message}`);
-              }
-            }
-            saveTrade(trade);
-            this.activeTrades.set(symbol, trade);
-          }
-
-          if (profitR >= 3.0 && !trade.partial2Taken) {
-            const reduceFraction = 0.30;
-            const currentPnl = trade.pnl || 0;
-            const chunkPnl = currentPnl * reduceFraction;
-            trade.realizedPnl = (trade.realizedPnl || 0) + chunkPnl;
-            
-            const prevAmount = trade.amount;
-            trade.amount = trade.amount * (1 - reduceFraction);
-            trade.partial2Taken = true;
-            trade.isPartialProfitTaken = true;
-            trade.status = 'TP2_HIT';
-            
-            console.log(`[⭐ TAWLEEFA PARTIAL 2] 💸 Taken 30% partial profit at +3.0R for ${symbol}. Remaining Amount: ${trade.amount}$`);
-            addLog(`💸 جني أرباح جزئي ثانٍ (30%): تصفية جزء إضافي من صفقة ${symbol} عند تحقيق +3.0R. المتبقي: ${trade.amount.toFixed(2)}$`, 'success');
-            
-            if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
-              try {
-                const side = trade.type === 'LONG' ? 'sell' : 'buy';
-                const quantityToClose = (prevAmount * reduceFraction) / currentPrice;
-                const roundedAmount = this.exchange.amountToPrecision(symbol, quantityToClose);
-                await this.exchange.createOrder(symbol, 'market', side, roundedAmount);
-              } catch (e: any) {
-                console.error(`[BINANCE] Tawleefa Partial 2 Order failed: ${e.message}`);
-              }
-            }
-            saveTrade(trade);
-            this.activeTrades.set(symbol, trade);
-          }
-
-          //--------------------------------
-          // 3. Dynamic Regime Rules
+          // 1. DYNAMIC EXIT REGIME PROFILE SELECTION
           //--------------------------------
           const evaluationRegime = trade.entryRegime || adaptiveEval.decision || 'TRENDING';
-          let decision: 'HOLD' | 'TRAIL_TIGHT' | 'EXIT_NOW' = 'HOLD';
+          const exitProfiles = tawleefa.dynamicExitProfiles || [];
+          const profile = exitProfiles.find((p: any) => p.regime === evaluationRegime);
 
-          const cvdBearishDivergence = (metricsObj.takerRatio < 0.95 && metricsObj.oiChange < -1);
-          const tradeAgeMinutes = (Date.now() - trade.entryTime) / 60000;
+          let decision: 'HOLD' | 'EXIT_NOW' = 'HOLD';
+          let exitNowBecauseOfHardExit = false;
+          let exitNowBecauseOfConditions = false;
+          let exitReasonDetail = "";
 
-          switch (evaluationRegime) {
-            case 'TREND_EXPANSION':
-              if (adx < 20) {
-                decision = 'TRAIL_TIGHT';
-                break;
-              }
-              if (metricsObj.rvol < 1.0) {
-                decision = 'TRAIL_TIGHT';
-                break;
-              }
-              if (cvdBearishDivergence) {
-                decision = 'EXIT_NOW';
-                break;
-              }
-              decision = 'HOLD';
-              break;
-
-            case 'TRENDING':
-              if (profitR >= 3.0) {
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (metricsObj.takerRatio < 1.0) {
-                decision = 'TRAIL_TIGHT';
-                break;
-              }
-              decision = 'HOLD';
-              break;
-
-            case 'MOMENTUM_MODE':
-              // TIME STOP: MOMENTUM - 45 minutes limit for achieving +0.5R
-              if (tradeAgeMinutes >= 45 && profitR < 0.5) {
-                console.log(`[⭐ TAWLEEFA TIME STOP] MOMENTUM Time Stop triggered for ${symbol}. Age: ${tradeAgeMinutes.toFixed(1)}m`);
-                addLog(`⏳ وقف زمني لتوليفة الزخم: إغلاق صفقة ${symbol} لعدم إحراز +0.5R خلال 45 دقيقة`, 'warn');
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (metricsObj.oiChange < 0) { // OPEN_INTEREST_SPIKE_ENDED
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (metricsObj.takerRatio < 1.02) {
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (profitR >= 2.5) {
-                decision = 'TRAIL_TIGHT'; // Weakness 1 fix: return TRAIL_TIGHT instead of EXIT_NOW
-                break;
-              }
-              decision = 'HOLD';
-              break;
-
-            case 'LIQUIDITY_SWEEP':
-              // TIME STOP: LIQUIDITY SWEEP - 30 minutes limit for achieving +0.5R
-              if (tradeAgeMinutes >= 30 && profitR < 0.5) {
-                console.log(`[⭐ TAWLEEFA TIME STOP] LIQUIDITY_SWEEP Time Stop triggered for ${symbol}. Age: ${tradeAgeMinutes.toFixed(1)}m`);
-                addLog(`⏳ وقف زمني لسيولة السحب: إغلاق صفقة ${symbol} لعدم إحراز +0.5R خلال 30 دقيقة`, 'warn');
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (profitR >= 2.0) {
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (cvdBearishDivergence) {
-                decision = 'EXIT_NOW';
-                break;
-              }
-              decision = 'HOLD';
-              break;
-
-            case 'COMPRESSION':
-              // TIME STOP: COMPRESSION - 90 minutes limit to start explosion (+0.5R)
-              if (tradeAgeMinutes >= 90 && profitR < 0.5) {
-                console.log(`[⭐ TAWLEEFA TIME STOP] COMPRESSION Time Stop triggered for ${symbol}. Age: ${tradeAgeMinutes.toFixed(1)}m`);
-                addLog(`⏳ وقف زمني لتوليفة الضغط: إغلاق صفقة ${symbol} لعدم بدء الانفجار السعري (+0.5R) خلال 90 دقيقة`, 'warn');
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (metricsObj.rvol < 0.8 && metricsObj.oiChange < -1) { // Weakness 3 fix
-                decision = 'EXIT_NOW';
-                break;
-              }
-              if (metricsObj.oiChange < 0) { // OPEN_INTEREST_FALLING
-                decision = 'TRAIL_TIGHT';
-                break;
-              }
-              decision = 'HOLD';
-              break;
-          }
-
-          //--------------------------------
-          // 4. Global FailSafe Rules
-          //--------------------------------
-          if (decision === 'HOLD') {
-            const atrPercValue = (() => {
-              if (klines && klines.length >= 14) {
-                const trVals: number[] = [];
-                const len = klines.length;
-                for (let i = len - 14; i < len; i++) {
-                  const k = klines[i];
-                  const high = parseFloat(k[2]);
-                  const low = parseFloat(k[3]);
-                  if (i === len - 14) {
-                    trVals.push(high - low);
-                  } else {
-                    const prevClose = parseFloat(klines[i - 1][4]);
-                    trVals.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
-                  }
-                }
-                const atrVal = trVals.reduce((sum, val) => sum + val, 0) / trVals.length;
-                return currentPrice > 0 ? (atrVal / currentPrice) * 100 : 0;
-              }
-              return 0;
-            })();
-
-            if (atrPercValue > 5) {
-              decision = 'EXIT_NOW';
-              console.log(`[⭐ TAWLEEFA FAILSAFE] ATR Percent ${atrPercValue.toFixed(2)}% > 5% triggered EXIT_NOW for ${symbol}`);
-            } else if (metricsObj.rvol < 0.9) {
-              decision = 'TRAIL_TIGHT';
-              console.log(`[⭐ TAWLEEFA FAILSAFE] RVOL ${metricsObj.rvol.toFixed(2)} < 0.9 triggered TRAIL_TIGHT for ${symbol}`);
+          // Helper function to evaluate dynamic exit conditions
+          const evaluateExitConditionDetail = (cond: any) => {
+            let actualVal = 0;
+            const rsiVal = rsi !== undefined ? rsi : 50;
+            const adxVal = adx !== undefined ? adx : 25;
+            switch (cond.metric) {
+              case 'PRICE': actualVal = currentPrice; break;
+              case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
+              case 'CVD': actualVal = metricsObj.takerRatio; break;
+              case 'RVOL': actualVal = metricsObj.rvol; break;
+              case 'TAKER_RATIO': actualVal = metricsObj.takerRatio; break;
+              case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
+              case 'RSI': actualVal = rsiVal; break;
+              case 'ADX': actualVal = adxVal; break;
+              default: actualVal = currentPrice;
             }
-          }
 
-          // Execute physical exit / stop updates based on final decision state
-          if (decision === 'EXIT_NOW') {
-            console.log(`[⭐ TAWLEEFA EXIT_NOW] Triggered exit conditions matching EXIT_NOW for ${symbol}`);
-            addLog(`🚨 خروج التوليفة المطلق: تصفية صفقة ${symbol} فوراً بناءً على قواعد التوليفة "${tawleefa.name}"`, 'warn');
-            await this.closeTrade(trade, currentPrice, `TAWLEEFA_EXIT_NOW: ${tawleefa.name}`);
-            return;
-          } else if (decision === 'TRAIL_TIGHT') {
-            const smartSl = this.calculateSmartTightStop(trade, currentPrice);
-            if (trade.sl !== smartSl) {
-              trade.sl = smartSl;
+            let isTrue = false;
+            if (cond.operator === 'GREATER_THAN') {
+              isTrue = actualVal > cond.valueNumber;
+            } else if (cond.operator === 'LESS_THAN') {
+              isTrue = actualVal < cond.valueNumber;
+            } else if (cond.operator === 'CROSSES_ABOVE') {
+              isTrue = actualVal >= cond.valueNumber;
+            } else if (cond.operator === 'CROSSES_BELOW') {
+              isTrue = actualVal <= cond.valueNumber;
+            } else if (cond.operator === 'SPIKE') {
+              isTrue = Math.abs(actualVal) >= cond.valueNumber;
+            } else {
+              isTrue = actualVal > cond.valueNumber;
+            }
+            return isTrue;
+          };
+
+          if (profile) {
+            // A. Dynamic Breakeven R (Capital Protection)
+            if (profile.breakevenR !== undefined && profitR >= profile.breakevenR && !trade.stopMoved) {
+              trade.sl = trade.entryPrice;
+              trade.stopMoved = true;
+              trade.isBreakeven = true;
+              console.log(`[⭐ TAWLEEFA DYNAMIC CAP-PROTECT] Moved stop loss to Break Even (${trade.entryPrice}) for ${symbol} at profitR = ${profitR.toFixed(2)}`);
+              addLog(`🔒 حماية رأس المال الديناميكية: تم نقل وقف الخسارة إلى سعر الدخول لصفقة ${symbol} عند تحقيق +${profile.breakevenR}R`, 'info');
               saveTrade(trade);
               this.activeTrades.set(symbol, trade);
-              console.log(`[⭐ TAWLEEFA TRAIL_TIGHT] Tightened Stop Loss for ${symbol} to ${smartSl}`);
             }
 
-            const isLong = trade.type === 'LONG';
-            const slHit = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
-            if (slHit) {
-              console.log(`[⭐ TAWLEEFA SL HIT] Price crossed tightened stop loss ${trade.sl} for ${symbol} at ${currentPrice}`);
-              addLog(`🚨 خروج التوليفة (تتبع ضيق): تصفية صفقة ${symbol} بناءً على ملامسة وقف الخسارة المشدود عند ${trade.sl}`, 'warn');
-              await this.closeTrade(trade, currentPrice, `TAWLEEFA_TRAIL_TIGHT_HIT: ${tawleefa.name}`);
-              return;
+            // B. Dynamic Partials taking
+            if (profile.partials && profile.partials.length > 0) {
+              if (!trade.takenPartials) {
+                trade.takenPartials = [];
+              }
+              for (const p of profile.partials) {
+                if (profitR >= p.profitR && !trade.takenPartials.includes(p.profitR)) {
+                  const reduceFraction = p.closePercent / 100;
+                  const currentPnl = trade.pnl || 0;
+                  const chunkPnl = currentPnl * reduceFraction;
+                  trade.realizedPnl = (trade.realizedPnl || 0) + chunkPnl;
+                  
+                  const prevAmount = trade.amount;
+                  trade.amount = trade.amount * (1 - reduceFraction);
+                  
+                  trade.takenPartials.push(p.profitR);
+                  trade.isPartialProfitTaken = true;
+                  trade.status = 'TP1_HIT'; // Align with UI expectations
+                  
+                  console.log(`[⭐ TAWLEEFA DYNAMIC PARTIAL] 💸 Taken ${p.closePercent}% partial profit at +${p.profitR}R for ${symbol}. Remaining Amount: ${trade.amount}$`);
+                  addLog(`💸 جني أرباح جزئي ديناميكي (${p.closePercent}%): تصفية جزء من صفقة ${symbol} عند تحقيق +${p.profitR}R. المتبقي: ${trade.amount.toFixed(2)}$`, 'success');
+                  
+                  if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
+                    try {
+                      const side = trade.type === 'LONG' ? 'sell' : 'buy';
+                      const quantityToClose = (prevAmount * reduceFraction) / currentPrice;
+                      const roundedAmount = this.exchange.amountToPrecision(symbol, quantityToClose);
+                      await this.exchange.createOrder(symbol, 'market', side, roundedAmount);
+                    } catch (e: any) {
+                      console.error(`[BINANCE] Dynamic Tawleefa Partial Order failed: ${e.message}`);
+                    }
+                  }
+                  saveTrade(trade);
+                  this.activeTrades.set(symbol, trade);
+                }
+              }
             }
+
+            // C. Dynamic Hard Exit R
+            exitNowBecauseOfHardExit = false;
+            exitNowBecauseOfConditions = false;
+            exitReasonDetail = "";
+
+            if (profile.hardExitR !== undefined && profitR >= profile.hardExitR) {
+              decision = 'EXIT_NOW';
+              exitNowBecauseOfHardExit = true;
+              exitReasonDetail = `تحقيق هدف الربح الصلب الديناميكي (Hard Exit R) والمستهدف (+${profile.hardExitR}R)، بينما المحقق حالياً هو (+${profitR.toFixed(2)}R)`;
+              console.log(`[⭐ TAWLEEFA DYNAMIC HARD EXIT] profitR ${profitR.toFixed(2)} >= hardExitR ${profile.hardExitR} for ${symbol}`);
+            }
+
+            // D. Dynamic Exit Conditions Evaluation
+            if (profile.exitConditions && profile.exitConditions.length > 0) {
+              const condDetails = profile.exitConditions.map((cond: any) => {
+                let actualVal = 0;
+                const rsiVal = rsi !== undefined ? rsi : 50;
+                const adxVal = adx !== undefined ? adx : 25;
+                switch (cond.metric) {
+                  case 'PRICE': actualVal = currentPrice; break;
+                  case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
+                  case 'CVD': actualVal = metricsObj.takerRatio; break;
+                  case 'RVOL': actualVal = metricsObj.rvol; break;
+                  case 'TAKER_RATIO': actualVal = metricsObj.takerRatio; break;
+                  case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
+                  case 'RSI': actualVal = rsiVal; break;
+                  case 'ADX': actualVal = adxVal; break;
+                  default: actualVal = currentPrice;
+                }
+                const isTrue = evaluateExitConditionDetail(cond);
+                const opArabic = cond.operator === 'GREATER_THAN' ? 'أكبر من 🡵' :
+                                 cond.operator === 'LESS_THAN' ? 'أصغر من 🡶' :
+                                 cond.operator === 'CROSSES_ABOVE' ? 'تجاوز لأعلى 🡵' :
+                                 cond.operator === 'CROSSES_BELOW' ? 'تجاوز لأسفل 🡶' :
+                                 cond.operator === 'SPIKE' ? 'انفجار قفزة ⚡' : 'يساوي';
+                return {
+                  isTrue,
+                  text: `شرط [${cond.metric}]: القيمة الفعلية (${actualVal.toFixed(3)}) مقارنة بـ ${opArabic} (${cond.valueNumber}) 🡪 [${isTrue ? '✅ محقق' : '❌ غير محقق'}]`
+                };
+              });
+
+              const condResults = condDetails.map((d: any) => d.isTrue);
+              const gateRaw = profile.exitGate || 'AND';
+              const gate = typeof gateRaw === 'string' ? gateRaw.trim().toUpperCase() : 'AND';
+              let conditionsMet = false;
+              if (gate === 'AND') {
+                conditionsMet = condResults.every((r: boolean) => r);
+              } else {
+                conditionsMet = condResults.some((r: boolean) => r);
+              }
+
+              if (conditionsMet) {
+                decision = 'EXIT_NOW';
+                exitNowBecauseOfConditions = true;
+                const matchedCondsText = condDetails.map((d: any) => d.text).join(" | ");
+                exitReasonDetail = `تطابق شروط الخروج المخصصة تحت البوابة [${gate}]: ${matchedCondsText}`;
+                console.log(`[⭐ TAWLEEFA DYNAMIC CONDITIONS MET] Exit Conditions met under ${evaluationRegime} for ${symbol} using gate ${gate}`);
+              }
+            }
+          }
+
+          // Execute physical exit if dynamic results require it
+          if (decision === 'EXIT_NOW') {
+            console.log(`[⭐ TAWLEEFA DYNAMIC EXIT_NOW] Triggered dynamic exit for ${symbol}`);
+            const detailedReason = exitNowBecauseOfHardExit 
+              ? `خروج الربح الصلب الديناميكي لكبار القوم: ${exitReasonDetail}`
+              : `شروط الخروج الديناميكية للتوليفة: ${exitReasonDetail}`;
+            addLog(`🚨 خروج التوليفة الديناميكي: تصفية صفقة ${symbol} فوراً بموجب [${detailedReason}] لـ "${tawleefa.name}" (${evaluationRegime})`, 'warn');
+            await this.closeTrade(trade, currentPrice, `TAWLEEFA_EXIT_NOW: ${detailedReason}`);
+            return;
+          }
+
+          // Dynamic Hard Stop Loss protection (If price passes trade.sl which could be initial Sl or entry/breakeven)
+          const isLong = trade.type === 'LONG';
+          const slHit = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+          if (slHit) {
+            console.log(`[⭐ TAWLEEFA SL HIT] Price crossed stop loss ${trade.sl} for ${symbol} at ${currentPrice}`);
+            const isBE = trade.isBreakeven ? "تأمين حماية رأس المال (Break-even)" : "وقف الخسارة المبدئي المحدد";
+            const slDetail = `ضرب خط الدفاع المالي (${isBE}) عند السعر [${trade.sl.toFixed(4)}] ومستوى الوقف [${trade.sl.toFixed(4)}]`;
+            addLog(`🚨 تصفية التوليفة للحماية: تصفية صفقة ${symbol} فوراً لضرب وقف الخسارة عند ${trade.sl.toFixed(4)} (${isBE})`, 'warn');
+            await this.closeTrade(trade, currentPrice, `TAWLEEFA_SL_HIT: ${slDetail}`);
+            return;
           }
 
           // Bypass standard exit rules since Tawleefa Engine has absolute authority!

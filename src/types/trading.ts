@@ -116,6 +116,7 @@ export interface Trade {
   stopMoved?: boolean;
   partial1Taken?: boolean;
   partial2Taken?: boolean;
+  takenPartials?: number[];
 }
 
 export interface MarketCondition {

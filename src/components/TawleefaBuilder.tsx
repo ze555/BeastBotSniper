@@ -44,7 +44,7 @@ import {
 
 // Define the type structures for our custom rules engine (Tawleefa)
 export type LogicGate = 'AND' | 'OR';
-export type RuleAction = 'LONG' | 'SHORT' | 'EXIT_ALL' | 'ALERT_ONLY';
+export type RuleAction = 'LONG' | 'SHORT' | 'EXIT_ALL' | 'ALERT_ONLY' | 'DUAL';
 
 export interface ConditionRow {
   id: string;
@@ -57,6 +57,26 @@ export interface ConditionRow {
   sensitivity: number; // For advanced items like sweep, divergence, exhaustion
 }
 
+export interface DynamicExitCondition {
+  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER';
+  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION';
+  valueNumber: number;
+}
+
+export interface DynamicExitPartial {
+  profitR: number;
+  closePercent: number;
+}
+
+export interface DynamicExitProfile {
+  regime: string;
+  breakevenR?: number;
+  partials?: DynamicExitPartial[];
+  exitConditions?: DynamicExitCondition[];
+  exitGate?: 'AND' | 'OR';
+  hardExitR?: number;
+}
+
 export interface RegimeProfile {
   regime: string;
   gate: LogicGate;
@@ -66,6 +86,12 @@ export interface RegimeProfile {
   stopLossValue: number;
   takeProfitMode: 'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE';
   takeProfitValue: number;
+
+  // New fields for dual direction support
+  longConditions?: ConditionRow[];
+  longGate?: LogicGate;
+  shortConditions?: ConditionRow[];
+  shortGate?: LogicGate;
 }
 
 export interface TawleefaConfig {
@@ -92,6 +118,13 @@ export interface TawleefaConfig {
   
   // Dynamic regime specific profiles mapping
   dynamicRegimeProfiles?: RegimeProfile[];
+  dynamicExitProfiles?: DynamicExitProfile[];
+
+  // New fields for dual direction support
+  longConditions?: ConditionRow[];
+  longGate?: LogicGate;
+  shortConditions?: ConditionRow[];
+  shortGate?: LogicGate;
 
   createdAt: string;
 }
@@ -122,374 +155,42 @@ interface SimulatorScenario {
 // Professional preset templates that the user can start with or modify
 const PRESET_TEMPLATES: TawleefaConfig[] = [
   {
-    id: 'adaptive_regime_intelligence_engine',
-    name: 'Adaptive Regime Intelligence Engine',
-    description: 'محرك ذكي متكيف يغيّر سلوك الدخول تلقائياً حسب طبيعة السوق والسيولة والزخم المؤسسي، مع تفعيل توليفات فرعية مخصصة لكل ريجيم بشكل أوتوماتيكي.',
-    creator: 'مجمع سنايبر الكمي',
+    id: 'golden_sniper_balanced_v1',
+    name: 'توليفة القناص الذهبي المتوازن (Golden Sniper Balanced)',
+    description: 'نسخة متقنة تجمع بين دقة الدخول في الريجيمات السوقية الخمسة وإستراتيجيات الخروج الديناميكية الصارمة لعامة الأصول الرقمية.',
+    creator: 'ChatGPT',
+    action: 'DUAL',
     gate: 'AND',
     conditions: [
       {
-        id: 'default_c1',
+        id: 'global_rvol',
         metric: 'RVOL',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.3,
-        timeframe: '5m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'default_c2',
-        metric: 'TAKER_RATIO',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.05,
+        valueNumber: 1.0,
         timeframe: '5m',
         sensitivity: 1.0
       }
     ],
-    action: 'LONG',
-    allowedRegimes: ['TRENDING', 'LIQUIDITY_SWEEP', 'COMPRESSION', 'TRAP_MODE'],
+    allowedRegimes: [
+      'TREND_EXPANSION',
+      'MOMENTUM_MODE',
+      'TRENDING',
+      'LIQUIDITY_SWEEP',
+      'COMPRESSION'
+    ],
     btcAlignmentRequired: false,
-    minMarketConfidence: 58,
+    minMarketConfidence: 50,
     leverage: 8,
     riskPerTrade: 1.0,
     stopLossMode: 'ATR_DYNAMIC',
-    stopLossValue: 1.2,
+    stopLossValue: 1.3,
     takeProfitMode: 'TRAILING_MOMENTUM',
-    takeProfitValue: 2.0,
-    dynamicRegimeProfiles: [
-      {
-        regime: 'TRENDING',
-        gate: 'AND',
-        conditions: [
-          {
-            id: 'trend_c1',
-            metric: 'ADX',
-            operator: 'GREATER_THAN',
-            valueType: 'NUMBER',
-            valueNumber: 26,
-            timeframe: '15m',
-            sensitivity: 1.0
-          },
-          {
-            id: 'trend_c2',
-            metric: 'PRICE',
-            operator: 'CROSSES_ABOVE',
-            valueType: 'NUMBER',
-            valueNumber: 0,
-            timeframe: '5m',
-            sensitivity: 1.0
-          },
-          {
-            id: 'trend_c3',
-            metric: 'RVOL',
-            operator: 'GREATER_THAN',
-            valueType: 'NUMBER',
-            valueNumber: 1.6,
-            timeframe: '15m',
-            sensitivity: 1.0
-          },
-          {
-            id: 'trend_c4',
-            metric: 'TAKER_RATIO',
-            operator: 'GREATER_THAN',
-            valueType: 'NUMBER',
-            valueNumber: 1.1,
-            timeframe: '5m',
-            sensitivity: 1.0
-          }
-        ],
-        action: 'LONG',
-        stopLossMode: 'ATR_DYNAMIC',
-        stopLossValue: 1.4,
-        takeProfitMode: 'TRAILING_MOMENTUM',
-        takeProfitValue: 3.5
-      },
-      {
-        regime: 'LIQUIDITY_SWEEP',
-        gate: 'AND',
-        conditions: [
-          {
-            id: 'liq_c1',
-            metric: 'PRICE',
-            operator: 'SWEEP_LOW_HIGH',
-            valueType: 'NUMBER',
-            valueNumber: 3,
-            timeframe: '5m',
-            sensitivity: 0.85
-          },
-          {
-            id: 'liq_c2',
-            metric: 'CVD',
-            operator: 'DIVERGENCING',
-            valueType: 'NUMBER',
-            valueNumber: 0,
-            timeframe: '5m',
-            sensitivity: 0.9
-          },
-          {
-            id: 'liq_c3',
-            metric: 'TAKER_RATIO',
-            operator: 'GREATER_THAN',
-            valueType: 'NUMBER',
-            valueNumber: 1.08,
-            timeframe: '5m',
-            sensitivity: 1.0
-          }
-        ],
-        action: 'LONG',
-        stopLossMode: 'SWEEP_LOW_BOUND',
-        stopLossValue: 0.25,
-        takeProfitMode: 'TRAILING_MOMENTUM',
-        takeProfitValue: 2.8
-      },
-      {
-        regime: 'COMPRESSION',
-        gate: 'AND',
-        conditions: [
-          {
-            id: 'comp_c1',
-            metric: 'RVOL',
-            operator: 'SPIKE',
-            valueType: 'NUMBER',
-            valueNumber: 20,
-            timeframe: '5m',
-            sensitivity: 1.0
-          },
-          {
-            id: 'comp_c2',
-            metric: 'PRICE',
-            operator: 'CROSSES_ABOVE',
-            valueType: 'NUMBER',
-            valueNumber: 0,
-            timeframe: '5m',
-            sensitivity: 1.0
-          },
-          {
-            id: 'comp_c3',
-            metric: 'OPEN_INTEREST',
-            operator: 'SPIKE',
-            valueType: 'NUMBER',
-            valueNumber: 12,
-            timeframe: '5m',
-            sensitivity: 1.0
-          }
-        ],
-        action: 'LONG',
-        stopLossMode: 'ATR_DYNAMIC',
-        stopLossValue: 1.2,
-        takeProfitMode: 'FUSION_CASCADE',
-        takeProfitValue: 4.0
-      },
-      {
-        regime: 'TRAP_MODE',
-        gate: 'AND',
-        conditions: [
-          {
-            id: 'trap_c1',
-            metric: 'PRICE',
-            operator: 'SWEEP_LOW_HIGH',
-            valueType: 'NUMBER',
-            valueNumber: 2,
-            timeframe: '1m',
-            sensitivity: 1.0
-          },
-          {
-            id: 'trap_c2',
-            metric: 'CVD',
-            operator: 'DIVERGENCING',
-            valueType: 'NUMBER',
-            valueNumber: 0,
-            timeframe: '1m',
-            sensitivity: 0.8
-          },
-          {
-            id: 'trap_c3',
-            metric: 'RVOL',
-            operator: 'GREATER_THAN',
-            valueType: 'NUMBER',
-            valueNumber: 1.3,
-            timeframe: '5m',
-            sensitivity: 1.0
-          }
-        ],
-        action: 'LONG',
-        stopLossMode: 'FIXED',
-        stopLossValue: 0.35,
-        takeProfitMode: 'TRAILING_MOMENTUM',
-        takeProfitValue: 2.0
-      }
-    ],
-    createdAt: '2026-05-30T08:35:00Z'
-  },
-  {
-    id: 'smc_sweep_hunter',
-    name: 'صيد السيولة واقتناص عتبات القيعان (SMC Sweep & Absorb)',
-    description: 'استراتيجية مؤسساتية تترصد موجات التصفية العنيفة (Price Sweep Low) مع هبوط حدة البيع وامتصاص تدفق عقود البائعين بنشاط مع تباعد الدلتا الإيجابي للانعطاف القوي.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
-      {
-        id: 'c1',
-        metric: 'PRICE',
-        operator: 'SWEEP_LOW_HIGH',
-        valueType: 'NUMBER',
-        valueNumber: 5, // Previous 5 candles low
-        timeframe: '5m',
-        sensitivity: 0.8
-      },
-      {
-        id: 'c2',
-        metric: 'CVD',
-        operator: 'DIVERGENCING',
-        valueType: 'NUMBER',
-        valueNumber: 0, 
-        timeframe: '5m',
-        sensitivity: 1.2 // Positive divergence intensity
-      },
-      {
-        id: 'c3',
-        metric: 'OPEN_INTEREST',
-        operator: 'SPIKE',
-        valueType: 'NUMBER',
-        valueNumber: 15, // 15% Spike
-        timeframe: '5m',
-        sensitivity: 1.0
-      }
-    ],
-    action: 'LONG',
-    allowedRegimes: ['LIQUIDITY_SWEEP', 'VIOLENT_VOLATILITY', 'TRENDING'],
-    btcAlignmentRequired: false,
-    minMarketConfidence: 55,
-    leverage: 15,
-    riskPerTrade: 1.5,
-    stopLossMode: 'SWEEP_LOW_BOUND',
-    stopLossValue: 0.2, // 0.2% padding below the sweep low
-    takeProfitMode: 'TRAILING_MOMENTUM',
-    takeProfitValue: 2.5, // 2.5 R targets
-    createdAt: '2026-05-28T21:00:00Z'
-  },
-  {
-    id: 'bear_trap_absorption',
-    name: 'امتصاص الاختراق الكاذب وجدار الحيتان (Bull Trap & CVD Stall)',
-    description: 'ترصد انفجارات صعودية كاذبة بالقرب من مقاومات هامة، حيث تتدفق السيولة وتنفجر العقود المفتوحة لكن السعر يفشل بالاستمرار (Exhaustion/Stall) ويبدأ ضغط البيع غير المعلن.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
-      {
-        id: 'ct1',
-        metric: 'OPEN_INTEREST',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.25, // OI Exploding
-        timeframe: '15m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'ct2',
-        metric: 'PRICE',
-        operator: 'EXHAUSTION', // price stalls despite high volume
-        valueType: 'NUMBER',
-        valueNumber: 2.0, 
-        timeframe: '5m',
-        sensitivity: 1.5
-      },
-      {
-        id: 'ct3',
-        metric: 'TAKER_RATIO',
-        operator: 'LESS_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 0.96, // Sellers taking aggressive leads
-        timeframe: '1m',
-        sensitivity: 1.0
-      }
-    ],
-    action: 'SHORT',
-    allowedRegimes: ['TRAP_MODE', 'COMPRESSION', 'VIOLENT_VOLATILITY'],
-    btcAlignmentRequired: true,
-    minMarketConfidence: 65,
-    leverage: 10,
-    riskPerTrade: 2.0,
-    stopLossMode: 'ATR_DYNAMIC',
-    stopLossValue: 1.8, // 1.8x ATR SL
-    takeProfitMode: 'FUSION_CASCADE',
     takeProfitValue: 3.0,
-    createdAt: '2026-05-28T21:10:00Z'
-  },
-  {
-    id: 'panic_selloff_absorber',
-    name: 'مصيدة الهلع وصانع السوق العكسي (Panic Reversion Maker)',
-    description: 'اقتناص موجات البيع المرعبة الناتجة عن تصفية الصغار (Panic Selling) وانكماش CVD بشكل عمودي حاد وتدفق عقود حاد تمهيداً لجني أرباح الحيتان والارتداد الصاروخي.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
+    longGate: 'AND',
+    longConditions: [
       {
-        id: 'cp1',
-        metric: 'RVOL',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 2.2, // Huge relative volume
-        timeframe: '5m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'cp2',
-        metric: 'CVD',
-        operator: 'LESS_THAN',
-        valueType: 'NUMBER',
-        valueNumber: -30, // massive drop in CVD
-        timeframe: '5m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'cp3',
-        metric: 'FUNDING_RATE',
-        operator: 'CROSSES_BELOW',
-        valueType: 'NUMBER',
-        valueNumber: -0.01, // Negative rates indicating oversold panic shorting
-        timeframe: '15m',
-        sensitivity: 1.0
-      }
-    ],
-    action: 'LONG',
-    allowedRegimes: ['VIOLENT_VOLATILITY', 'LIQUIDITY_SWEEP'],
-    btcAlignmentRequired: false,
-    minMarketConfidence: 50,
-    leverage: 20,
-    riskPerTrade: 1.0,
-    stopLossMode: 'FIXED',
-    stopLossValue: 0.8, // Strict 0.8% Stop loss
-    takeProfitMode: 'TRAILING_MOMENTUM',
-    takeProfitValue: 4.0, // High trailing targets
-    createdAt: '2026-05-28T21:20:00Z'
-  },
-  {
-    id: 'steel_clad_cascade',
-    name: 'اتجاه الفولاذ المتدفق والزخم (Steel-Clad Trend Expansion Pro)',
-    description: 'توليفة هجينة ممتازة مستوحاة من محركاتنا الكلاسيكية وعمليات التتبع المستمر للاتجاه الفولاذي، تترقب ارتفاع معدلات ADX والزخم المتسارع بصحبة أحجام تداول قياسية ومعدل تيكر إيجابي للضرب مع اتجاه الاتجاه بقوة.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
-      {
-        id: 'scc1',
-        metric: 'ADX',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 28,
-        timeframe: '15m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'scc2',
-        metric: 'RVOL',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.8,
-        timeframe: '15m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'scc3',
+        id: 'long_taker',
         metric: 'TAKER_RATIO',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
@@ -498,611 +199,824 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         sensitivity: 1.0
       }
     ],
-    action: 'LONG',
-    allowedRegimes: ['TRENDING', 'TREND_EXPANSION', 'VIOLENT_VOLATILITY'],
-    btcAlignmentRequired: true,
-    minMarketConfidence: 70,
-    leverage: 10,
-    riskPerTrade: 1.0,
-    stopLossMode: 'ATR_DYNAMIC',
-    stopLossValue: 1.5,
-    takeProfitMode: 'FUSION_CASCADE',
-    takeProfitValue: 3.5,
-    createdAt: '2026-05-29T18:00:00Z'
-  },
-  {
-    id: 'hyper_reversion_fusion',
-    name: 'ارتباط الانحدار العكسي والاتزان الفائق (Hyper-Reversion Fusion)',
-    description: 'توليفة متطورة لصيد الارتدادات من مستويات التشبع البيعي الفائقة جداً (RSI) المصحوبة بمعدلات تمويل سالبة استثنائية (Negative Funding Rate) لتوقع انكسار موجات الهبوط العنيفة والتحول السريع للصعود.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
+    shortGate: 'AND',
+    shortConditions: [
       {
-        id: 'hrf1',
-        metric: 'RSI',
+        id: 'short_taker',
+        metric: 'TAKER_RATIO',
         operator: 'LESS_THAN',
         valueType: 'NUMBER',
-        valueNumber: 25,
-        timeframe: '5m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'hrf2',
-        metric: 'FUNDING_RATE',
-        operator: 'LESS_THAN',
-        valueType: 'NUMBER',
-        valueNumber: -0.02,
-        timeframe: '15m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'hrf3',
-        metric: 'CVD',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 0,
+        valueNumber: 0.97,
         timeframe: '5m',
         sensitivity: 1.0
       }
     ],
-    action: 'LONG',
-    allowedRegimes: ['LIQUIDITY_SWEEP', 'VIOLENT_VOLATILITY', 'TRAP_MODE'],
-    btcAlignmentRequired: false,
-    minMarketConfidence: 60,
-    leverage: 15,
-    riskPerTrade: 1.2,
-    stopLossMode: 'EXHAUSTION_CLOSE',
-    stopLossValue: 0.5,
-    takeProfitMode: 'TRAILING_MOMENTUM',
-    takeProfitValue: 3.0,
-    createdAt: '2026-05-29T18:10:00Z'
-  },
-  {
-    id: 'bear_trap_liquidity_cluster',
-    name: 'مصيدة الدببة وعنقود السيولة الذكي (Liquidity Cluster & Bear Trap)',
-    description: 'تقتنص مستويات السيولة المؤسساتية العميقة عندما تكون هناك تصفية كاذبة للمستثمرين (Sweep Low) مع تمركز سيولة متراكمة عريضة، لتنشيط صفقات LONG واقتناص الهبوط العبثي السريع.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
-      {
-        id: 'btlc1',
-        metric: 'LIQUIDITY_CLUSTER',
-        operator: 'SPIKE',
-        valueType: 'NUMBER',
-        valueNumber: 2.0,
-        timeframe: '15m',
-        sensitivity: 1.5
-      },
-      {
-        id: 'btlc2',
-        metric: 'PRICE',
-        operator: 'SWEEP_LOW_HIGH',
-        valueType: 'NUMBER',
-        valueNumber: 3,
-        timeframe: '5m',
-        sensitivity: 1.2
-      },
-      {
-        id: 'btlc3',
-        metric: 'OPEN_INTEREST',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 5.0,
-        timeframe: '5m',
-        sensitivity: 1.0
-      }
-    ],
-    action: 'LONG',
-    allowedRegimes: ['LIQUIDITY_SWEEP', 'TRAP_MODE', 'COMPRESSION'],
-    btcAlignmentRequired: true,
-    minMarketConfidence: 65,
-    leverage: 12,
-    riskPerTrade: 1.5,
-    stopLossMode: 'SWEEP_LOW_BOUND',
-    stopLossValue: 0.1,
-    takeProfitMode: 'FUSION_CASCADE',
-    takeProfitValue: 4.5,
-    createdAt: '2026-05-29T18:20:00Z'
-  },
-  {
-    id: 'rapid_scalp_momentum_hunter',
-    name: 'قناص السكالبينج السريع (Hyper-Frequency Scalper Pro)',
-    description: 'توليفة سريعة جداً بحدود شروط مرنة وسهلة التحقق لفتح صفقات سكالبينج متكررة. تهدف لتخفيف قيود التصفية بتقليل عتبة الحجم النشط والزخم، مع إيقاف تفعيل ربط البيتكوين لتوليد صفقات مستمرة على مدار اليوم وتقليل فترة الانتظار الطويلة.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
-      {
-        id: 'rsm1',
-        metric: 'RVOL',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.15, // Low barrier volume (15% higher than average is enough)
-        timeframe: '5m',
-        sensitivity: 0.8
-      },
-      {
-        id: 'rsm2',
-        metric: 'TAKER_RATIO',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.005, // Slightly positive buyer taker ratio
-        timeframe: '5m',
-        sensitivity: 0.7
-      }
-    ],
-    action: 'LONG',
-    allowedRegimes: ['TRENDING', 'TREND_EXPANSION', 'VIOLENT_VOLATILITY', 'LIQUIDITY_SWEEP', 'TRAP_MODE', 'COMPRESSION'],
-    btcAlignmentRequired: false, // Low bottleneck
-    minMarketConfidence: 45, // Less strict global confidence threshold
-    leverage: 8, // Safety leverage
-    riskPerTrade: 0.8, // 0.8% conservative risk due to high trade frequency
-    stopLossMode: 'ATR_DYNAMIC',
-    stopLossValue: 1.2, // Tighter stop loss
-    takeProfitMode: 'TRAILING_MOMENTUM',
-    takeProfitValue: 1.8, // Faster, easily achievable TP target
-    createdAt: '2026-05-29T18:30:00Z'
-  },
-  {
-    id: 'institutional_hybrid_hunter',
-    name: 'Institutional Hybrid Hunter',
-    description: 'محرك هجومي مؤسساتي ذكي يدمج صيد السيولة مع تأكيد تدفق المؤسسات والزخم الحقيقي لتقليل الفخاخ وزيادة الاستمرارية التشغيلية.',
-    creator: 'مجمع سنايبر الكمي',
-    gate: 'AND',
-    conditions: [
-      {
-        id: 'trend_strength',
-        metric: 'ADX',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 22,
-        timeframe: '15m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'liquidity_sweep',
-        metric: 'PRICE',
-        operator: 'SWEEP_LOW_HIGH',
-        valueType: 'NUMBER',
-        valueNumber: 3,
-        timeframe: '5m',
-        sensitivity: 0.85
-      },
-      {
-        id: 'institutional_absorption',
-        metric: 'CVD',
-        operator: 'DIVERGENCING',
-        valueType: 'NUMBER',
-        valueNumber: 0,
-        timeframe: '5m',
-        sensitivity: 0.9
-      },
-      {
-        id: 'aggressive_buying',
-        metric: 'TAKER_RATIO',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.08,
-        timeframe: '5m',
-        sensitivity: 1.0
-      },
-      {
-        id: 'volume_confirmation',
-        metric: 'RVOL',
-        operator: 'GREATER_THAN',
-        valueType: 'NUMBER',
-        valueNumber: 1.4,
-        timeframe: '15m',
-        sensitivity: 1.0
-      }
-    ],
-    action: 'LONG',
-    allowedRegimes: ['LIQUIDITY_SWEEP', 'VIOLENT_VOLATILITY', 'TREND_EXPANSION', 'TRAP_MODE'],
-    btcAlignmentRequired: false,
-    minMarketConfidence: 62,
-    leverage: 8,
-    riskPerTrade: 1.0,
-    stopLossMode: 'SWEEP_LOW_BOUND',
-    stopLossValue: 0.25,
-    takeProfitMode: 'TRAILING_MOMENTUM',
-    takeProfitValue: 3.0,
-    createdAt: '2026-05-29T21:30:00Z'
-  },
-  {
-    id: "adaptive_regime_alpha_v2",
-    name: "Adaptive Regime Alpha V2",
-    description: "نسخة محسنة لرفع جودة الدخول وتقليل ضربات الوقف مع الحفاظ على تدفق الصفقات.",
-    creator: "ChatGPT",
-    gate: "AND",
-    conditions: [
-      {
-        id: "global_rvol",
-        metric: "RVOL",
-        operator: "GREATER_THAN",
-        valueType: "NUMBER",
-        valueNumber: 1.15,
-        timeframe: "5m",
-        sensitivity: 1
-      }
-    ],
-    action: "LONG",
-    allowedRegimes: [
-      "TREND_EXPANSION",
-      "TRENDING",
-      "MOMENTUM_MODE",
-      "LIQUIDITY_SWEEP",
-      "COMPRESSION"
-    ],
-    btcAlignmentRequired: false,
-    minMarketConfidence: 58,
-    leverage: 5,
-    riskPerTrade: 1.0,
-    stopLossMode: "ATR_DYNAMIC",
-    stopLossValue: 1.4,
-    takeProfitMode: "TRAILING_MOMENTUM",
-    takeProfitValue: 3.0,
     dynamicRegimeProfiles: [
       {
-        regime: "TREND_EXPANSION",
-        gate: "AND",
-        conditions: [
+        regime: 'TREND_EXPANSION',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
           {
-            id: "te_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.08,
-            timeframe: "5m",
-            sensitivity: 1
+            id: 'te_long_1',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 20,
+            timeframe: '15m',
+            sensitivity: 1.0
           },
           {
-            id: "te_oi",
-            metric: "OPEN_INTEREST",
-            operator: "SPIKE",
-            valueType: "NUMBER",
-            valueNumber: 2,
-            timeframe: "5m",
-            sensitivity: 1
-          }
-        ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 4.0
-      },
-      {
-        regime: "TRENDING",
-        gate: "AND",
-        conditions: [
-          {
-            id: "trend_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
+            id: 'te_long_2',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
             valueNumber: 1.05,
-            timeframe: "5m",
-            sensitivity: 1
+            timeframe: '5m',
+            sensitivity: 1.0
           }
         ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.4,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.8
-      },
-      {
-        regime: "MOMENTUM_MODE",
-        gate: "AND",
-        conditions: [
+        shortConditions: [
           {
-            id: "mom_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.2,
-            timeframe: "5m",
-            sensitivity: 1
-          }
-        ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.2,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 3.5
-      },
-      {
-        regime: "LIQUIDITY_SWEEP",
-        gate: "AND",
-        conditions: [
-          {
-            id: "liq_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.08,
-            timeframe: "5m",
-            sensitivity: 1
-          }
-        ],
-        action: "LONG",
-        stopLossMode: "SWEEP_LOW_BOUND",
-        stopLossValue: 0.35,
-        takeProfitMode: "FUSION_CASCADE",
-        takeProfitValue: 3.0
-      },
-      {
-        regime: "COMPRESSION",
-        gate: "AND",
-        conditions: [
-          {
-            id: "comp_oi",
-            metric: "OPEN_INTEREST",
-            operator: "SPIKE",
-            valueType: "NUMBER",
-            valueNumber: 2,
-            timeframe: "5m",
-            sensitivity: 1
+            id: 'te_short_1',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 20,
+            timeframe: '15m',
+            sensitivity: 1.0
           },
           {
-            id: "comp_rvol",
-            metric: "RVOL",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.2,
-            timeframe: "5m",
-            sensitivity: 1
+            id: 'te_short_2',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.95,
+            timeframe: '5m',
+            sensitivity: 1.0
           }
         ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
+        stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.3,
-        takeProfitMode: "FUSION_CASCADE",
+        takeProfitMode: 'TRAILING_MOMENTUM',
         takeProfitValue: 4.0
       },
       {
-        regime: "TRAP_MODE",
-        gate: "AND",
+        regime: 'MOMENTUM_MODE',
+        action: 'DUAL',
+        gate: 'AND',
         conditions: [],
-        action: "ALERT_ONLY",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.0
-      },
-      {
-        regime: "DEAD_CHOP",
-        gate: "AND",
-        conditions: [],
-        action: "ALERT_ONLY",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.0
-      },
-      {
-        regime: "VIOLENT_VOLATILITY",
-        gate: "AND",
-        conditions: [],
-        action: "ALERT_ONLY",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.0
-      }
-    ],
-    createdAt: "2026-06-01T14:43:00Z"
-  },
-  {
-    id: "sentinel_intel_hybrid_v3",
-    name: "Sentinel Intelligence Hybrid V3",
-    description: "توليفة تكيفية ذكية مدمجة: حماية صارمة لرأس المال عند +1R مع تتبع أرباح طماع ومدروس يصل إلى 5.0R في ظروف الاختراق والضغط السعري.",
-    creator: "Sentinel AI Engine",
-    gate: "AND",
-    conditions: [
-      {
-        id: "global_rvol",
-        metric: "RVOL",
-        operator: "GREATER_THAN",
-        valueType: "NUMBER",
-        valueNumber: 1.22,
-        timeframe: "5m",
-        sensitivity: 1
-      },
-      {
-        id: "global_taker",
-        metric: "TAKER_RATIO",
-        operator: "GREATER_THAN",
-        valueType: "NUMBER",
-        valueNumber: 1.04,
-        timeframe: "5m",
-        sensitivity: 1
-      }
-    ],
-    action: "LONG",
-    allowedRegimes: [
-      "TREND_EXPANSION",
-      "TRENDING",
-      "MOMENTUM_MODE",
-      "LIQUIDITY_SWEEP",
-      "COMPRESSION"
-    ],
-    btcAlignmentRequired: false,
-    minMarketConfidence: 60,
-    leverage: 8,
-    riskPerTrade: 1.0,
-    stopLossMode: "ATR_DYNAMIC",
-    stopLossValue: 1.4,
-    takeProfitMode: "TRAILING_MOMENTUM",
-    takeProfitValue: 3.5,
-    dynamicRegimeProfiles: [
-      {
-        regime: "TREND_EXPANSION",
-        gate: "AND",
-        conditions: [
+        longConditions: [
           {
-            id: "te_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
+            id: 'mom_long_1',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
             valueNumber: 1.08,
-            timeframe: "5m",
-            sensitivity: 1
+            timeframe: '5m',
+            sensitivity: 1.0
           },
           {
-            id: "te_oi",
-            metric: "OPEN_INTEREST",
-            operator: "SPIKE",
-            valueType: "NUMBER",
-            valueNumber: 2,
-            timeframe: "5m",
-            sensitivity: 1
+            id: 'mom_long_2',
+            metric: 'OPEN_INTEREST',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.5,
+            timeframe: '5m',
+            sensitivity: 1.0
           }
         ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.3,
-        takeProfitMode: "TRAILING_MOMENTUM",
+        shortConditions: [
+          {
+            id: 'mom_short_1',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.92,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'mom_short_2',
+            metric: 'OPEN_INTEREST',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 1.0,
+        takeProfitMode: 'TRAILING_MOMENTUM',
         takeProfitValue: 4.5
       },
       {
-        regime: "TRENDING",
-        gate: "AND",
-        conditions: [
+        regime: 'TRENDING',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
           {
-            id: "trend_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.06,
-            timeframe: "5m",
-            sensitivity: 1
-          },
-          {
-            id: "trend_rvol",
-            metric: "RVOL",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.10,
-            timeframe: "5m",
-            sensitivity: 1
+            id: 'tr_long_1',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.05,
+            timeframe: '5m',
+            sensitivity: 1.0
           }
         ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
+        shortConditions: [
+          {
+            id: 'tr_short_1',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.05,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.2,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 3.5
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 3.0
       },
       {
-        regime: "MOMENTUM_MODE",
-        gate: "AND",
-        conditions: [
+        regime: 'LIQUIDITY_SWEEP',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
           {
-            id: "mom_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.18,
-            timeframe: "5m",
-            sensitivity: 1
-          },
-          {
-            id: "mom_oi",
-            metric: "OPEN_INTEREST",
-            operator: "SPIKE",
-            valueType: "NUMBER",
-            valueNumber: 1.5,
-            timeframe: "5m",
-            sensitivity: 1
+            id: 'ls_long',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 0.8
           }
         ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
+        shortConditions: [
+          {
+            id: 'ls_short',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 0.8
+          }
+        ],
+        stopLossMode: 'SWEEP_LOW_BOUND',
+        stopLossValue: 0.3,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 2.5
+      },
+      {
+        regime: 'COMPRESSION',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'comp_long_1',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'comp_short_1',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.1,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 4.2
-      },
+        takeProfitMode: 'FUSION_CASCADE',
+        takeProfitValue: 5.0
+      }
+    ],
+    dynamicExitProfiles: [
       {
-        regime: "LIQUIDITY_SWEEP",
-        gate: "AND",
-        conditions: [
-          {
-            id: "liq_taker",
-            metric: "TAKER_RATIO",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.10,
-            timeframe: "5m",
-            sensitivity: 1
-          }
+        regime: 'TREND_EXPANSION',
+        breakevenR: 0.8,
+        hardExitR: 6.0,
+        partials: [
+          { profitR: 1.5, closePercent: 25 },
+          { profitR: 3.0, closePercent: 25 }
         ],
-        action: "LONG",
-        stopLossMode: "SWEEP_LOW_BOUND",
-        stopLossValue: 0.40,
-        takeProfitMode: "FUSION_CASCADE",
-        takeProfitValue: 3.2
-      },
-      {
-        regime: "COMPRESSION",
-        gate: "AND",
-        conditions: [
+        exitGate: 'OR',
+        exitConditions: [
           {
-            id: "comp_oi",
-            metric: "OPEN_INTEREST",
-            operator: "SPIKE",
-            valueType: "NUMBER",
-            valueNumber: 3,
-            timeframe: "5m",
-            sensitivity: 1
+            metric: 'ADX',
+            operator: 'LESS_THAN',
+            valueNumber: 18
           },
           {
-            id: "comp_rvol",
-            metric: "RVOL",
-            operator: "GREATER_THAN",
-            valueType: "NUMBER",
-            valueNumber: 1.25,
-            timeframe: "5m",
-            sensitivity: 1
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueNumber: 0.98
+          }
+        ]
+      },
+      {
+        regime: 'MOMENTUM_MODE',
+        breakevenR: 0.5,
+        hardExitR: 4.0,
+        partials: [
+          { profitR: 1.0, closePercent: 30 },
+          { profitR: 2.5, closePercent: 20 }
+        ],
+        exitGate: 'OR',
+        exitConditions: [
+          {
+            metric: 'OPEN_INTEREST',
+            operator: 'LESS_THAN',
+            valueNumber: 0
+          },
+          {
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueNumber: 1.0
+          }
+        ]
+      },
+      {
+        regime: 'TRENDING',
+        breakevenR: 0.8,
+        hardExitR: 3.5,
+        partials: [
+          { profitR: 1.5, closePercent: 25 }
+        ],
+        exitGate: 'OR',
+        exitConditions: [
+          {
+            metric: 'RVOL',
+            operator: 'LESS_THAN',
+            valueNumber: 0.9
+          },
+          {
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueNumber: 0.99
+          }
+        ]
+      },
+      {
+        regime: 'LIQUIDITY_SWEEP',
+        breakevenR: 0.5,
+        hardExitR: 2.0,
+        partials: [
+          { profitR: 1.0, closePercent: 30 }
+        ],
+        exitGate: 'OR',
+        exitConditions: [
+          {
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueNumber: 0.98
+          }
+        ]
+      },
+      {
+        regime: 'COMPRESSION',
+        breakevenR: 0.8,
+        hardExitR: 5.0,
+        partials: [
+          { profitR: 2.0, closePercent: 20 }
+        ],
+        exitGate: 'OR',
+        exitConditions: [
+          {
+            metric: 'RVOL',
+            operator: 'LESS_THAN',
+            valueNumber: 0.95
+          },
+          {
+            metric: 'OPEN_INTEREST',
+            operator: 'LESS_THAN',
+            valueNumber: 0
+          }
+        ]
+      }
+    ],
+    createdAt: '2026-06-03T17:11:39Z'
+  },
+  {
+    id: 'hybrid_twin_engine_pro_v3',
+    name: 'التوليفة الذهبية الموحدة (Golden Sniper Ultimate)',
+    description: 'التوليفة المطلقة المتكاملة لمحرك البوت ثنائي الاتجاه، تجمع بين خطط دخول دقيقة ومصممة لكل رييجيم سوقي من جهة، وخطط خروج آمنة وديناميكية (حماية رأس مال، جني أرباح جزئي، تتبع زخم، إغلاق مؤشرات) تؤمن الحساب وتقتنص الأرباح بكفاءة فولاذية من جهة أخرى.',
+    creator: 'مجمع سنايبر الكمي المطور',
+    action: 'DUAL',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'global_val_1',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.01,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    allowedRegimes: [
+      'TRENDING',
+      'TREND_EXPANSION',
+      'MOMENTUM_MODE',
+      'LIQUIDITY_SWEEP',
+      'COMPRESSION'
+    ],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 55,
+    leverage: 8,
+    riskPerTrade: 1.5,
+    stopLossMode: 'ATR_DYNAMIC',
+    stopLossValue: 1.2,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 3.0,
+
+    longGate: 'AND',
+    longConditions: [
+      {
+        id: 'global_long_rvol',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.10,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_long_taker',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.05,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+
+    shortGate: 'AND',
+    shortConditions: [
+      {
+        id: 'global_short_rvol',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.10,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_short_taker',
+        metric: 'TAKER_RATIO',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0.95,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+
+    dynamicRegimeProfiles: [
+      {
+        regime: 'TREND_EXPANSION',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_te_long_1',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 22,
+            timeframe: '15m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_te_long_2',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.10,
+            timeframe: '5m',
+            sensitivity: 1.0
           }
         ],
-        action: "LONG",
-        stopLossMode: "ATR_DYNAMIC",
+        shortConditions: [
+          {
+            id: 'gp_te_short_1',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 22,
+            timeframe: '15m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_te_short_2',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.90,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.2,
-        takeProfitMode: "FUSION_CASCADE",
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 4.0
+      },
+      {
+        regime: 'MOMENTUM_MODE',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_mm_long_1',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.15,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_mm_long_2',
+            metric: 'OPEN_INTEREST',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.0,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_mm_short_1',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.85,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_mm_short_2',
+            metric: 'OPEN_INTEREST',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.0,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 1.0,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 4.5
+      },
+      {
+        regime: 'LIQUIDITY_SWEEP',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_lq_long_1',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_lq_short_1',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'SWEEP_LOW_BOUND',
+        stopLossValue: 0.25,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 2.5
+      },
+      {
+        regime: 'COMPRESSION',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_cp_long_1',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_cp_long_2',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_cp_short_1',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_cp_short_2',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 1.0,
+        takeProfitMode: 'FUSION_CASCADE',
         takeProfitValue: 5.0
       },
       {
-        regime: "TRAP_MODE",
-        gate: "AND",
+        regime: 'TRENDING',
+        action: 'DUAL',
+        gate: 'AND',
         conditions: [],
-        action: "ALERT_ONLY",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.0
-      },
-      {
-        regime: "DEAD_CHOP",
-        gate: "AND",
-        conditions: [],
-        action: "ALERT_ONLY",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.0
-      },
-      {
-        regime: "VIOLENT_VOLATILITY",
-        gate: "AND",
-        conditions: [],
-        action: "ALERT_ONLY",
-        stopLossMode: "ATR_DYNAMIC",
-        stopLossValue: 1.5,
-        takeProfitMode: "TRAILING_MOMENTUM",
-        takeProfitValue: 2.0
+        longConditions: [
+          {
+            id: 'gp_tr_long_1',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.10,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_tr_long_2',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.05,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_tr_short_1',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.10,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_tr_short_2',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.95,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 1.1,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 3.0
       }
     ],
-    createdAt: "2026-06-01T15:02:00Z"
+
+    // خطط الخروج الآمنة لكل رييجيم سوقي ديناميكي (Safe Dynamic Exit Profiles)
+    dynamicExitProfiles: [
+      {
+        regime: "TREND_EXPANSION",
+        breakevenR: 1.0, // حماية رأس المال بنقل الوقف على الدخول عند +1.0R
+        partials: [
+          {
+            profitR: 2.0, // جني أرباح جزئي أول 20% عند +2.0R
+            closePercent: 20
+          },
+          {
+            profitR: 4.0, // جني أرباح جزئي ثانٍ 20% عند +4.0R
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "ADX",
+            operator: "LESS_THAN",
+            valueNumber: 20 // الخروج فور تباطؤ اتجاه التوسع السعري
+          },
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 0.95 // ضعف هيمنة صانعي السوق
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "MOMENTUM_MODE",
+        breakevenR: 0.5, // حماية رأس المال سريعة للغاية عند +0.5R لتجنب الارتدادات العنيفة
+        partials: [
+          {
+            profitR: 1.5, // جني أرباح مبكر 30% عند +1.5R لتأمين الحساب
+            closePercent: 30
+          },
+          {
+            profitR: 3.0, // جني أرباح ثانٍ 20% عند +3.0R
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 1.0 // الخروج فور غياب الحسم الشرائي/البيعي
+          },
+          {
+            metric: "OPEN_INTEREST",
+            operator: "LESS_THAN",
+            valueNumber: 0.0 // خروج العقود المفتوحة يعني انسحاب القوة الدافعة
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "LIQUIDITY_SWEEP",
+        breakevenR: 0.5, // نقل على الدخول سريع جداً عند +0.5R لأن سحب السيولة معرض جداً للمصائد
+        partials: [
+          {
+            profitR: 1.0, // جني أرباح جزئي 30% سريعاً عند +1.0R
+            closePercent: 30
+          }
+        ],
+        hardExitR: 2.0, // خروج فوري جشع عند +2.0R لتصفية كامل المركز
+        exitConditions: [
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 0.95 // تراجع العزم لصالح المزايدة المضادة
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "COMPRESSION",
+        breakevenR: 1.0, // حماية رأس مال عند +1.0R
+        partials: [
+          {
+            profitR: 2.5, // جني أرباح جزئي 20% عند تحقيق انفجار أولي بنسبة +2.5R
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "RVOL",
+            operator: "LESS_THAN",
+            valueNumber: 0.9 // انخفاض السيولة عما دون المتوسط
+          },
+          {
+            metric: "OPEN_INTEREST",
+            operator: "LESS_THAN",
+            valueNumber: -1 // انخفاض كبير وتفريغ في العقود المفتوحة
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "TRENDING",
+        breakevenR: 0.8, // نقل وقف الخسارة عند تحقيق +0.8R
+        partials: [
+          {
+            profitR: 1.5, // جني أرباح جزئي 20% عند +1.5R
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "RVOL",
+            operator: "LESS_THAN",
+            valueNumber: 0.9 // تأكيد تباطؤ وتراجع عزم السيولة
+          },
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 0.98 // فقدان التفوق لصالح الاتجاه المعاكس
+          }
+        ],
+        exitGate: "AND"
+      }
+    ],
+    createdAt: '2026-06-02T21:30:00Z'
+  }
+];
+
+// Default configuration for custom/draft adaptive exit profiles fallback
+const DEFAULT_DYNAMIC_EXIT_PROFILES: DynamicExitProfile[] = [
+  {
+    regime: "TREND_EXPANSION",
+    breakevenR: 1.0,
+    partials: [
+      { profitR: 2.0, closePercent: 20 },
+      { profitR: 4.0, closePercent: 20 }
+    ],
+    exitConditions: [
+      { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
+      { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 }
+    ],
+    exitGate: "AND"
+  },
+  {
+    regime: "MOMENTUM_MODE",
+    breakevenR: 0.5,
+    partials: [
+      { profitR: 1.5, closePercent: 30 },
+      { profitR: 3.0, closePercent: 20 }
+    ],
+    exitConditions: [
+      { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 1.0 },
+      { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: 0.0 }
+    ],
+    exitGate: "AND"
+  },
+  {
+    regime: "LIQUIDITY_SWEEP",
+    breakevenR: 0.5,
+    partials: [
+      { profitR: 1.0, closePercent: 30 }
+    ],
+    hardExitR: 2.0,
+    exitConditions: [
+      { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 }
+    ],
+    exitGate: "AND"
+  },
+  {
+    regime: "COMPRESSION",
+    breakevenR: 1.0,
+    partials: [
+      { profitR: 2.5, closePercent: 20 }
+    ],
+    exitConditions: [
+      { metric: "RVOL", operator: "LESS_THAN", valueNumber: 0.9 },
+      { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: -1 }
+    ],
+    exitGate: "AND"
+  },
+  {
+    regime: "TRENDING",
+    breakevenR: 0.8,
+    partials: [
+      { profitR: 1.5, closePercent: 20 }
+    ],
+    exitConditions: [
+      { metric: "RVOL", operator: "LESS_THAN", valueNumber: 0.9 },
+      { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
+    ],
+    exitGate: "AND"
   }
 ];
 
@@ -1142,7 +1056,16 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
   const [displayedLogs, setDisplayedLogs] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [activeProfileTab, setActiveProfileTab] = useState<string>('TRENDING');
+  const [activeEngineSubTab, setActiveEngineSubTab] = useState<'ENTRY' | 'EXIT'>('ENTRY');
   const [dynamicRegimeProfiles, setDynamicRegimeProfiles] = useState<RegimeProfile[] | undefined>(undefined);
+  const [dynamicExitProfiles, setDynamicExitProfiles] = useState<DynamicExitProfile[]>(DEFAULT_DYNAMIC_EXIT_PROFILES);
+
+  // Helper state variables for dual direction (DUAL LONG & SHORT) conditions support
+  const [longConditions, setLongConditions] = useState<ConditionRow[]>([]);
+  const [longGate, setLongGate] = useState<LogicGate>('AND');
+  const [shortConditions, setShortConditions] = useState<ConditionRow[]>([]);
+  const [shortGate, setShortGate] = useState<LogicGate>('AND');
+  const [activeDualTab, setActiveDualTab] = useState<'LONG' | 'SHORT'>('LONG');
 
   // Load Tawleefas from local storage on mount
   useEffect(() => {
@@ -1159,33 +1082,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       })
       .catch(() => {});
 
-    const stored = localStorage.getItem('cust_tawleefas_v1');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        const parsedIds = new Set(parsed.map((p: any) => p.id));
-        const missingPresets = PRESET_TEMPLATES.filter(p => !parsedIds.has(p.id));
-        let updatedList = [...parsed];
-        if (missingPresets.length > 0) {
-          updatedList = [...updatedList, ...missingPresets];
-          localStorage.setItem('cust_tawleefas_v1', JSON.stringify(updatedList));
-        }
-        setTawleefas(updatedList);
-        if (updatedList.length > 0) {
-          loadTawleefaToForm(updatedList[0]);
-        } else {
-          loadPresetIntoForm(PRESET_TEMPLATES[0]);
-        }
-      } catch (e) {
-        setTawleefas(PRESET_TEMPLATES);
-        loadPresetIntoForm(PRESET_TEMPLATES[0]);
-      }
-    } else {
-      // First-time load: populate with presets
-      setTawleefas(PRESET_TEMPLATES);
-      localStorage.setItem('cust_tawleefas_v1', JSON.stringify(PRESET_TEMPLATES));
-      loadPresetIntoForm(PRESET_TEMPLATES[0]);
-    }
+    // Force wipe all old configurations and load the new master Tawleefa configuration
+    localStorage.setItem('cust_tawleefas_v1', JSON.stringify(PRESET_TEMPLATES));
+    setTawleefas(PRESET_TEMPLATES);
+    loadTawleefaToForm(PRESET_TEMPLATES[0]);
   }, []);
 
   const handleActivateOnLiveBot = async (t: TawleefaConfig) => {
@@ -1256,6 +1156,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setTakeProfitMode(t.takeProfitMode ?? 'TRAILING_MOMENTUM');
     setTakeProfitValue(t.takeProfitValue ?? 2.0);
     setDynamicRegimeProfiles(t.dynamicRegimeProfiles || undefined);
+    
+    // Load dual direction fields (or fallback to general conditions)
+    setLongConditions(t.longConditions || t.conditions || []);
+    setLongGate(t.longGate || t.gate || 'AND');
+    setShortConditions(t.shortConditions || []);
+    setShortGate(t.shortGate || 'AND');
   };
 
   const loadPresetIntoForm = (t: TawleefaConfig) => {
@@ -1275,6 +1181,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setTakeProfitMode(t.takeProfitMode ?? 'TRAILING_MOMENTUM');
     setTakeProfitValue(t.takeProfitValue ?? 2.0);
     setDynamicRegimeProfiles(t.dynamicRegimeProfiles || undefined);
+
+    // Load preset dual direction fields
+    setLongConditions((t.longConditions || t.conditions || []).map(c => ({ ...c, id: Math.random().toString(36).substr(2, 9) })));
+    setLongGate(t.longGate || t.gate || 'AND');
+    setShortConditions((t.shortConditions || []).map(c => ({ ...c, id: Math.random().toString(36).substr(2, 9) })));
+    setShortGate(t.shortGate || 'AND');
   };
 
   const addConditionRow = () => {
@@ -1287,20 +1199,121 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       timeframe: '5m',
       sensitivity: 1.0
     };
-    setConditions([...conditions, newCond]);
+    if (action === 'DUAL') {
+      if (activeDualTab === 'LONG') {
+        setLongConditions([...longConditions, newCond]);
+      } else {
+        setShortConditions([...shortConditions, newCond]);
+      }
+    } else {
+      setConditions([...conditions, newCond]);
+    }
   };
 
   const removeConditionRow = (id: string) => {
-    setConditions(conditions.filter(c => c.id !== id));
+    if (action === 'DUAL') {
+      if (activeDualTab === 'LONG') {
+        setLongConditions(longConditions.filter(c => c.id !== id));
+      } else {
+        setShortConditions(shortConditions.filter(c => c.id !== id));
+      }
+    } else {
+      setConditions(conditions.filter(c => c.id !== id));
+    }
   };
 
   const updateConditionRow = (id: string, field: keyof ConditionRow, val: any) => {
-    setConditions(conditions.map(c => {
-      if (c.id === id) {
-        return { ...c, [field]: val };
+    if (action === 'DUAL') {
+      if (activeDualTab === 'LONG') {
+        setLongConditions(longConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+      } else {
+        setShortConditions(shortConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
       }
-      return c;
-    }));
+    } else {
+      setConditions(conditions.map(c => {
+        if (c.id === id) {
+          return { ...c, [field]: val };
+        }
+        return c;
+      }));
+    }
+  };
+
+  // Safe Dynamic Exit Profiles Interactive Helpers
+  const handleAddExitCondition = (regimeReg: string) => {
+    const updated = dynamicExitProfiles.map(p => {
+      if (p.regime === regimeReg) {
+        const exitConditions = p.exitConditions ? [...p.exitConditions] : [];
+        return {
+          ...p,
+          exitConditions: [
+            ...exitConditions,
+            { metric: 'TAKER_RATIO' as any, operator: 'LESS_THAN' as any, valueNumber: 0.95 }
+          ]
+        };
+      }
+      return p;
+    });
+    setDynamicExitProfiles(updated);
+  };
+
+  const handleRemoveExitCondition = (regimeReg: string, index: number) => {
+    const updated = dynamicExitProfiles.map(p => {
+      if (p.regime === regimeReg) {
+        const exitConditions = p.exitConditions ? p.exitConditions.filter((_, idx) => idx !== index) : [];
+        return {
+          ...p,
+          exitConditions
+        };
+      }
+      return p;
+    });
+    setDynamicExitProfiles(updated);
+  };
+
+  const handleUpdateExitCondition = (regimeReg: string, index: number, field: keyof DynamicExitCondition, value: any) => {
+    const updated = dynamicExitProfiles.map(p => {
+      if (p.regime === regimeReg) {
+        const exitConditions = p.exitConditions ? p.exitConditions.map((c, idx) => {
+          if (idx === index) {
+            return { ...c, [field]: value };
+          }
+          return c;
+        }) : [];
+        return {
+          ...p,
+          exitConditions
+        };
+      }
+      return p;
+    });
+    setDynamicExitProfiles(updated);
+  };
+
+  const handleUpdateExitGate = (regimeReg: string, gateVal: 'AND' | 'OR') => {
+    const updated = dynamicExitProfiles.map(p => {
+      if (p.regime === regimeReg) {
+        return {
+          ...p,
+          exitGate: gateVal
+        };
+      }
+      return p;
+    });
+    setDynamicExitProfiles(updated);
+  };
+
+  const handleUpdateExitParams = (regimeReg: string, field: 'breakevenR' | 'hardExitR', value: number | undefined) => {
+    const updated = dynamicExitProfiles.map(p => {
+      if (p.regime === regimeReg) {
+        return {
+          ...p,
+          [field]: value
+        };
+      }
+      return p;
+    });
+    setDynamicExitProfiles(updated);
   };
 
   const handleSaveTawleefa = () => {
@@ -1327,6 +1340,11 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       takeProfitMode,
       takeProfitValue,
       dynamicRegimeProfiles,
+      dynamicExitProfiles,
+      longConditions,
+      longGate,
+      shortConditions,
+      shortGate,
       createdAt: activeTawleefa?.createdAt || new Date().toISOString()
     };
 
@@ -1383,7 +1401,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
         stopLossValue,
         takeProfitMode,
         takeProfitValue,
-        dynamicRegimeProfiles
+        dynamicRegimeProfiles,
+        dynamicExitProfiles,
+        longConditions,
+        longGate,
+        shortConditions,
+        shortGate
       }
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(raw, null, 2));
@@ -1418,6 +1441,11 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           setTakeProfitMode(cfg.takeProfitMode || 'TRAILING_MOMENTUM');
           setTakeProfitValue(cfg.takeProfitValue || 2.0);
           setDynamicRegimeProfiles(cfg.dynamicRegimeProfiles || undefined);
+          setDynamicExitProfiles(cfg.dynamicExitProfiles || DEFAULT_DYNAMIC_EXIT_PROFILES);
+          setLongConditions(cfg.longConditions || cfg.conditions || []);
+          setLongGate(cfg.longGate || cfg.gate || 'AND');
+          setShortConditions(cfg.shortConditions || []);
+          setShortGate(cfg.shortGate || 'AND');
           setActiveTawleefa(null);
           alert('تم استيراد التوليفة ومواصفات الفلو بنجاح! يمكنك مراجعتها وحفظها.');
         } else {
@@ -1589,6 +1617,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     let activeTakeProfitValue = takeProfitValue;
     let usingProfile = false;
 
+    // Dual direction helper lists
+    let activeLongConditions = longConditions;
+    let activeLongGate = longGate;
+    let activeShortConditions = shortConditions;
+    let activeShortGate = shortGate;
+
     // Use currentProfiles state if activeTawleefa doesn't contain it yet
     const currentProfiles = activeTawleefa?.dynamicRegimeProfiles || dynamicRegimeProfiles;
     if (currentProfiles && Array.isArray(currentProfiles) && currentProfiles.length > 0) {
@@ -1602,11 +1636,16 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
         activeTakeProfitMode = matchedProfile.takeProfitMode;
         activeTakeProfitValue = matchedProfile.takeProfitValue;
         usingProfile = true;
+
+        activeLongConditions = matchedProfile.longConditions || matchedProfile.conditions || [];
+        activeLongGate = matchedProfile.longGate || matchedProfile.gate || 'AND';
+        activeShortConditions = matchedProfile.shortConditions || [];
+        activeShortGate = matchedProfile.shortGate || 'AND';
         logs.push(`[⭐ نظام متكيف] تم التعرف على ريجيم السوق المالي المفعّل [${scenario.regime}] تلقائياً وتحويل المحرك إلى التوليفة الفرعية المطابقة بنجاح! ⚡`);
       }
     }
 
-    logs.push(`[تفسير التوليفة] جاري فحص الشروط مستعيناً بالبوابة [${activeGate}] وتحديد اتجاه الدخول [${activeAction}]...`);
+    logs.push(`[تفسير التوليفة] جاري فحص الشروط وتحديد اتجاه الدخول [${activeAction}]...`);
     
     let position: 'LONG' | 'SHORT' | null = null;
     let entryPrice = 0;
@@ -1620,25 +1659,9 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     let isBreakeven = false;
     let isPartialProfitTaken = false;
     let peakPrice = 0;
-    
-    const processedTicks = scenario.ticks.map((tick, index) => {
-      // Calculate indicators/features based on rolling slice
-      const history = scenario.ticks.slice(0, index + 1);
-      const prevTick = index > 0 ? scenario.ticks[index - 1] : null;
-      
-      // Feature calculations:
-      const rvol = tick.volume / 300000; // Simulated RVOL
-      const isOISpiking = prevTick ? (tick.openInterest - prevTick.openInterest) / prevTick.openInterest > 0.05 : false;
-      
-      // Crossover evaluations
-      const rsiCrossoverBelow30 = prevTick ? prevTick.rsi > 30 && tick.rsi <= 30 : false;
-      const rsiCrossoverAbove30 = prevTick ? prevTick.rsi < 30 && tick.rsi >= 30 : false;
-      const cvdDivergening = index > 4 ? evaluateDivergence(history) : false;
-      const lowPriceSweep = index > 5 ? evaluateSweep(history) : false;
-      const momentumExhaustion = index > 4 ? evaluateExhaustion(history) : false;
 
-      // Map values of custom inputs dynamically
-      let conditionsEvaluation = activeConditions.map(cond => {
+    const evaluateConds = (condsList: any[], tick: any, rvol: number, isOISpiking: boolean, rsiCrossoverAbove30: boolean, lowPriceSweep: boolean, cvdDivergening: boolean, momentumExhaustion: boolean) => {
+      return condsList.map(cond => {
         let actualVal = 0;
         let isTrue = false;
         
@@ -1693,21 +1716,72 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
 
         return { ...cond, isTrue, actualVal };
       });
+    };
+    
+    const processedTicks = scenario.ticks.map((tick, index) => {
+      // Calculate indicators/features based on rolling slice
+      const history = scenario.ticks.slice(0, index + 1);
+      const prevTick = index > 0 ? scenario.ticks[index - 1] : null;
+      
+      // Feature calculations:
+      const rvol = tick.volume / 300000; // Simulated RVOL
+      const isOISpiking = prevTick ? (tick.openInterest - prevTick.openInterest) / prevTick.openInterest > 0.05 : false;
+      
+      // Crossover evaluations
+      const rsiCrossoverBelow30 = prevTick ? prevTick.rsi > 30 && tick.rsi <= 30 : false;
+      const rsiCrossoverAbove30 = prevTick ? prevTick.rsi < 30 && tick.rsi >= 30 : false;
+      const cvdDivergening = index > 4 ? evaluateDivergence(history) : false;
+      const lowPriceSweep = index > 5 ? evaluateSweep(history) : false;
+      const momentumExhaustion = index > 4 ? evaluateExhaustion(history) : false;
 
-      // Filter out conditions if empty
+      let conditionsEvaluation: any[] = [];
       let triggerSignal = false;
-      if (conditionsEvaluation.length > 0) {
-        if (activeGate === 'AND') {
-          triggerSignal = conditionsEvaluation.every(c => c.isTrue);
+      let detectedDirection: 'LONG' | 'SHORT' = 'LONG';
+
+      if (activeAction === 'DUAL') {
+        const evalLongs = evaluateConds(activeLongConditions || [], tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion);
+        const evalShorts = evaluateConds(activeShortConditions || [], tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion);
+
+        const longGateValRaw = activeLongGate || 'AND';
+        const longGateVal = typeof longGateValRaw === 'string' ? longGateValRaw.trim().toUpperCase() : 'AND';
+        const shortGateValRaw = activeShortGate || 'AND';
+        const shortGateVal = typeof shortGateValRaw === 'string' ? shortGateValRaw.trim().toUpperCase() : 'AND';
+
+        const longTriggered = evalLongs.length > 0 && (longGateVal === 'AND' ? evalLongs.every(c => c.isTrue) : evalLongs.some(c => c.isTrue));
+        const shortTriggered = evalShorts.length > 0 && (shortGateVal === 'AND' ? evalShorts.every(c => c.isTrue) : evalShorts.some(c => c.isTrue));
+
+        if (longTriggered && !shortTriggered) {
+          triggerSignal = true;
+          detectedDirection = 'LONG';
+          conditionsEvaluation = evalLongs.map(c => ({...c, metric: `LONG: ${c.metric}`}));
+        } else if (shortTriggered && !longTriggered) {
+          triggerSignal = true;
+          detectedDirection = 'SHORT';
+          conditionsEvaluation = evalShorts.map(c => ({...c, metric: `SHORT: ${c.metric}`}));
+        } else if (longTriggered && shortTriggered) {
+          triggerSignal = true;
+          detectedDirection = 'LONG';
+          conditionsEvaluation = evalLongs.map(c => ({...c, metric: `LONG: ${c.metric}`}));
         } else {
-          triggerSignal = conditionsEvaluation.some(c => c.isTrue);
+          triggerSignal = false;
+          conditionsEvaluation = [
+            ...evalLongs.map(c => ({...c, metric: `LONG: ${c.metric}`})),
+            ...evalShorts.map(c => ({...c, metric: `SHORT: ${c.metric}`}))
+          ];
         }
+      } else {
+        conditionsEvaluation = evaluateConds(activeConditions, tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion);
+        if (conditionsEvaluation.length > 0) {
+          const activeGateNormalized = typeof activeGate === 'string' ? activeGate.trim().toUpperCase() : 'AND';
+          triggerSignal = activeGateNormalized === 'AND' ? conditionsEvaluation.every(c => c.isTrue) : conditionsEvaluation.some(c => c.isTrue);
+        }
+        detectedDirection = activeAction === 'LONG' || activeAction === 'SHORT' ? (activeAction as 'LONG' | 'SHORT') : 'LONG';
       }
 
       // Check regime whitelist mapping
       const regimeMatch = usingProfile || allowedRegimes.length === 0 || allowedRegimes.includes(scenario.regime);
       if (triggerSignal && !regimeMatch) {
-        triggerSignal = false; // blocked by lifestyle/environment regime
+         triggerSignal = false; // blocked by lifestyle/environment regime
       }
 
       // Position logic simulation
@@ -1716,7 +1790,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       
       if (!position && triggerSignal) {
         // Trigger position entry!
-        position = activeAction === 'LONG' || activeAction === 'SHORT' ? (activeAction as 'LONG' | 'SHORT') : 'LONG';
+        position = detectedDirection;
         entryPrice = tick.price;
         resultStatus = 'ACTIVE';
         isBreakeven = false;
@@ -2223,23 +2297,75 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
               {(() => {
                 const targetProfile = activeTawleefa.dynamicRegimeProfiles.find(p => p.regime === activeProfileTab);
                 if (!targetProfile) return null;
+
+                const isDual = targetProfile.action === 'DUAL';
+                const longConds = targetProfile.longConditions || targetProfile.conditions || [];
+                const shortConds = targetProfile.shortConditions || [];
+
                 return (
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 space-y-2.5 text-right font-sans">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400 font-bold">بوابة الدمج المنطقي: <span className="text-emerald-400 font-mono">[{targetProfile.gate}]</span></span>
+                      <span className="text-slate-400 font-bold">
+                        بوابة الدمج المنطقي:{" "}
+                        <span className="text-emerald-400 font-mono">
+                          {isDual ? `LONG: [${targetProfile.longGate || 'AND'}] / SHORT: [${targetProfile.shortGate || 'AND'}]` : `[${targetProfile.gate}]`}
+                        </span>
+                      </span>
                       <span className="text-slate-400 font-bold">الاتجاه المعتمد: <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">[{targetProfile.action}]</span></span>
                     </div>
 
-                    <div className="border-t border-slate-800/85 pt-2.5 space-y-1.5">
-                      <div className="text-[10px] text-slate-400 font-bold mb-1">شروط الدخول المحددة في هذا الريجيم:</div>
-                      {targetProfile.conditions.map((c, i) => (
-                        <div key={c.id || i} className="text-[10px] text-slate-300 bg-slate-950/60 px-2 py-1.5 rounded border border-slate-850/80 flex items-center justify-between font-mono">
-                          <span className="text-emerald-400">#{i + 1}</span>
-                          <span className="text-slate-200">{c.metric} {c.operator === 'GREATER_THAN' ? 'أكبر من' : (c.operator === 'LESS_THAN' ? 'أصغر من' : (c.operator === 'CROSSES_ABOVE' ? 'يخترق صعوداً' : c.operator))} {c.valueNumber === 0 ? '' : c.valueNumber}</span>
-                          <span className="text-slate-500">[{c.timeframe}]</span>
+                    {isDual ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-slate-800/85 pt-2.5">
+                        {/* LONG CONDITIONS */}
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] text-emerald-400 font-bold mb-1 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            شروط الصعود (LONG):
+                          </div>
+                          {longConds.length === 0 ? (
+                            <div className="text-[10px] text-slate-500 bg-slate-950/40 p-2 rounded text-center">لا توجد شروط صعود</div>
+                          ) : (
+                            longConds.map((c, i) => (
+                              <div key={c.id || i} className="text-[10px] text-slate-300 bg-slate-950/60 px-2 py-1.5 rounded border border-slate-850/80 flex items-center justify-between font-mono">
+                                <span className="text-emerald-400">#{i + 1}</span>
+                                <span className="text-slate-200">{c.metric} {c.operator === 'GREATER_THAN' ? 'أكبر من' : (c.operator === 'LESS_THAN' ? 'أصغر من' : (c.operator === 'CROSSES_ABOVE' ? 'يخترق صعوداً' : c.operator))} {c.valueNumber === 0 ? '' : c.valueNumber}</span>
+                                <span className="text-slate-500">[{c.timeframe}]</span>
+                              </div>
+                            ))
+                          )}
                         </div>
-                      ))}
-                    </div>
+
+                        {/* SHORT CONDITIONS */}
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] text-rose-400 font-bold mb-1 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                            شروط الهبوط (SHORT):
+                          </div>
+                          {shortConds.length === 0 ? (
+                            <div className="text-[10px] text-slate-500 bg-slate-950/40 p-2 rounded text-center">لا توجد شروط هبوط</div>
+                          ) : (
+                            shortConds.map((c, i) => (
+                              <div key={c.id || i} className="text-[10px] text-slate-300 bg-slate-950/60 px-2 py-1.5 rounded border border-slate-850/80 flex items-center justify-between font-mono">
+                                <span className="text-rose-400">#{i + 1}</span>
+                                <span className="text-slate-200">{c.metric} {c.operator === 'GREATER_THAN' ? 'أكبر من' : (c.operator === 'LESS_THAN' ? 'أصغر من' : (c.operator === 'CROSSES_ABOVE' ? 'يخترق صعوداً' : c.operator))} {c.valueNumber === 0 ? '' : c.valueNumber}</span>
+                                <span className="text-slate-500">[{c.timeframe}]</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="border-t border-slate-800/85 pt-2.5 space-y-1.5">
+                        <div className="text-[10px] text-slate-400 font-bold mb-1">شروط الدخول المحددة في هذا الريجيم:</div>
+                        {targetProfile.conditions.map((c, i) => (
+                          <div key={c.id || i} className="text-[10px] text-slate-300 bg-slate-950/60 px-2 py-1.5 rounded border border-slate-850/80 flex items-center justify-between font-mono">
+                            <span className="text-emerald-400">#{i + 1}</span>
+                            <span className="text-slate-200">{c.metric} {c.operator === 'GREATER_THAN' ? 'أكبر من' : (c.operator === 'LESS_THAN' ? 'أصغر من' : (c.operator === 'CROSSES_ABOVE' ? 'يخترق صعوداً' : c.operator))} {c.valueNumber === 0 ? '' : c.valueNumber}</span>
+                            <span className="text-slate-500">[{c.timeframe}]</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="border-t border-slate-800/85 pt-2.5 grid grid-cols-2 gap-2 text-[10px]">
                       <div className="bg-slate-950/40 p-2 rounded border border-slate-850/40">
@@ -2263,18 +2389,54 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
               <div className="flex items-center gap-3">
                 <span className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg text-xs font-bold leading-none">بوابة الدمج المنطقي:</span>
                 <div className="flex p-0.5 bg-slate-900 rounded-lg border border-slate-800">
-                  <button
-                    onClick={() => setGate('AND')}
-                    className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                  >
-                    تطابق الكل (AND)
-                  </button>
-                  <button
-                    onClick={() => setGate('OR')}
-                    className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                  >
-                    تطابق أي شرط (OR)
-                  </button>
+                  {action === 'DUAL' ? (
+                    activeDualTab === 'LONG' ? (
+                      <>
+                        <button
+                          onClick={() => setLongGate('AND')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          تطابق الكل (AND)
+                        </button>
+                        <button
+                          onClick={() => setLongGate('OR')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          تطابق أي شرط (OR)
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setShortGate('AND')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          تطابق الكل (AND)
+                        </button>
+                        <button
+                          onClick={() => setShortGate('OR')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          تطابق أي شرط (OR)
+                        </button>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setGate('AND')}
+                        className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        تطابق الكل (AND)
+                      </button>
+                      <button
+                        onClick={() => setGate('OR')}
+                        className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        تطابق أي شرط (OR)
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -2293,16 +2455,46 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                   >
                     دخول هبوطي (SHORT)
                   </button>
+                  <button
+                    onClick={() => {
+                      setAction('DUAL');
+                      if (longConditions.length === 0) {
+                        setLongConditions(conditions.length > 0 ? [...conditions] : []);
+                      }
+                    }}
+                    className={`px-4 py-1 rounded text-xs font-bold transition-all ${action === 'DUAL' ? 'bg-amber-500/15 border border-amber-500/40 text-amber-400' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    اتجاهين معاً (LONG & SHORT)
+                  </button>
                 </div>
               </div>
             </div>
+
+            {action === 'DUAL' && (
+              <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800/80 mb-2">
+                <button
+                  onClick={() => setActiveDualTab('LONG')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeDualTab === 'LONG' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  شروط الاتجاه الصعودي (LONG) - {longConditions.length}
+                </button>
+                <button
+                  onClick={() => setActiveDualTab('SHORT')}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeDualTab === 'SHORT' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/25' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                  شروط الاتجاه الهبوطي (SHORT) - {shortConditions.length}
+                </button>
+              </div>
+            )}
 
             {/* Micro-indicators Conditions Engine Table */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1">
                   <Layers className="text-emerald-400 w-3.5 h-3.5" />
-                  قائمة شروط وبلوكات الفلو الهيكلي ({conditions.length})
+                  قائمة شروط وبلوكات الفلو الهيكلي ({action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions.length : shortConditions.length) : conditions.length})
                 </h4>
                 <button
                   onClick={addConditionRow}
@@ -2313,7 +2505,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                 </button>
               </div>
 
-              {conditions.length === 0 ? (
+              {(action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions.length === 0 : shortConditions.length === 0) : conditions.length === 0) ? (
                 <div className="text-center py-10 bg-slate-950/20 border border-slate-800/80 rounded-xl space-y-2">
                   <Info className="mx-auto text-slate-600 w-8 h-8" />
                   <p className="text-xs text-slate-500">لا توجد أي شروط مضافة حتى الآن لهذه التوليفة!</p>
@@ -2326,7 +2518,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                  {conditions.map((cond, idx) => (
+                  {(action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions : shortConditions) : conditions).map((cond, idx) => (
                     <div 
                       key={cond.id} 
                       className="group bg-slate-950/80 border border-slate-800/80 hover:border-slate-700 p-4 rounded-xl flex flex-col md:flex-row items-stretch md:items-center gap-3 relative transition-all"
@@ -2851,28 +3043,36 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                                   </span>
                                 </div>
                                 <div className="flex flex-wrap gap-1.5">
-                                  {report.conditions.map((cond: any, cidx: number) => (
-                                    <div 
-                                      key={cidx} 
-                                      className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-[9px] font-mono select-none ${
-                                        cond.isMet 
-                                          ? 'bg-emerald-950/40 text-emerald-400 border-emerald-900/50' 
-                                          : 'bg-rose-950/20 text-rose-400 border-rose-900/30'
-                                      }`}
-                                      title={`الشرط: ${cond.metric} ${cond.operator} ${cond.threshold}. القيمة المقروءة: ${cond.actualValue}`}
-                                    >
-                                      <span className="font-extrabold">{cond.metric}</span>
-                                      <span className="text-slate-500">
-                                        {cond.operator === 'GREATER_THAN' ? '>' : cond.operator === 'LESS_THAN' ? '<' : cond.operator === 'CROSSES_ABOVE' ? '≥' : cond.operator === 'CROSSES_BELOW' ? '≤' : cond.operator}
-                                      </span>
-                                      <span className="text-slate-300 font-bold">{cond.threshold}</span>
-                                      <span className="text-slate-500">|</span>
-                                      <span className="font-bold underline decoration-dotted text-slate-100">
-                                        {cond.actualValue?.toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                                      </span>
-                                      <span>{cond.isMet ? '✅' : '❌'}</span>
-                                    </div>
-                                  ))}
+                                  {report.conditions.map((cond: any, cidx: number) => {
+                                    const isLongC = cond.metric?.startsWith('LONG:');
+                                    const isShortC = cond.metric?.startsWith('SHORT:');
+                                    const displayName = isLongC 
+                                      ? cond.metric.replace('LONG:', '🟢 صعود:') 
+                                      : (isShortC ? cond.metric.replace('SHORT:', '🔴 هبوط:') : cond.metric);
+
+                                    return (
+                                      <div 
+                                        key={cidx} 
+                                        className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-[9px] font-mono select-none ${
+                                          cond.isMet 
+                                            ? (isShortC ? 'bg-orange-950/40 text-orange-400 border-orange-900/50' : 'bg-emerald-950/40 text-emerald-400 border-emerald-900/50') 
+                                            : (isShortC ? 'bg-rose-950/10 text-rose-300 border-rose-900/20' : 'bg-slate-950/20 text-slate-400 border-slate-900/30')
+                                        }`}
+                                        title={`الشرط: ${cond.metric} ${cond.operator} ${cond.threshold}. القيمة المقروءة: ${cond.actualValue}`}
+                                      >
+                                        <span className="font-extrabold">{displayName}</span>
+                                        <span className="text-slate-500">
+                                          {cond.operator === 'GREATER_THAN' ? '>' : cond.operator === 'LESS_THAN' ? '<' : cond.operator === 'CROSSES_ABOVE' ? '≥' : cond.operator === 'CROSSES_BELOW' ? '≤' : cond.operator}
+                                        </span>
+                                        <span className="text-slate-300 font-bold">{cond.threshold}</span>
+                                        <span className="text-slate-500">|</span>
+                                        <span className="font-bold underline decoration-dotted text-slate-100">
+                                          {cond.actualValue?.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                                        </span>
+                                        <span>{cond.isMet ? '✅' : '❌'}</span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             ) : hasDecision ? (

@@ -115,7 +115,10 @@ export class CoreEngine {
               }
             }
 
-            if (activeConfig && Array.isArray(activeConfig.conditions) && activeConfig.conditions.length > 0) {
+            if (activeConfig && (
+              (activeConfig.action === 'DUAL' && ((activeConfig.longConditions && activeConfig.longConditions.length > 0) || (activeConfig.shortConditions && activeConfig.shortConditions.length > 0))) ||
+              (Array.isArray(activeConfig.conditions) && activeConfig.conditions.length > 0)
+            )) {
               const evaluateConditionsDetailed = (conditionsList: any[], metricsObj: MarketMetrics) => {
                 return conditionsList.map((cond: any) => {
                   let actualVal = 0;
@@ -166,14 +169,69 @@ export class CoreEngine {
                 });
               };
 
-              const detailedConditions = evaluateConditionsDetailed(activeConfig.conditions, metrics);
-              const conditionsEvaluation = detailedConditions.map(c => c.isMet);
-
+              let botBias: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
+              let detailedConditions: any[] = [];
               let triggerSignal = false;
-              if (activeConfig.gate === 'AND') {
-                triggerSignal = conditionsEvaluation.every((v: boolean) => v);
+              let activeGateRaw = activeConfig.gate || 'AND';
+              let activeGate = typeof activeGateRaw === 'string' ? activeGateRaw.trim().toUpperCase() : 'AND';
+
+              const isDualMode = activeConfig.action === 'DUAL';
+
+              if (isDualMode) {
+                const longConds = activeConfig.longConditions || [];
+                const shortConds = activeConfig.shortConditions || [];
+
+                const detailedLong = evaluateConditionsDetailed(longConds, metrics).map(c => ({...c, metric: `LONG: ${c.metric}`}));
+                const detailedShort = evaluateConditionsDetailed(shortConds, metrics).map(c => ({...c, metric: `SHORT: ${c.metric}`}));
+
+                const longGateValRaw = activeConfig.longGate || 'AND';
+                const longGateVal = typeof longGateValRaw === 'string' ? longGateValRaw.trim().toUpperCase() : 'AND';
+                const shortGateValRaw = activeConfig.shortGate || 'AND';
+                const shortGateVal = typeof shortGateValRaw === 'string' ? shortGateValRaw.trim().toUpperCase() : 'AND';
+
+                const longTriggered = longConds.length > 0 && (longGateVal === 'AND' 
+                  ? detailedLong.every(c => c.isMet) 
+                  : detailedLong.some(c => c.isMet));
+
+                const shortTriggered = shortConds.length > 0 && (shortGateVal === 'AND' 
+                  ? detailedShort.every(c => c.isMet) 
+                  : detailedShort.some(c => c.isMet));
+
+                if (longTriggered && !shortTriggered) {
+                  botBias = 'LONG';
+                  triggerSignal = true;
+                  detailedConditions = detailedLong;
+                  activeGate = longGateVal;
+                } else if (shortTriggered && !longTriggered) {
+                  botBias = 'SHORT';
+                  triggerSignal = true;
+                  detailedConditions = detailedShort;
+                  activeGate = shortGateVal;
+                } else if (longTriggered && shortTriggered) {
+                  botBias = 'LONG';
+                  triggerSignal = true;
+                  detailedConditions = detailedLong;
+                  activeGate = longGateVal;
+                } else {
+                  detailedConditions = [...detailedLong, ...detailedShort];
+                  triggerSignal = false;
+                  botBias = 'NEUTRAL';
+                  activeGate = `${longGateVal}/${shortGateVal}`;
+                }
               } else {
-                triggerSignal = conditionsEvaluation.some((v: boolean) => v);
+                detailedConditions = evaluateConditionsDetailed(activeConfig.conditions || [], metrics);
+                const conditionsEvaluation = detailedConditions.map(c => c.isMet);
+
+                if (detailedConditions.length > 0) {
+                  if (activeGate === 'AND') {
+                    triggerSignal = conditionsEvaluation.every((v: boolean) => v);
+                  } else {
+                    triggerSignal = conditionsEvaluation.some((v: boolean) => v);
+                  }
+                }
+                if (triggerSignal) {
+                  botBias = activeConfig.action === 'LONG' ? 'LONG' : (activeConfig.action === 'SHORT' ? 'SHORT' : 'NEUTRAL');
+                }
               }
 
               // Regime filtering
@@ -182,7 +240,7 @@ export class CoreEngine {
 
               const tawleefaReportJson = {
                 name: tawleefa.name,
-                gate: activeConfig.gate || 'AND',
+                gate: activeGate,
                 allowedRegimes: tawleefa.allowedRegimes || [],
                 currentRegime: currentRegimeName,
                 regimeMatch: regimeMatch,
@@ -191,16 +249,15 @@ export class CoreEngine {
               };
 
               if (triggerSignal && regimeMatch) {
-                const botBias: 'LONG' | 'SHORT' | 'NEUTRAL' = activeConfig.action === 'LONG' ? 'LONG' : (activeConfig.action === 'SHORT' ? 'SHORT' : 'NEUTRAL');
                 if (botBias !== 'NEUTRAL') {
-                  console.log(`[⭐ TAWLEEFA ENGINE] Attack signal triggered via "${tawleefa.name}"${usingProfile ? ' (Regime profile active)' : ''} for ${metrics.symbol}`);
+                  console.log(`[⭐ TAWLEEFA ENGINE] Attack signal triggered via "${tawleefa.name}"${usingProfile ? ' (Regime profile active)' : ''} for ${metrics.symbol} Bias: ${botBias}`);
                   return {
                     regime: regimeStatus.regime,
                     bias: botBias,
                     trap: trap,
                     confidence: (tawleefa.minMarketConfidence ?? 60) / 100,
                     action: 'ATTACK',
-                    reason: `TAWLEEFA:${tawleefa.name}${usingProfile ? '_PROFILE_' + currentRegimeName : ''}`,
+                    reason: `TAWLEEFA:${tawleefa.name}${usingProfile ? '_PROFILE_' + currentRegimeName : ''}_${botBias}`,
                     tawleefaReport: tawleefaReportJson
                   };
                 }

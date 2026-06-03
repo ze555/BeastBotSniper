@@ -2,7 +2,7 @@ import axios from 'axios';
 import { sniper } from './sniperEngine.js';
 import { getWatchlist } from './binanceScanner.js';
 import { MarketCondition, GlobalContext } from '../types/trading.js';
-import { getTimeframes } from './timeframeUtils.js';
+import { getTimeframes, calculateTakerRatio } from './timeframeUtils.js';
 
 const BINANCE_FAPI = 'https://fapi.binance.com';
 let isRunning = false;
@@ -154,15 +154,8 @@ export async function runTradeLoop() {
                 klines = klinesRes.data;
                 if (klines && klines.length > 0) {
                   const lastK = klines[klines.length - 1];
-                  const totalVol = parseFloat(lastK[5]);
-                  const takerBuyVol = parseFloat(lastK[9]);
-                  const takerSellVol = totalVol - takerBuyVol;
-                  if (takerSellVol > 0) {
-                    currentTakerRatio = takerBuyVol / takerSellVol;
-                  } else {
-                    currentTakerRatio = 1.0;
-                  }
-                  currentVol = totalVol;
+                  currentTakerRatio = calculateTakerRatio(lastK);
+                  currentVol = parseFloat(lastK[5]);
                 }
 
                 if (oiRes && oiRes.data && oiRes.data.openInterest) {
@@ -287,11 +280,12 @@ export async function runTradeLoop() {
                      let takerRatio = 1.0;
                      if (klines && klines.length > 0) {
                          const lastK = klines[klines.length - 1];
-                         const totalVol = parseFloat(lastK[5]);
-                         const takerBuyVol = parseFloat(lastK[9]);
+                         const totalVol = 0;
+                         takerRatio = calculateTakerRatio(lastK);
+                         const takerBuyVol = 0;
                          const takerSellVol = totalVol - takerBuyVol;
                          if (takerSellVol > 0) {
-                             takerRatio = takerBuyVol / takerSellVol;
+                             /* already calculated manually */
                          }
                      }
 
