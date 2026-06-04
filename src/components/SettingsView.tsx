@@ -216,7 +216,18 @@ export function SettingsView({
                   <label className="text-slate-300 text-sm font-bold flex items-center gap-2">
                      تأمين الدخول السريع (Breakeven %)
                   </label>
-                  <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-blue-400 font-mono focus:border-blue-500 outline-none transition-all text-left text-lg" dir="ltr" value={settings.strictFastBreakevenPerc ?? 0.5} onChange={e => setSettings({...settings, strictFastBreakevenPerc: parseFloat(e.target.value)})} />
+                  <div className="flex items-center justify-between p-3 bg-slate-900/60 rounded-xl border border-slate-800 my-2">
+                     <span className="text-xs text-slate-400 font-bold">تفعيل الخيار (Enable)</span>
+                     <input 
+                       type="checkbox" 
+                       checked={!!settings.enableFastBreakeven} 
+                       onChange={e => setSettings({...settings, enableFastBreakeven: e.target.checked})} 
+                       className="w-5 h-5 accent-cyan-500 cursor-pointer" 
+                     />
+                  </div>
+                  {settings.enableFastBreakeven && (
+                     <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-blue-400 font-mono focus:border-blue-500 outline-none transition-all text-left text-lg mt-2 animate-in fade-in duration-150" dir="ltr" value={settings.strictFastBreakevenPerc ?? 0.5} onChange={e => setSettings({...settings, strictFastBreakevenPerc: parseFloat(e.target.value)})} />
+                  )}
                   <p className="text-[9px] text-slate-500 italic">نقل الوقف لسعر الدخول بمجرد وصول الربح السعري لهذه النسبة.</p>
                </div>
             </div>

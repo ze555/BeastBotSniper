@@ -49,6 +49,7 @@ export class SniperEngine {
     strictMode: true,
     strictMinRvol: 1.5,
     strictFastBreakevenPerc: 0.3,
+    enableFastBreakeven: false,
     useSmartExit: true,
     useWiseExit: true,
     useWiseEntry: true,
@@ -228,6 +229,7 @@ export class SniperEngine {
             strictRsiFilter: dbSettings.strictRsiFilter === 1,
             strictRetest: dbSettings.strictRetest === 1,
             strictFastBreakevenPerc: dbSettings.strictFastBreakevenPerc,
+            enableFastBreakeven: dbSettings.enableFastBreakeven === 1,
             strictRsiHigh: dbSettings.strictRsiHigh,
             strictRsiLow: dbSettings.strictRsiLow,
             strictRetestPullbackPerc: dbSettings.strictRetestPullbackPerc,
@@ -445,7 +447,7 @@ export class SniperEngine {
 
     // 2. ULTRA-FAST BREAKEVEN GUARD (التأمين الفولاذي اللحظي المستميت)
     const lockThreshold = 0.20; 
-    if (!trade.isBreakeven && priceChangePerc >= lockThreshold) {
+    if (this.settings.enableFastBreakeven && !trade.isBreakeven && priceChangePerc >= lockThreshold) {
       const buffer = 1.0006; // Secure 0.06% above entry price to safeguard trading commissions
       trade.sl = isLong ? entryPrice * buffer : entryPrice * (2 - buffer);
       trade.isBreakeven = true;
@@ -718,7 +720,9 @@ export class SniperEngine {
       }
 
       const slVal = targetConfig.stopLossValue ?? 1.5;
-      if (targetConfig.stopLossMode === 'ATR_DYNAMIC' && cond.atr) {
+      if (targetConfig.stopLossMode === 'NONE' || targetConfig.stopLossMode === 'DISABLED') {
+        sl = cond.type === "LONG" ? 0.000001 : 9999999999;
+      } else if (targetConfig.stopLossMode === 'ATR_DYNAMIC' && cond.atr) {
         sl = cond.type === "LONG" ? entryPrice - cond.atr * slVal : entryPrice + cond.atr * slVal;
       } else if (targetConfig.stopLossMode === 'FIXED') {
         sl = cond.type === "LONG" ? entryPrice * (1 - (slVal / 100)) : entryPrice * (1 + (slVal / 100));
@@ -727,7 +731,10 @@ export class SniperEngine {
       }
 
       const tpVal = targetConfig.takeProfitValue ?? 2.0;
-      const slDistance = Math.abs(entryPrice - sl);
+      let slDistance = Math.abs(entryPrice - sl);
+      if (targetConfig.stopLossMode === 'NONE' || targetConfig.stopLossMode === 'DISABLED') {
+        slDistance = entryPrice * 0.015; // 1.5% nominal distance for TP calculation if SL is disabled
+      }
       if (targetConfig.takeProfitMode === 'FIXED_R') {
         tp1 = cond.type === "LONG" ? entryPrice + slDistance * tpVal * 0.5 : entryPrice - slDistance * tpVal * 0.5;
         tp2 = cond.type === "LONG" ? entryPrice + slDistance * tpVal : entryPrice - slDistance * tpVal;
@@ -1219,7 +1226,7 @@ export class SniperEngine {
 
           if (profile) {
             // A. Dynamic Breakeven R (Capital Protection)
-            if (profile.breakevenR !== undefined && profitR >= profile.breakevenR && !trade.stopMoved) {
+            if (this.settings.enableFastBreakeven && profile.breakevenR !== undefined && profitR >= profile.breakevenR && !trade.stopMoved) {
               trade.sl = trade.entryPrice;
               trade.stopMoved = true;
               trade.isBreakeven = true;

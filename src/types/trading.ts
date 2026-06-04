@@ -217,6 +217,7 @@ export interface BotSettings {
   strictRsiFilter?: boolean;        
   strictRetest?: boolean;           
   strictFastBreakevenPerc?: number; 
+  enableFastBreakeven?: boolean;     // تفعيل تأمين رأس المال ونقل الوقف على الدخول
 
   // Advanced Strict Tuning
   strictRsiHigh?: number;           // Default 75

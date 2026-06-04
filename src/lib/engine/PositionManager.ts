@@ -50,7 +50,7 @@ export class PositionManager {
 
     // 3. تأمين نقطة الدخول (Breakeven Logic)
     const beThreshold = settings.strictFastBreakevenPerc ?? 0.5;
-    if (!trade.isBreakeven && priceChangePerc >= beThreshold) {
+    if (settings.enableFastBreakeven && !trade.isBreakeven && priceChangePerc >= beThreshold) {
       // نقل الوقف لسعر الدخول + تغطية الرسوم (0.15% أمان إضافي)
       const feeBuffer = 1.0015;
       newTrade.sl = trade.type === 'LONG' ? trade.entryPrice * feeBuffer : trade.entryPrice * (2 - feeBuffer);

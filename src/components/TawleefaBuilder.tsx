@@ -82,7 +82,7 @@ export interface RegimeProfile {
   gate: LogicGate;
   conditions: ConditionRow[];
   action: RuleAction;
-  stopLossMode: 'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE';
+  stopLossMode: 'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE' | 'NONE';
   stopLossValue: number;
   takeProfitMode: 'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE';
   takeProfitValue: number;
@@ -111,7 +111,7 @@ export interface TawleefaConfig {
   // Execution params
   leverage: number;
   riskPerTrade: number; // % of portfolio
-  stopLossMode: 'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE';
+  stopLossMode: 'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE' | 'NONE';
   stopLossValue: number; // multiplier or percentage
   takeProfitMode: 'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE';
   takeProfitValue: number; // multiplier or percentage
@@ -183,7 +183,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     minMarketConfidence: 50,
     leverage: 8,
     riskPerTrade: 1.0,
-    stopLossMode: 'ATR_DYNAMIC',
+    stopLossMode: 'NONE',
     stopLossValue: 1.3,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.0,
@@ -544,7 +544,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     minMarketConfidence: 55,
     leverage: 8,
     riskPerTrade: 1.5,
-    stopLossMode: 'ATR_DYNAMIC',
+    stopLossMode: 'NONE',
     stopLossValue: 1.2,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.0,
@@ -951,6 +951,481 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       }
     ],
     createdAt: '2026-06-02T21:30:00Z'
+  },
+  {
+    id: 'hybrid_twin_engine_anti_chop_v4',
+    name: 'توليفة الحماية الفولاذية ضد التذبذب والأثر الارتدادي (Anti-Chop & Sideways Protection)',
+    description: 'توليفة مطورة خصيصاً لوقاية المحفظة من الفرم والمصائد في الأسواق المستقرة والتذبذب العرضي؛ تدمج مرشحات اتجاه ADX صارمة، وترشيح لسيولة هائلة RVOL، مع اتساع وقف الخسارة ATR لإبطال مفعول الذيول العشوائية.',
+    creator: 'مجمع سنايبر الكمي المطور (Anti-Chop)',
+    action: 'DUAL',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'global_val_chop_1',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.01,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_val_chop_2',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.5,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    allowedRegimes: [
+      'TRENDING',
+      'TREND_EXPANSION',
+      'MOMENTUM_MODE'
+    ],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 60,
+    leverage: 8,
+    riskPerTrade: 1.2,
+    stopLossMode: 'NONE',
+    stopLossValue: 2.2,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 3.5,
+    longGate: 'AND',
+    longConditions: [
+      {
+        id: 'global_long_rvol_chop',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.5,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_long_taker_chop',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.05,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    shortGate: 'AND',
+    shortConditions: [
+      {
+        id: 'global_short_rvol_chop',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.5,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_short_taker_chop',
+        metric: 'TAKER_RATIO',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0.95,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    dynamicRegimeProfiles: [
+      {
+        regime: 'TREND_EXPANSION',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_te_long_1_chop',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 25,
+            timeframe: '15m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_te_long_2_chop',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.10,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_te_short_1_chop',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 25,
+            timeframe: '15m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_te_short_2_chop',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.90,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 2.2,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 4.0
+      },
+      {
+        regime: 'MOMENTUM_MODE',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_mm_long_1_chop',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.15,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_mm_long_2_chop',
+            metric: 'OPEN_INTEREST',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.0,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_mm_long_3_chop',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 20,
+            timeframe: '15m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_mm_short_1_chop',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.85,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_mm_short_2_chop',
+            metric: 'OPEN_INTEREST',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.0,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_mm_short_3_chop',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 20,
+            timeframe: '15m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 2.0,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 4.5
+      },
+      {
+        regime: 'LIQUIDITY_SWEEP',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_lq_long_1_chop',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_lq_short_1_chop',
+            metric: 'PRICE',
+            operator: 'SWEEP_LOW_HIGH',
+            valueType: 'NUMBER',
+            valueNumber: 2,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'SWEEP_LOW_BOUND',
+        stopLossValue: 0.25,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 2.5
+      },
+      {
+        regime: 'COMPRESSION',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_cp_long_1_chop',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_cp_long_2_chop',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_cp_short_1_chop',
+            metric: 'OPEN_INTEREST',
+            operator: 'SPIKE',
+            valueType: 'NUMBER',
+            valueNumber: 5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_cp_short_2_chop',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 2.0,
+        takeProfitMode: 'FUSION_CASCADE',
+        takeProfitValue: 5.0
+      },
+      {
+        regime: 'TRENDING',
+        action: 'DUAL',
+        gate: 'AND',
+        conditions: [],
+        longConditions: [
+          {
+            id: 'gp_tr_long_1_chop',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_tr_long_2_chop',
+            metric: 'TAKER_RATIO',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.05,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_tr_long_3_chop',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 25,
+            timeframe: '15m',
+            sensitivity: 1.0
+          }
+        ],
+        shortConditions: [
+          {
+            id: 'gp_tr_short_1_chop',
+            metric: 'RVOL',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 1.5,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_tr_short_2_chop',
+            metric: 'TAKER_RATIO',
+            operator: 'LESS_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 0.95,
+            timeframe: '5m',
+            sensitivity: 1.0
+          },
+          {
+            id: 'gp_tr_short_3_chop',
+            metric: 'ADX',
+            operator: 'GREATER_THAN',
+            valueType: 'NUMBER',
+            valueNumber: 25,
+            timeframe: '15m',
+            sensitivity: 1.0
+          }
+        ],
+        stopLossMode: 'ATR_DYNAMIC',
+        stopLossValue: 2.2,
+        takeProfitMode: 'TRAILING_MOMENTUM',
+        takeProfitValue: 3.0
+      }
+    ],
+    dynamicExitProfiles: [
+      {
+        regime: "TREND_EXPANSION",
+        breakevenR: 1.2,
+        partials: [
+          {
+            profitR: 2.0,
+            closePercent: 20
+          },
+          {
+            profitR: 4.0,
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "ADX",
+            operator: "LESS_THAN",
+            valueNumber: 20
+          },
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 0.95
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "MOMENTUM_MODE",
+        breakevenR: 0.8,
+        partials: [
+          {
+            profitR: 1.5,
+            closePercent: 30
+          },
+          {
+            profitR: 3.0,
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 1.0
+          },
+          {
+            metric: "OPEN_INTEREST",
+            operator: "LESS_THAN",
+            valueNumber: 0.0
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "LIQUIDITY_SWEEP",
+        breakevenR: 0.5,
+        partials: [
+          {
+            profitR: 1.0,
+            closePercent: 30
+          }
+        ],
+        hardExitR: 2.0,
+        exitConditions: [
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 0.95
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "COMPRESSION",
+        breakevenR: 1.0,
+        partials: [
+          {
+            profitR: 2.5,
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "RVOL",
+            operator: "LESS_THAN",
+            valueNumber: 0.9
+          },
+          {
+            metric: "OPEN_INTEREST",
+            operator: "LESS_THAN",
+            valueNumber: -1
+          }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "TRENDING",
+        breakevenR: 1.0,
+        partials: [
+          {
+            profitR: 1.5,
+            closePercent: 20
+          }
+        ],
+        exitConditions: [
+          {
+            metric: "RVOL",
+            operator: "LESS_THAN",
+            valueNumber: 0.9
+          },
+          {
+            metric: "TAKER_RATIO",
+            operator: "LESS_THAN",
+            valueNumber: 0.98
+          }
+        ],
+        exitGate: "AND"
+      }
+    ],
+    createdAt: '2026-06-04T10:46:00Z'
   }
 ];
 
@@ -1040,7 +1515,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
   const [minMarketConfidence, setMinMarketConfidence] = useState(60);
   const [leverage, setLeverage] = useState(10);
   const [riskPerTrade, setRiskPerTrade] = useState(1.0);
-  const [stopLossMode, setStopLossMode] = useState<'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE'>('ATR_DYNAMIC');
+  const [stopLossMode, setStopLossMode] = useState<'ATR_DYNAMIC' | 'FIXED' | 'SWEEP_LOW_BOUND' | 'EXHAUSTION_CLOSE' | 'NONE'>('NONE');
   const [stopLossValue, setStopLossValue] = useState(1.5);
   const [takeProfitMode, setTakeProfitMode] = useState<'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE'>('TRAILING_MOMENTUM');
   const [takeProfitValue, setTakeProfitValue] = useState(2.0);
@@ -2661,6 +3136,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                   className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200"
                 >
                   <option value="ATR_DYNAMIC">تكيّفي (ATR Multiplier)</option>
+                  <option value="NONE">تعطيل وقف الخسارة البارز (Disabled - No Stop Loss)</option>
                   <option value="FIXED">ثابت مئوي (Fixed %SL)</option>
                   <option value="SWEEP_LOW_BOUND">تحت قاع التصفية (Sweep boundary)</option>
                   <option value="EXHAUSTION_CLOSE">إغلاق تلقائي عند الاستقرار</option>
