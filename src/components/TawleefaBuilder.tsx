@@ -974,7 +974,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'RVOL',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.5,
+        valueNumber: 1.2,
         timeframe: '5m',
         sensitivity: 1.0
       }
@@ -999,7 +999,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'RVOL',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.5,
+        valueNumber: 1.2,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1020,7 +1020,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'RVOL',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.5,
+        valueNumber: 1.2,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1105,7 +1105,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'OPEN_INTEREST',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 1.0,
+            valueNumber: 0.5,
             timeframe: '5m',
             sensitivity: 1.0
           },
@@ -1134,7 +1134,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'OPEN_INTEREST',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 1.0,
+            valueNumber: 0.5,
             timeframe: '5m',
             sensitivity: 1.0
           },
@@ -1205,7 +1205,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'RVOL',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 1.5,
+            valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
           }
@@ -1225,7 +1225,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'RVOL',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 1.5,
+            valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
           }
@@ -1246,7 +1246,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'RVOL',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 1.5,
+            valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
           },
@@ -1275,7 +1275,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'RVOL',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 1.5,
+            valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
           },
