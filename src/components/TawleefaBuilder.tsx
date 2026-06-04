@@ -1046,7 +1046,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'ADX',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 25,
+            valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
           },
@@ -1066,7 +1066,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'ADX',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 25,
+            valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
           },
@@ -1114,7 +1114,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'ADX',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 20,
+            valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
           }
@@ -1143,7 +1143,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'ADX',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 20,
+            valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
           }
@@ -1264,7 +1264,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'ADX',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 25,
+            valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
           }
@@ -1293,7 +1293,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             metric: 'ADX',
             operator: 'GREATER_THAN',
             valueType: 'NUMBER',
-            valueNumber: 25,
+            valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
           }
