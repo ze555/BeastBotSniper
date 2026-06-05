@@ -1457,7 +1457,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     leverage: 10,
     riskPerTrade: 1.5,
     stopLossMode: 'FIXED',
-    stopLossValue: 1.5,
+    stopLossValue: 0.5,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.5,
     longGate: 'AND',
@@ -3349,10 +3349,13 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                       }`}
                     >
                       {regime === 'TREND_EXPANSION' && '📈 اتجاه توسعي صاعد'}
+                      {regime === 'MOMENTUM_MODE' && '🚀 زخم اندفاعي'}
+                      {regime === 'TRENDING' && '📊 مسار اتجاهي'}
                       {regime === 'LIQUIDITY_SWEEP' && '⚡ موجات تصفية سيولة'}
                       {regime === 'TRAP_MODE' && '🎯 فخاخ ومكائد صانع السوق'}
                       {regime === 'COMPRESSION' && '🌀 انضغاط وجمع سيولة هادئ'}
                       {regime === 'VIOLENT_VOLATILITY' && '🔥 تقلب مفرط وعشوائي'}
+                      {regime === 'DEAD_CHOP' && '💀 مسار متذبذب ميت'}
                     </button>
                   );
                 })}
