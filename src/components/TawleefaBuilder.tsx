@@ -48,8 +48,8 @@ export type RuleAction = 'LONG' | 'SHORT' | 'EXIT_ALL' | 'ALERT_ONLY' | 'DUAL';
 
 export interface ConditionRow {
   id: string;
-  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER';
-  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION';
+  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND';
+  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT';
   valueType: 'NUMBER' | 'METRIC';
   valueNumber: number;
   valueMetric?: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE';
@@ -58,8 +58,8 @@ export interface ConditionRow {
 }
 
 export interface DynamicExitCondition {
-  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER';
-  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION';
+  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND';
+  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT';
   valueNumber: number;
 }
 
@@ -74,6 +74,10 @@ export interface DynamicExitProfile {
   partials?: DynamicExitPartial[];
   exitConditions?: DynamicExitCondition[];
   exitGate?: 'AND' | 'OR';
+  longExitConditions?: DynamicExitCondition[];
+  longExitGate?: 'AND' | 'OR';
+  shortExitConditions?: DynamicExitCondition[];
+  shortExitGate?: 'AND' | 'OR';
   hardExitR?: number;
 }
 
@@ -1546,10 +1550,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { profitR: 2.0, closePercent: 20 },
           { profitR: 4.0, closePercent: 20 }
         ],
-        exitConditions: [
+        exitConditions: [],
+        longExitConditions: [
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
-          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 }
+          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
         ],
+        longExitGate: "AND",
+        shortExitConditions: [
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
+          { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.02 }
+        ],
+        shortExitGate: "AND",
         exitGate: "AND"
       },
       {
@@ -1571,14 +1582,81 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         partials: [
           { profitR: 1.5, closePercent: 20 }
         ],
-        exitConditions: [
-          { metric: "RVOL", operator: "LESS_THAN", valueNumber: 0.9 },
+        exitConditions: [],
+        longExitConditions: [
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
           { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
         ],
+        longExitGate: "AND",
+        shortExitConditions: [
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
+          { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.02 }
+        ],
+        shortExitGate: "AND",
         exitGate: "AND"
       }
     ],
     createdAt: '2026-06-05T10:00:00Z'
+  },
+  {
+    id: '100_trades_blueprint_strict',
+    name: 'توليفة المئة صفقة الصارمة (100 Trades Strict Blueprint)',
+    description: 'توليفة صارمة جداً ومقيدة مخصصة لاختبار المئة صفقة. تضمن أعلى مستويات الثقة مع فلتر EMA50 الإلزامي لمنع الصفقات المعكوسة.',
+    creator: 'Beast Sniper Control',
+    action: 'DUAL',
+    gate: 'AND',
+    conditions: [
+      {
+        id: '100_trades_ema50_filter',
+        metric: 'EMA50_TREND',
+        operator: 'EXPECT_LONG', 
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    longGate: 'AND',
+    longConditions: [
+      { id: '100l_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.8, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_ema', metric: 'EMA50_TREND', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    shortGate: 'AND',
+    shortConditions: [
+      { id: '100s_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.8, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_ema', metric: 'EMA50_TREND', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    minMarketConfidence: 70,
+    leverage: 10,
+    riskPerTrade: 1.0,
+    stopLossMode: 'ATR_DYNAMIC',
+    stopLossValue: 1.5,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 3.5,
+    dynamicExitProfiles: [
+      {
+        regime: "TRENDING",
+        breakevenR: 0.8,
+        partials: [{ profitR: 1.5, closePercent: 20 }],
+        exitConditions: [],
+        longExitConditions: [
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
+          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
+        ],
+        longExitGate: "AND",
+        shortExitConditions: [
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
+          { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.02 }
+        ],
+        shortExitGate: "AND",
+        exitGate: "AND"
+      }
+    ],
+    createdAt: '2026-06-05T12:00:00Z'
   }
 ];
 

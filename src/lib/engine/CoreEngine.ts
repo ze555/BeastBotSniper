@@ -131,6 +131,7 @@ export class CoreEngine {
                     case 'FUNDING_RATE': actualVal = metricsObj.fundingRate ?? 0; break;
                     case 'RSI': actualVal = metricsObj.rsi; break;
                     case 'ADX': actualVal = metricsObj.adx; break;
+                    case 'EMA50_TREND': actualVal = metricsObj.ema50 ? (metricsObj.price > metricsObj.ema50 ? 1 : -1) : 0; break;
                     default: actualVal = metricsObj.price;
                   }
 
@@ -159,6 +160,10 @@ export class CoreEngine {
                     isTrue = (metricsObj.takerRatio !== undefined && ((metricsObj.takerRatio > 1.2 && metricsObj.rsi < 45) || (metricsObj.takerRatio < 0.8 && metricsObj.rsi > 55)));
                   } else if (cond.operator === 'SWEEP_LOW_HIGH' || cond.operator === 'EXHAUSTION') {
                     isTrue = metricsObj.rsi > 70 || metricsObj.rsi < 30;
+                  } else if (cond.operator === 'EXPECT_LONG') {
+                    isTrue = actualVal > 0;
+                  } else if (cond.operator === 'EXPECT_SHORT') {
+                    isTrue = actualVal < 0;
                   } else {
                     isTrue = actualVal > cond.valueNumber;
                   }

@@ -149,6 +149,7 @@ export interface MarketCondition {
   decision?: EngineDecision;  // The 7-layer decision core result
   adx?: number;              // Real-time ADX strength
   rsi?: number;              // Real-time RSI relative strength
+  ema50?: number;            // 50 EMA Trend filter
   isAdxRising?: boolean;     // Whether ADX is currently rising or decreasing
 }
 
@@ -159,6 +160,7 @@ export interface MarketMetrics {
   atr: number;
   atrPerc: number;
   rsi: number;
+  ema50?: number;
   volume: number;
   rvol: number;
   spread: number;

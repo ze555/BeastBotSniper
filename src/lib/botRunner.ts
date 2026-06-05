@@ -292,9 +292,23 @@ export async function runTradeLoop() {
 
                      // --- 🦁 BEAST AUDITOR LIVE METRICS CALCULATION ---
                      const currentPx = parseFloat(klines[klines.length - 1][4]);
-                     // Use only completed candles for robust technical indicator calculations
+                      // Use only completed candles for robust technical indicator calculations
                      const completedKlines = klines && klines.length > 2 ? klines.slice(0, -1) : klines;
                      
+                      let currentEma50 = currentPx;
+                      if (completedKlines && completedKlines.length >= 50) {
+                          const period = 50;
+                          const k = 2 / (period + 1);
+                          let sum = 0;
+                          for (let i = 0; i < period; i++) {
+                              sum += parseFloat(completedKlines[i][4]);
+                          }
+                          currentEma50 = sum / period;
+                          for (let i = period; i < completedKlines.length; i++) {
+                              currentEma50 = (parseFloat(completedKlines[i][4]) - currentEma50) * k + currentEma50;
+                          }
+                      }
+
                      const { RegimeEngine } = await import('./engine/RegimeEngine.js');
                      const adxCurrent = RegimeEngine.calculateADX(completedKlines);
                      const adxPrev = RegimeEngine.calculateADX(completedKlines.slice(0, -1));
@@ -371,6 +385,7 @@ export async function runTradeLoop() {
                          oiChange: oiChangeVal,
                          adx: adxCurrent,
                          adxPrev: adxPrev,
+                         ema50: currentEma50,
                          isAdxRising: isAdxRising,
                          lastUpdated: Date.now()
                      };
@@ -448,6 +463,7 @@ export async function runTradeLoop() {
                              fundingRate: parseFloat((coin as any).fundingRate || 0),
                              adx: adxCurrent,
                              rsi: currentRsi,
+                             ema50: currentEma50,
                              isAdxRising: isAdxRising
                          };
 

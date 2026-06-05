@@ -610,6 +610,7 @@ export class SniperEngine {
       atr: atrVal,
       atrPerc: atrVal ? (atrVal / condition.price) * 100 : 0,
       rsi: condition.rsi !== undefined ? condition.rsi : 50,
+      ema50: condition.ema50,
       volume: condition.vol24h || 0,
       rvol: (condition.rvol && condition.rvol > 0) ? condition.rvol : (condition.isMomentumHigh ? 2 : 1),
       spread: condition.spread || 0,
@@ -1206,6 +1207,7 @@ export class SniperEngine {
               case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
               case 'RSI': actualVal = rsiVal; break;
               case 'ADX': actualVal = adxVal; break;
+              case 'EMA50_TREND': actualVal = condition.ema50 ? (currentPrice > condition.ema50 ? 1 : -1) : 0; break;
               default: actualVal = currentPrice;
             }
 
@@ -1220,6 +1222,10 @@ export class SniperEngine {
               isTrue = actualVal <= cond.valueNumber;
             } else if (cond.operator === 'SPIKE') {
               isTrue = Math.abs(actualVal) >= cond.valueNumber;
+            } else if (cond.operator === 'EXPECT_LONG') {
+              isTrue = actualVal > 0;
+            } else if (cond.operator === 'EXPECT_SHORT') {
+              isTrue = actualVal < 0;
             } else {
               isTrue = actualVal > cond.valueNumber;
             }
@@ -1289,8 +1295,19 @@ export class SniperEngine {
             }
 
             // D. Dynamic Exit Conditions Evaluation
-            if (profile.exitConditions && profile.exitConditions.length > 0) {
-              const condDetails = profile.exitConditions.map((cond: any) => {
+            let conditionsToEvaluate = profile.exitConditions || [];
+            let gateRaw = profile.exitGate || 'AND';
+
+            if (trade.type === 'LONG' && profile.longExitConditions && profile.longExitConditions.length > 0) {
+              conditionsToEvaluate = profile.longExitConditions;
+              gateRaw = profile.longExitGate || 'AND';
+            } else if (trade.type === 'SHORT' && profile.shortExitConditions && profile.shortExitConditions.length > 0) {
+              conditionsToEvaluate = profile.shortExitConditions;
+              gateRaw = profile.shortExitGate || 'AND';
+            }
+
+            if (conditionsToEvaluate && conditionsToEvaluate.length > 0) {
+              const condDetails = conditionsToEvaluate.map((cond: any) => {
                 let actualVal = 0;
                 const rsiVal = rsi !== undefined ? rsi : 50;
                 const adxVal = adx !== undefined ? adx : 25;
@@ -1318,7 +1335,6 @@ export class SniperEngine {
               });
 
               const condResults = condDetails.map((d: any) => d.isTrue);
-              const gateRaw = profile.exitGate || 'AND';
               const gate = typeof gateRaw === 'string' ? gateRaw.trim().toUpperCase() : 'AND';
               let conditionsMet = false;
               if (gate === 'AND') {
