@@ -249,7 +249,15 @@ export class CoreEngine {
 
               // Regime filtering
               const allowedRegimes = tawleefa.allowedRegimes || [];
-              const regimeMatch = usingProfile || allowedRegimes.length === 0 || allowedRegimes.includes(currentRegimeName) || allowedRegimes.includes('ANY');
+              let regimeMatch = false;
+              if (usingProfile) {
+                 regimeMatch = true;
+              } else if (allowedRegimes.length === 0 || allowedRegimes.includes('ANY')) {
+                 // Default to BEST states if nothing is selected or ANY is used
+                 regimeMatch = currentRegimeName !== 'DEAD_CHOP' && currentRegimeName !== 'VIOLENT_VOLATILITY';
+              } else {
+                 regimeMatch = allowedRegimes.includes(currentRegimeName);
+              }
 
               const tawleefaReportJson = {
                 name: tawleefa.name,

@@ -615,6 +615,7 @@ export class SniperEngine {
       spread: condition.spread || 0,
       fundingRate: condition.fundingRate,
       openInterest: condition.oi,
+      oiChange: condition.oiChange24h || 0,
       takerRatio: condition.takerBuySellRatio,
       isChop: condition.isRanging,
       isAdxRising: condition.isAdxRising,

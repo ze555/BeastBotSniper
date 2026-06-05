@@ -1448,7 +1448,9 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     allowedRegimes: [
       'TREND_EXPANSION',
       'MOMENTUM_MODE',
-      'TRENDING'
+      'TRENDING',
+      'COMPRESSION',
+      'LIQUIDITY_SWEEP'
     ],
     btcAlignmentRequired: false,
     minMarketConfidence: 50,
@@ -1465,7 +1467,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'RVOL',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.3,
+        valueNumber: 1.15,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1474,7 +1476,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'TAKER_RATIO',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.08,
+        valueNumber: 1.05,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1483,7 +1485,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'OPEN_INTEREST',
         operator: 'SPIKE',
         valueType: 'NUMBER',
-        valueNumber: 1.0,
+        valueNumber: 0.5,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1492,7 +1494,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'ADX',
         operator: 'CROSSES_ABOVE',
         valueType: 'NUMBER',
-        valueNumber: 23,
+        valueNumber: 20,
         timeframe: '5m',
         sensitivity: 1.0
       }
@@ -1504,7 +1506,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'RVOL',
         operator: 'GREATER_THAN',
         valueType: 'NUMBER',
-        valueNumber: 1.3,
+        valueNumber: 1.15,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1513,7 +1515,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'TAKER_RATIO',
         operator: 'LESS_THAN',
         valueType: 'NUMBER',
-        valueNumber: 0.92,
+        valueNumber: 0.95,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1522,7 +1524,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'OPEN_INTEREST',
         operator: 'SPIKE',
         valueType: 'NUMBER',
-        valueNumber: 1.0,
+        valueNumber: 0.5,
         timeframe: '5m',
         sensitivity: 1.0
       },
@@ -1531,7 +1533,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         metric: 'ADX',
         operator: 'CROSSES_ABOVE',
         valueType: 'NUMBER',
-        valueNumber: 23,
+        valueNumber: 20,
         timeframe: '5m',
         sensitivity: 1.0
       }
@@ -2355,7 +2357,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       
       // Feature calculations:
       const rvol = tick.volume / 300000; // Simulated RVOL
-      const isOISpiking = prevTick ? (tick.openInterest - prevTick.openInterest) / prevTick.openInterest > 0.05 : false;
+      
+      // Calculate conditionally based on individual condition thresholds when mapping conditions
+      // For now, approximate based on an average threshold for overall boolean check
+      const isOISpiking = prevTick ? Math.abs((tick.openInterest - prevTick.openInterest) / prevTick.openInterest) * 100 > 0.5 : false;
       const isAdxRising = prevTick ? (tick.adx > prevTick.adx) : true;
       
       // Crossover evaluations
@@ -2410,7 +2415,14 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       }
 
       // Check regime whitelist mapping
-      const regimeMatch = usingProfile || allowedRegimes.length === 0 || allowedRegimes.includes(scenario.regime);
+      let regimeMatch = false;
+      if (usingProfile) {
+         regimeMatch = true;
+      } else if (allowedRegimes.length === 0 || allowedRegimes.includes('ANY')) {
+         regimeMatch = scenario.regime !== 'DEAD_CHOP' && scenario.regime !== 'VIOLENT_VOLATILITY';
+      } else {
+         regimeMatch = allowedRegimes.includes(scenario.regime);
+      }
       if (triggerSignal && !regimeMatch) {
          triggerSignal = false; // blocked by lifestyle/environment regime
       }
@@ -3315,7 +3327,16 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
             <div className="space-y-2">
               <label className="text-xs text-slate-400 block font-medium">تقييد تشغيل التوليفة في بيئات سوقية محددة فقط:</label>
               <div className="flex flex-wrap gap-2">
-                {['TREND_EXPANSION', 'LIQUIDITY_SWEEP', 'TRAP_MODE', 'COMPRESSION', 'VIOLENT_VOLATILITY'].map(regime => {
+                {[
+                  'TREND_EXPANSION', 
+                  'MOMENTUM_MODE', 
+                  'TRENDING', 
+                  'LIQUIDITY_SWEEP', 
+                  'TRAP_MODE', 
+                  'COMPRESSION', 
+                  'VIOLENT_VOLATILITY',
+                  'DEAD_CHOP'
+                ].map(regime => {
                   const active = allowedRegimes.includes(regime);
                   return (
                     <button

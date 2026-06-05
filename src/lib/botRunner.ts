@@ -17,6 +17,7 @@ let globalContext: GlobalContext = {
 
 // Map to track previous Open Interest per symbol to calculate real-time percentage change
 const lastOpenInterestMap = new Map<string, number>();
+const baseOpenInterestMap = new Map<string, { value: number; timestamp: number }>();
 
 export function getGlobalMarketContext() {
   return globalContext;
@@ -152,7 +153,11 @@ export async function runTradeLoop() {
                 ]);
                 
                 klines = klinesRes.data;
-                if (klines && klines.length > 0) {
+                if (klines && klines.length > 1) {
+                  const completedK = klines[klines.length - 2];
+                  currentTakerRatio = calculateTakerRatio(completedK);
+                  currentVol = parseFloat(klines[klines.length - 1][5]); // Still use latest vol for current volume
+                } else if (klines && klines.length > 0) {
                   const lastK = klines[klines.length - 1];
                   currentTakerRatio = calculateTakerRatio(lastK);
                   currentVol = parseFloat(lastK[5]);
@@ -276,33 +281,32 @@ export async function runTradeLoop() {
                      const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
-                     // Calculate Taker Ratio safely from the last candle of klines
+                     // Calculate Taker Ratio safely from the last completed candle of klines
                      let takerRatio = 1.0;
-                     if (klines && klines.length > 0) {
-                         const lastK = klines[klines.length - 1];
-                         const totalVol = 0;
-                         takerRatio = calculateTakerRatio(lastK);
-                         const takerBuyVol = 0;
-                         const takerSellVol = totalVol - takerBuyVol;
-                         if (takerSellVol > 0) {
-                             /* already calculated manually */
-                         }
+                     if (klines && klines.length > 1) {
+                         const completedK = klines[klines.length - 2]; // Last completed candle
+                         takerRatio = calculateTakerRatio(completedK);
+                     } else if (klines && klines.length === 1) {
+                         takerRatio = calculateTakerRatio(klines[0]);
                      }
 
                      // --- 🦁 BEAST AUDITOR LIVE METRICS CALCULATION ---
                      const currentPx = parseFloat(klines[klines.length - 1][4]);
+                     // Use only completed candles for robust technical indicator calculations
+                     const completedKlines = klines && klines.length > 2 ? klines.slice(0, -1) : klines;
+                     
                      const { RegimeEngine } = await import('./engine/RegimeEngine.js');
-                     const adxCurrent = RegimeEngine.calculateADX(klines);
-                     const adxPrev = RegimeEngine.calculateADX(klines.slice(0, -1));
+                     const adxCurrent = RegimeEngine.calculateADX(completedKlines);
+                     const adxPrev = RegimeEngine.calculateADX(completedKlines.slice(0, -1));
                      const isAdxRising = adxCurrent > adxPrev;
 
                      let currentRsi = 50;
-                     if (klines && klines.length >= 14) {
+                     if (completedKlines && completedKlines.length >= 14) {
                          const calcRSI = (endIdx: number, period: number = 14) => {
-                             if (klines.length < period + 1) return 50;
+                             if (completedKlines.length < period + 1) return 50;
                              let gains = 0, losses = 0;
                              for (let i = endIdx - period + 1; i <= endIdx; i++) {
-                                 const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
+                                 const change = parseFloat(completedKlines[i][4]) - parseFloat(completedKlines[i-1][4]);
                                  if (change > 0) gains += change;
                                  else losses -= change;
                              }
@@ -310,22 +314,23 @@ export async function runTradeLoop() {
                              let avgLoss = losses / period;
                              return avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
                          };
-                         currentRsi = calcRSI(klines.length - 1, 14);
+                         currentRsi = calcRSI(completedKlines.length - 1, 14);
                      }
 
                                            let liveRvol = coin.rvol || 1.0;
-                      if (klines && klines.length >= 20) {
+                      if (completedKlines && completedKlines.length >= 20) {
                           let sumVol = 0;
-                          for (let i = 0; i < klines.length - 1; i++) {
-                              sumVol += parseFloat(klines[i][5]);
+                          for (let i = 0; i < completedKlines.length - 1; i++) {
+                              sumVol += parseFloat(completedKlines[i][5]);
                           }
-                          const avgVol = sumVol / (klines.length - 1);
-                          const currentCandleVol = parseFloat(klines[klines.length - 1][5]);
+                          const avgVol = sumVol / (completedKlines.length - 1);
+                          const lastCompletedVol = parseFloat(completedKlines[completedKlines.length - 1][5]);
                           if (avgVol > 0) {
-                              liveRvol = currentCandleVol / avgVol;
+                              liveRvol = lastCompletedVol / avgVol;
                           }
                       }
 
+                      const now = Date.now();
                       let currentOI = 0;
                       let oiChangeVal = 0;
                       try {
@@ -333,29 +338,28 @@ export async function runTradeLoop() {
                           const oiRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 });
                           if (oiRes.data && oiRes.data.openInterest) {
                               currentOI = parseFloat(oiRes.data.openInterest);
-                              if (!(coin as any).oiHistory) {
+                              
+                              let baseOI = baseOpenInterestMap.get(coin.symbol);
+                              // Refetch history only if not set or extremely old (older than 4 hours)
+                              if (!baseOI || (now - baseOI.timestamp > 4 * 60 * 60 * 1000)) {
                                   try {
-                                      const oiHistRes = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${coin.symbol}&period=15m&limit=15`, { timeout: 3000 });
+                                      // Get OI from 1 hour ago for baseline change
+                                      const oiHistRes = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${coin.symbol}&period=15m&limit=5`, { timeout: 3000 });
                                       if (Array.isArray(oiHistRes.data) && oiHistRes.data.length > 0) {
-                                          (coin as any).oiHistory = oiHistRes.data.map((point: any) => parseFloat(point.sumOpenInterest));
-                                          (coin as any).oiHistory.push(currentOI);
+                                          const pastOI = parseFloat(oiHistRes.data[0].sumOpenInterest);
+                                          baseOpenInterestMap.set(coin.symbol, { value: pastOI, timestamp: now });
+                                          baseOI = { value: pastOI, timestamp: now };
                                       } else {
-                                          (coin as any).oiHistory = [currentOI];
+                                          baseOpenInterestMap.set(coin.symbol, { value: currentOI, timestamp: now });
+                                          baseOI = { value: currentOI, timestamp: now };
                                       }
                                   } catch (error) {
-                                      (coin as any).oiHistory = [currentOI];
-                                  }
-                              } else {
-                                  (coin as any).oiHistory.push(currentOI);
-                                  if ((coin as any).oiHistory.length > 20) {
-                                      (coin as any).oiHistory.shift();
+                                      baseOpenInterestMap.set(coin.symbol, { value: currentOI, timestamp: now });
+                                      baseOI = { value: currentOI, timestamp: now };
                                   }
                               }
-                              const startOI = (coin as any).oiHistory[0];
-                              oiChangeVal = startOI > 0 ? ((currentOI - startOI) / startOI) * 100 : 0;
-                              if (oiChangeVal === 0 && (coin as any).oiHistory.length > 1) {
-                                  oiChangeVal = 1.05; // default live change fallback
-                              }
+                              
+                              oiChangeVal = baseOI.value > 0 ? ((currentOI - baseOI.value) / baseOI.value) * 100 : 0;
                           }
                       } catch (e) {}
 
@@ -373,11 +377,11 @@ export async function runTradeLoop() {
 
                      if (settings.useBeastAuditorEngine) {
                                                    const liveRvolVal = (coin as any).beastMetrics?.rvol ?? coin.rvol ?? 1.0;
-                          const isLongMatch = liveRvolVal > 1.3 && takerRatio > 1.08 && oiChangeVal > 1.0 && adxCurrent > 23 && isAdxRising;
-                         const isShortMatch = liveRvolVal > 1.3 && takerRatio < 0.92 && oiChangeVal > 1.0 && adxCurrent > 23 && isAdxRising;
+                          const isLongMatch = liveRvolVal >= 1.15 && takerRatio >= 1.05 && Math.abs(oiChangeVal) >= 0.5 && adxCurrent >= 20 && isAdxRising;
+                         const isShortMatch = liveRvolVal >= 1.15 && takerRatio <= 0.95 && Math.abs(oiChangeVal) >= 0.5 && adxCurrent >= 20 && isAdxRising;
 
                          (coin as any).decision = {
-                             regime: 'TREND_EXPANSION',
+                             regime: 'ANY',
                              bias: isLongMatch ? 'LONG' : (isShortMatch ? 'SHORT' : 'NEUTRAL'),
                              trap: 'NONE',
                              confidence: (isLongMatch || isShortMatch) ? 1.0 : 0.0,
@@ -414,7 +418,8 @@ export async function runTradeLoop() {
                              const label = 'Beast No Signal';
                              rejectionReasons[label] = (rejectionReasons[label] || 0) + 1;
                          }
-                         continue;
+                         
+                         // We do not 'continue' here so that if useTawleefaEngine is also on, it can populate the Live Diagnostics UI.
                      }
 
                      if (settings.useTawleefaEngine) {
@@ -451,18 +456,24 @@ export async function runTradeLoop() {
                              if (oiRes.data && oiRes.data.openInterest) {
                                  const currentOI = parseFloat(oiRes.data.openInterest);
                                  condition.oi = currentOI;
-                                 let prevOI = lastOpenInterestMap.get(coin.symbol);
-                                 if (!prevOI) {
+                                 const now = Date.now();
+                                 let baseOI = baseOpenInterestMap.get(coin.symbol);
+                                 if (!baseOI || now - baseOI.timestamp > 4 * 60 * 60 * 1000) {
                                      try {
                                          const oiHistRes = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${coin.symbol}&period=1d&limit=2`, { timeout: 3000 });
                                          if (Array.isArray(oiHistRes.data) && oiHistRes.data.length > 0) {
-                                             prevOI = parseFloat(oiHistRes.data[0].sumOpenInterest);
-                                             lastOpenInterestMap.set(coin.symbol, prevOI);
+                                             const pastOI = parseFloat(oiHistRes.data[0].sumOpenInterest);
+                                             baseOpenInterestMap.set(coin.symbol, { value: pastOI, timestamp: now });
+                                             baseOI = { value: pastOI, timestamp: now };
                                          }
                                      } catch (e) {}
                                  }
-                                 if (prevOI && prevOI > 0) {
-                                     condition.oiChange24h = ((currentOI - prevOI) / prevOI) * 100;
+                                 if (!baseOI) {
+                                     baseOpenInterestMap.set(coin.symbol, { value: currentOI, timestamp: now });
+                                     baseOI = { value: currentOI, timestamp: now };
+                                 }
+                                 if (baseOI && baseOI.value > 0) {
+                                     condition.oiChange24h = ((currentOI - baseOI.value) / baseOI.value) * 100;
                                  }
                                  lastOpenInterestMap.set(coin.symbol, currentOI);
                              }
