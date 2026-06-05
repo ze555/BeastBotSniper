@@ -890,6 +890,72 @@ export function SettingsView({
                   </div>
                 </div>
 
+                {/* 🦁 مدقق الوحش العملاق ذو الـ 5 شروط المطلقة (Beast Auditor Engine) */}
+                <div className="bg-gradient-to-r from-rose-950/20 via-slate-900 to-amber-950/20 border-2 border-amber-500/40 rounded-3xl p-6 md:p-8 space-y-6 relative overflow-hidden shadow-[0_0_25px_rgba(245,158,11,0.1)]">
+                  <div className="absolute top-0 right-0 p-2 opacity-5"><Flame className="w-32 h-32 text-amber-500" /></div>
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-800 pb-4 relative z-10 gap-4" dir="rtl">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-amber-500/10 rounded-2xl border border-amber-500/20 text-amber-400">
+                        <Zap className="w-7 h-7 text-amber-500 animate-bounce" />
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-2 justify-end">
+                          <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">١٠٠٪ شروط قاطعة</span>
+                          <h4 className="font-extrabold text-amber-500 text-lg">مدقق الوحش العملاق ذو الـ 5 شروط المطلقة (Beast Auditor Engine)</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                          محرك هجومي استثنائي لا يسمح بالدخول بأي صفقة إلا بعد استيفاء <strong>خمسة شروط فنية مطلقة في اللحظة ذاتها</strong> بنسبة ١٠٠٪.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 self-end md:self-center ml-0 mr-auto">
+                      {settings.useBeastAuditorEngine && (
+                        <span className="text-[10px] bg-amber-500/15 text-amber-450 border border-amber-500/25 px-2.5 py-1 rounded-lg font-bold">ACTIVE & SCANNING ⚡</span>
+                      )}
+                      <input 
+                         type="checkbox" 
+                         checked={!!settings.useBeastAuditorEngine} 
+                         onChange={e => setSettings({...settings, useBeastAuditorEngine: e.target.checked})} 
+                         className="w-7 h-7 accent-amber-500 cursor-pointer" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4 relative z-10 text-right" dir="rtl">
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                      <div className="text-amber-450 font-black text-xs">١. الحجم النسبي الحاسم</div>
+                      <div className="text-[10px] text-slate-350 font-mono">Relative Volume &gt; 1.3</div>
+                      <p className="text-[9px] text-slate-500 font-sans">تأكيد وجود زخم مالي وسيولة تدعم الاختراق.</p>
+                    </div>
+
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                      <div className="text-amber-450 font-black text-xs">٢. ضغط شراء/بيع حقيقي</div>
+                      <div className="text-[10px] text-slate-350 font-mono">Taker Ratio &gt; 1.08 / &lt; 0.92</div>
+                      <p className="text-[9px] text-slate-500 font-sans">تأكيد غلبة صناع السوق والبيع اللحظي.</p>
+                    </div>
+
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                      <div className="text-amber-450 font-black text-xs">٣. تدفق السيولة المفتوحة</div>
+                      <div className="text-[10px] text-slate-350 font-mono">OI Change &gt; 1.0%</div>
+                      <p className="text-[9px] text-slate-500 font-sans">تراكم عقود جديدة حاسمة تدعم حركة السعر.</p>
+                    </div>
+
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                      <div className="text-amber-450 font-black text-xs">٤. قوة الاتجاه الفني</div>
+                      <div className="text-[10px] text-slate-350 font-mono">ADX Trend &gt; 23</div>
+                      <p className="text-[9px] text-slate-500 font-sans">تجاوز حدود التذبذب وبدء ترند خارق.</p>
+                    </div>
+
+                    <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                      <div className="text-amber-450 font-black text-xs">٥. زيادة معامل ADX</div>
+                      <div className="text-[10px] text-slate-350 font-mono">ADX Current &gt; ADX Prev</div>
+                      <p className="text-[9px] text-slate-500 font-sans">ضمان زيادة تسارع اتساع النطاق اللحظي.</p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Section 1: المفاتيح الهجومية للعمليات الخاطفة */}
                 <div className="bg-slate-950/40 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6">
                   <h3 className="text-lg font-black text-white flex items-center gap-2 border-b border-slate-800 pb-4">

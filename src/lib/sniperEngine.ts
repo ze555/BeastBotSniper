@@ -606,10 +606,10 @@ export class SniperEngine {
     const metrics: MarketMetrics = {
       symbol: condition.symbol,
       price: condition.price,
-      adx: 25, // TODO: calculate accurately
+      adx: condition.adx !== undefined ? condition.adx : 25,
       atr: atrVal,
       atrPerc: atrVal ? (atrVal / condition.price) * 100 : 0,
-      rsi: 50, // TODO: calculate accurately
+      rsi: condition.rsi !== undefined ? condition.rsi : 50,
       volume: condition.vol24h || 0,
       rvol: (condition.rvol && condition.rvol > 0) ? condition.rvol : (condition.isMomentumHigh ? 2 : 1),
       spread: condition.spread || 0,
@@ -617,6 +617,7 @@ export class SniperEngine {
       openInterest: condition.oi,
       takerRatio: condition.takerBuySellRatio,
       isChop: condition.isRanging,
+      isAdxRising: condition.isAdxRising,
     };
 
     // 2. Clear Decision from the Core

@@ -772,7 +772,14 @@ export default function App() {
                         )}
                         {paginatedWatchlist.map((coin, i) => (
                            <tr key={i} className="hover:bg-slate-700/20 transition-colors">
-                              <td className="px-5 py-4 font-bold font-mono text-emerald-400">{coin.symbol}</td>
+                              <td className="px-5 py-4 font-bold font-mono text-emerald-400">
+                                <div>{coin.symbol}</div>
+                                {coin.beastMetrics && (
+                                  <div className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono mt-1 inline-flex items-center gap-1 leading-normal" title="مؤشرات وحيد القرن الحية لمدقق الوحش">
+                                    <span className="text-amber-500 font-extrabold font-sans">🦁 BEAST:</span> {coin.beastMetrics.oiChange > 0 ? '+' : ''}{coin.beastMetrics.oiChange.toFixed(1)}% OI | ADX: {coin.beastMetrics.adx.toFixed(0)} {coin.beastMetrics.isAdxRising ? '▲' : '▼'}
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-5 py-4">
                                 <span className={`px-2 py-1 rounded inline-flex items-center gap-1 font-bold ${coin.score >= 5 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-yellow-500/10 text-yellow-500'}`}>
                                   {coin.score}/5

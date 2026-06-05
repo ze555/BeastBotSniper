@@ -147,6 +147,9 @@ export interface MarketCondition {
   takerBuySellRatio?: number; // Active market pressure
   rvol?: number;             // Real-time relative volume
   decision?: EngineDecision;  // The 7-layer decision core result
+  adx?: number;              // Real-time ADX strength
+  rsi?: number;              // Real-time RSI relative strength
+  isAdxRising?: boolean;     // Whether ADX is currently rising or decreasing
 }
 
 export interface MarketMetrics {
@@ -165,6 +168,7 @@ export interface MarketMetrics {
   takerRatio?: number;
   isChop: boolean;
   volCoefVar?: number;
+  isAdxRising?: boolean;     // Whether ADX is currently rising
 }
 
 export interface GlobalContext {
@@ -369,6 +373,7 @@ export interface BotSettings {
   // Custom Tawleefa (التوليفة المخصصة)
   useTawleefaEngine?: boolean;          // تفعيل محرك التوليفات المخصصة بالقرارات
   activeTawleefaJson?: string;          // ملف التوليفة النشطة المشفر بصيغة JSON
+  useBeastAuditorEngine?: boolean;      // تفعيل مدقق الوحش العملاق (خمس شروط مطلقة)
 
   // 🦅 Savage & Fierce Exit Engine (محرك الخروج الشرس المستقل)
   useFierceExitEngine?: boolean;        // تفعيل محرك الخروج الشرس المستقل لأي محرك دخول

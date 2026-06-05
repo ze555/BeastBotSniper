@@ -1426,6 +1426,157 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       }
     ],
     createdAt: '2026-06-04T10:46:00Z'
+  },
+  {
+    id: 'beast_auditor_ultimate_v5',
+    name: 'توليفة مدقق الوحش العملاق المطلق (Beast Auditor Ultimate Engine)',
+    description: 'توليفة مدمّرة تعتمد على تفعيل دقيق ومئوي للشروط الخمسة المطلقة لمدقق الوحش اللحظي: دمج RVOL الساحق (>1.3)، قوة ضغط CVD التيكر (>1.08 للطلب أو <0.92 للعرض)، تراكم العقود المفتوحة الحقيقي (>1%)، وقوة الاتجاه المتسارع ADX (>23 متصاعد).',
+    creator: 'أحفاد القناص (Beast Sniper Group)',
+    action: 'DUAL',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'beast_global_rvol',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.3,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    allowedRegimes: [
+      'TREND_EXPANSION',
+      'MOMENTUM_MODE',
+      'TRENDING'
+    ],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 50,
+    leverage: 10,
+    riskPerTrade: 1.5,
+    stopLossMode: 'FIXED',
+    stopLossValue: 1.5,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 3.5,
+    longGate: 'AND',
+    longConditions: [
+      {
+        id: 'beast_long_rvol',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.3,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'beast_long_taker',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.08,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'beast_long_oi',
+        metric: 'OPEN_INTEREST',
+        operator: 'SPIKE',
+        valueType: 'NUMBER',
+        valueNumber: 1.0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'beast_long_adx',
+        metric: 'ADX',
+        operator: 'CROSSES_ABOVE',
+        valueType: 'NUMBER',
+        valueNumber: 23,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    shortGate: 'AND',
+    shortConditions: [
+      {
+        id: 'beast_short_rvol',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.3,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'beast_short_taker',
+        metric: 'TAKER_RATIO',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0.92,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'beast_short_oi',
+        metric: 'OPEN_INTEREST',
+        operator: 'SPIKE',
+        valueType: 'NUMBER',
+        valueNumber: 1.0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'beast_short_adx',
+        metric: 'ADX',
+        operator: 'CROSSES_ABOVE',
+        valueType: 'NUMBER',
+        valueNumber: 23,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    dynamicExitProfiles: [
+      {
+        regime: "TREND_EXPANSION",
+        breakevenR: 1.0,
+        partials: [
+          { profitR: 2.0, closePercent: 20 },
+          { profitR: 4.0, closePercent: 20 }
+        ],
+        exitConditions: [
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
+          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "MOMENTUM_MODE",
+        breakevenR: 0.5,
+        partials: [
+          { profitR: 1.5, closePercent: 30 },
+          { profitR: 3.0, closePercent: 20 }
+        ],
+        exitConditions: [
+          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 1.0 },
+          { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: 0.0 }
+        ],
+        exitGate: "AND"
+      },
+      {
+        regime: "TRENDING",
+        breakevenR: 0.8,
+        partials: [
+          { profitR: 1.5, closePercent: 20 }
+        ],
+        exitConditions: [
+          { metric: "RVOL", operator: "LESS_THAN", valueNumber: 0.9 },
+          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
+        ],
+        exitGate: "AND"
+      }
+    ],
+    createdAt: '2026-06-05T10:00:00Z'
   }
 ];
 
@@ -2135,7 +2286,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     let isPartialProfitTaken = false;
     let peakPrice = 0;
 
-    const evaluateConds = (condsList: any[], tick: any, rvol: number, isOISpiking: boolean, rsiCrossoverAbove30: boolean, lowPriceSweep: boolean, cvdDivergening: boolean, momentumExhaustion: boolean) => {
+    const evaluateConds = (condsList: any[], tick: any, rvol: number, isOISpiking: boolean, rsiCrossoverAbove30: boolean, lowPriceSweep: boolean, cvdDivergening: boolean, momentumExhaustion: boolean, isAdxRising: boolean) => {
       return condsList.map(cond => {
         let actualVal = 0;
         let isTrue = false;
@@ -2185,8 +2336,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           isTrue = actualVal < cond.valueNumber;
         } else if (cond.operator === 'CROSSES_ABOVE' && cond.metric === 'RSI') {
           isTrue = rsiCrossoverAbove30;
+        } else if (cond.operator === 'CROSSES_ABOVE' && cond.metric === 'ADX') {
+          isTrue = actualVal >= cond.valueNumber && isAdxRising;
         } else if (cond.operator === 'EXHAUSTION' && cond.metric === 'PRICE') {
           isTrue = momentumExhaustion;
+        } else {
+          isTrue = actualVal > cond.valueNumber;
         }
 
         return { ...cond, isTrue, actualVal };
@@ -2201,6 +2356,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       // Feature calculations:
       const rvol = tick.volume / 300000; // Simulated RVOL
       const isOISpiking = prevTick ? (tick.openInterest - prevTick.openInterest) / prevTick.openInterest > 0.05 : false;
+      const isAdxRising = prevTick ? (tick.adx > prevTick.adx) : true;
       
       // Crossover evaluations
       const rsiCrossoverBelow30 = prevTick ? prevTick.rsi > 30 && tick.rsi <= 30 : false;
@@ -2214,8 +2370,8 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       let detectedDirection: 'LONG' | 'SHORT' = 'LONG';
 
       if (activeAction === 'DUAL') {
-        const evalLongs = evaluateConds(activeLongConditions || [], tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion);
-        const evalShorts = evaluateConds(activeShortConditions || [], tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion);
+        const evalLongs = evaluateConds(activeLongConditions || [], tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion, isAdxRising);
+        const evalShorts = evaluateConds(activeShortConditions || [], tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion, isAdxRising);
 
         const longGateValRaw = activeLongGate || 'AND';
         const longGateVal = typeof longGateValRaw === 'string' ? longGateValRaw.trim().toUpperCase() : 'AND';
@@ -2245,7 +2401,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           ];
         }
       } else {
-        conditionsEvaluation = evaluateConds(activeConditions, tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion);
+        conditionsEvaluation = evaluateConds(activeConditions, tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion, isAdxRising);
         if (conditionsEvaluation.length > 0) {
           const activeGateNormalized = typeof activeGate === 'string' ? activeGate.trim().toUpperCase() : 'AND';
           triggerSignal = activeGateNormalized === 'AND' ? conditionsEvaluation.every(c => c.isTrue) : conditionsEvaluation.some(c => c.isTrue);
@@ -3510,13 +3666,32 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                                   <span className="text-[10px] text-slate-500">
                                     المطابقة الإجمالية للشروط: 
                                   </span>
-                                  <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded ${
-                                    completedConditions === totalConditions 
-                                      ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50' 
-                                      : 'bg-rose-950/40 text-rose-400 border border-rose-900/50'
-                                  }`}>
-                                    {completedConditions} / {totalConditions} استوفيت
-                                  </span>
+                                  {report.isDualMode ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                        report.completedLong === report.totalLong 
+                                          ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50 animate-pulse' 
+                                          : 'bg-slate-900/40 text-slate-400 border border-slate-800/40'
+                                      }`}>
+                                        🟢 صعود: {report.completedLong}/{report.totalLong}
+                                      </span>
+                                      <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                        report.completedShort === report.totalShort 
+                                          ? 'bg-orange-950/40 text-orange-400 border border-orange-900/50 animate-pulse' 
+                                          : 'bg-slate-900/40 text-slate-400 border border-slate-800/40'
+                                      }`}>
+                                        🔴 هبوط: {report.completedShort}/{report.totalShort}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded ${
+                                      completedConditions === totalConditions 
+                                        ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/50' 
+                                        : 'bg-rose-950/40 text-rose-400 border border-rose-900/50'
+                                    }`}>
+                                      {completedConditions} / {totalConditions} استوفيت
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="flex flex-wrap gap-1.5">
                                   {report.conditions.map((cond: any, cidx: number) => {

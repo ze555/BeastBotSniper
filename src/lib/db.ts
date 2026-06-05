@@ -137,6 +137,7 @@ export const initDB = () => {
           creativeUseAdaptiveExit INTEGER DEFAULT 0,
           useTawleefaEngine INTEGER DEFAULT 0,
           activeTawleefaJson TEXT DEFAULT null,
+          useBeastAuditorEngine INTEGER DEFAULT 0,
           useFierceExitEngine INTEGER DEFAULT 0,
           fierceTakeProfitValue REAL DEFAULT 1.5,
           fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'
@@ -241,6 +242,7 @@ export const initDB = () => {
         "steelMinProfitTake REAL DEFAULT 0.05",
         "useTawleefaEngine INTEGER DEFAULT 0",
         "activeTawleefaJson TEXT DEFAULT null",
+        "useBeastAuditorEngine INTEGER DEFAULT 0",
         "useFierceExitEngine INTEGER DEFAULT 0",
         "fierceTakeProfitValue REAL DEFAULT 1.5",
         "fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'"
@@ -375,7 +377,7 @@ export function saveSettingsToDB(settings: any) {
       isNightmareMode, marketPanicThreshold,
       useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine, creativeUseAdaptiveExit, disableConsecutiveLoss,
       useSteelEngine, steelMinProbability, steelInfluenceCreative, steelInfluenceQuantum, steelInfluenceFusion, steelTakerWeight, steelOiWeight, steelFundingWeight, steelLiquidityWeight, steelHtfTrendWeight, steelAdaptiveSlTp, steelMaxLossMode, steelReboundSensitivity, steelMinProfitTake,
-      useTawleefaEngine, activeTawleefaJson, useFierceExitEngine, fierceTakeProfitValue, fierceTakeProfitMode
+      useTawleefaEngine, activeTawleefaJson, useBeastAuditorEngine, useFierceExitEngine, fierceTakeProfitValue, fierceTakeProfitMode
     )
     VALUES (
       'default',
@@ -390,7 +392,7 @@ export function saveSettingsToDB(settings: any) {
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?
+      ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
@@ -503,6 +505,7 @@ export function saveSettingsToDB(settings: any) {
       steelMinProfitTake=excluded.steelMinProfitTake,
       useTawleefaEngine=excluded.useTawleefaEngine,
       activeTawleefaJson=excluded.activeTawleefaJson,
+      useBeastAuditorEngine=excluded.useBeastAuditorEngine,
       useFierceExitEngine=excluded.useFierceExitEngine,
       fierceTakeProfitValue=excluded.fierceTakeProfitValue,
       fierceTakeProfitMode=excluded.fierceTakeProfitMode
@@ -558,6 +561,7 @@ export function saveSettingsToDB(settings: any) {
     settings.steelMinProfitTake ?? 0.05,
     settings.useTawleefaEngine ? 1 : 0,
     settings.activeTawleefaJson || null,
+    settings.useBeastAuditorEngine ? 1 : 0,
     settings.useFierceExitEngine ? 1 : 0,
     settings.fierceTakeProfitValue ?? 1.5,
     settings.fierceTakeProfitMode || 'FUSION_CASCADE'
@@ -620,6 +624,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.useSteelEngine = row.useSteelEngine === 1;
         row.useTawleefaEngine = row.useTawleefaEngine === 1;
         row.activeTawleefaJson = row.activeTawleefaJson || null;
+        row.useBeastAuditorEngine = row.useBeastAuditorEngine === 1;
         row.useFierceExitEngine = row.useFierceExitEngine === 1;
         if (row.fierceTakeProfitValue === undefined) row.fierceTakeProfitValue = 1.5;
         if (row.fierceTakeProfitMode === undefined) row.fierceTakeProfitMode = 'FUSION_CASCADE';

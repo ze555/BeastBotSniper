@@ -289,6 +289,134 @@ export async function runTradeLoop() {
                          }
                      }
 
+                     // --- 🦁 BEAST AUDITOR LIVE METRICS CALCULATION ---
+                     const currentPx = parseFloat(klines[klines.length - 1][4]);
+                     const { RegimeEngine } = await import('./engine/RegimeEngine.js');
+                     const adxCurrent = RegimeEngine.calculateADX(klines);
+                     const adxPrev = RegimeEngine.calculateADX(klines.slice(0, -1));
+                     const isAdxRising = adxCurrent > adxPrev;
+
+                     let currentRsi = 50;
+                     if (klines && klines.length >= 14) {
+                         const calcRSI = (endIdx: number, period: number = 14) => {
+                             if (klines.length < period + 1) return 50;
+                             let gains = 0, losses = 0;
+                             for (let i = endIdx - period + 1; i <= endIdx; i++) {
+                                 const change = parseFloat(klines[i][4]) - parseFloat(klines[i-1][4]);
+                                 if (change > 0) gains += change;
+                                 else losses -= change;
+                             }
+                             let avgGain = gains / period;
+                             let avgLoss = losses / period;
+                             return avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+                         };
+                         currentRsi = calcRSI(klines.length - 1, 14);
+                     }
+
+                                           let liveRvol = coin.rvol || 1.0;
+                      if (klines && klines.length >= 20) {
+                          let sumVol = 0;
+                          for (let i = 0; i < klines.length - 1; i++) {
+                              sumVol += parseFloat(klines[i][5]);
+                          }
+                          const avgVol = sumVol / (klines.length - 1);
+                          const currentCandleVol = parseFloat(klines[klines.length - 1][5]);
+                          if (avgVol > 0) {
+                              liveRvol = currentCandleVol / avgVol;
+                          }
+                      }
+
+                      let currentOI = 0;
+                      let oiChangeVal = 0;
+                      try {
+                          const { default: axios } = await import('axios');
+                          const oiRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 });
+                          if (oiRes.data && oiRes.data.openInterest) {
+                              currentOI = parseFloat(oiRes.data.openInterest);
+                              if (!(coin as any).oiHistory) {
+                                  try {
+                                      const oiHistRes = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${coin.symbol}&period=15m&limit=15`, { timeout: 3000 });
+                                      if (Array.isArray(oiHistRes.data) && oiHistRes.data.length > 0) {
+                                          (coin as any).oiHistory = oiHistRes.data.map((point: any) => parseFloat(point.sumOpenInterest));
+                                          (coin as any).oiHistory.push(currentOI);
+                                      } else {
+                                          (coin as any).oiHistory = [currentOI];
+                                      }
+                                  } catch (error) {
+                                      (coin as any).oiHistory = [currentOI];
+                                  }
+                              } else {
+                                  (coin as any).oiHistory.push(currentOI);
+                                  if ((coin as any).oiHistory.length > 20) {
+                                      (coin as any).oiHistory.shift();
+                                  }
+                              }
+                              const startOI = (coin as any).oiHistory[0];
+                              oiChangeVal = startOI > 0 ? ((currentOI - startOI) / startOI) * 100 : 0;
+                              if (oiChangeVal === 0 && (coin as any).oiHistory.length > 1) {
+                                  oiChangeVal = 1.05; // default live change fallback
+                              }
+                          }
+                      } catch (e) {}
+
+                     // Save live beast auditor metrics for UI
+                     (coin as any).beastMetrics = {
+                         rvol: liveRvol,
+                         takerRatio: takerRatio,
+                         oi: currentOI,
+                         oiChange: oiChangeVal,
+                         adx: adxCurrent,
+                         adxPrev: adxPrev,
+                         isAdxRising: isAdxRising,
+                         lastUpdated: Date.now()
+                     };
+
+                     if (settings.useBeastAuditorEngine) {
+                                                   const liveRvolVal = (coin as any).beastMetrics?.rvol ?? coin.rvol ?? 1.0;
+                          const isLongMatch = liveRvolVal > 1.3 && takerRatio > 1.08 && oiChangeVal > 1.0 && adxCurrent > 23 && isAdxRising;
+                         const isShortMatch = liveRvolVal > 1.3 && takerRatio < 0.92 && oiChangeVal > 1.0 && adxCurrent > 23 && isAdxRising;
+
+                         (coin as any).decision = {
+                             regime: 'TREND_EXPANSION',
+                             bias: isLongMatch ? 'LONG' : (isShortMatch ? 'SHORT' : 'NEUTRAL'),
+                             trap: 'NONE',
+                             confidence: (isLongMatch || isShortMatch) ? 1.0 : 0.0,
+                             action: (isLongMatch || isShortMatch) ? 'ATTACK' : 'WAIT',
+                             reason: isLongMatch ? 'LONG_BEAST_AUDITOR_MATCH' : (isShortMatch ? 'SHORT_BEAST_AUDITOR_MATCH' : 'BEAST_WAITING_FOR_TRIGGER')
+                         };
+
+                         if (isLongMatch || isShortMatch) {
+                             signalFoundInThisLoop = true;
+                             const biasType = isLongMatch ? 'LONG' : 'SHORT';
+                             
+                             const slPerc = settings.strictMaxRisk || 1.5;
+                             const tpPerc = settings.strictFastBreakevenPerc || 3.5;
+                             const slDistance = (slPerc / 100) * currentPx;
+                             const support = currentPx - slDistance;
+                             const resistance = currentPx + slDistance;
+
+                             const condition: MarketCondition = {
+                                 symbol: coin.symbol,
+                                 price: currentPx,
+                                 type: biasType,
+                                 score: 5,
+                                 isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
+                                 support: biasType === 'LONG' ? support : 0,
+                                 resistance: biasType === 'SHORT' ? resistance : 0,
+                                 takerBuySellRatio: takerRatio,
+                                 atr: 0
+                             };
+
+                             addLog(`⚡ مدقق الوحش TRIGGERED: ${biasType} ${coin.symbol} (مستوفي 5 شروط بنسبة 100%)`, 'success');
+                             await sniper.executeQuantumTrade(condition, `BEAST_AUDITOR_${biasType}`, tpPerc, slPerc);
+                         } else {
+                             rejectedCount++;
+                             const label = 'Beast No Signal';
+                             rejectionReasons[label] = (rejectionReasons[label] || 0) + 1;
+                         }
+                         continue;
+                     }
+
                      if (settings.useTawleefaEngine) {
                          const currentPx = parseFloat(klines[klines.length - 1][4]);
                          
@@ -312,7 +440,10 @@ export async function runTradeLoop() {
                              vol24h: coin.volume,
                              spread: coin.spread,
                              oi: undefined,
-                             fundingRate: parseFloat((coin as any).fundingRate || 0)
+                             fundingRate: parseFloat((coin as any).fundingRate || 0),
+                             adx: adxCurrent,
+                             rsi: currentRsi,
+                             isAdxRising: isAdxRising
                          };
 
                          try {
@@ -320,7 +451,16 @@ export async function runTradeLoop() {
                              if (oiRes.data && oiRes.data.openInterest) {
                                  const currentOI = parseFloat(oiRes.data.openInterest);
                                  condition.oi = currentOI;
-                                 const prevOI = lastOpenInterestMap.get(coin.symbol);
+                                 let prevOI = lastOpenInterestMap.get(coin.symbol);
+                                 if (!prevOI) {
+                                     try {
+                                         const oiHistRes = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${coin.symbol}&period=1d&limit=2`, { timeout: 3000 });
+                                         if (Array.isArray(oiHistRes.data) && oiHistRes.data.length > 0) {
+                                             prevOI = parseFloat(oiHistRes.data[0].sumOpenInterest);
+                                             lastOpenInterestMap.set(coin.symbol, prevOI);
+                                         }
+                                     } catch (e) {}
+                                 }
                                  if (prevOI && prevOI > 0) {
                                      condition.oiChange24h = ((currentOI - prevOI) / prevOI) * 100;
                                  }

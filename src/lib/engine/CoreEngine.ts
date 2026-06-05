@@ -140,7 +140,11 @@ export class CoreEngine {
                   } else if (cond.operator === 'LESS_THAN') {
                     isTrue = actualVal < cond.valueNumber;
                   } else if (cond.operator === 'CROSSES_ABOVE') {
-                    isTrue = actualVal >= cond.valueNumber;
+                    if (cond.metric === 'ADX') {
+                      isTrue = actualVal >= cond.valueNumber && (metricsObj.isAdxRising !== false);
+                    } else {
+                      isTrue = actualVal >= cond.valueNumber;
+                    }
                   } else if (cond.operator === 'CROSSES_BELOW') {
                     isTrue = actualVal <= cond.valueNumber;
                   } else if (cond.operator === 'SPIKE') {
@@ -176,6 +180,10 @@ export class CoreEngine {
               let activeGate = typeof activeGateRaw === 'string' ? activeGateRaw.trim().toUpperCase() : 'AND';
 
               const isDualMode = activeConfig.action === 'DUAL';
+              let completedLong = 0;
+              let totalLong = 0;
+              let completedShort = 0;
+              let totalShort = 0;
 
               if (isDualMode) {
                 const longConds = activeConfig.longConditions || [];
@@ -183,6 +191,11 @@ export class CoreEngine {
 
                 const detailedLong = evaluateConditionsDetailed(longConds, metrics).map(c => ({...c, metric: `LONG: ${c.metric}`}));
                 const detailedShort = evaluateConditionsDetailed(shortConds, metrics).map(c => ({...c, metric: `SHORT: ${c.metric}`}));
+
+                completedLong = detailedLong.filter(c => c.isMet).length;
+                totalLong = detailedLong.length;
+                completedShort = detailedShort.filter(c => c.isMet).length;
+                totalShort = detailedShort.length;
 
                 const longGateValRaw = activeConfig.longGate || 'AND';
                 const longGateVal = typeof longGateValRaw === 'string' ? longGateValRaw.trim().toUpperCase() : 'AND';
@@ -245,7 +258,12 @@ export class CoreEngine {
                 currentRegime: currentRegimeName,
                 regimeMatch: regimeMatch,
                 conditions: detailedConditions,
-                triggerSignal: triggerSignal
+                triggerSignal: triggerSignal,
+                isDualMode: isDualMode,
+                completedLong,
+                totalLong,
+                completedShort,
+                totalShort
               };
 
               if (triggerSignal && regimeMatch) {

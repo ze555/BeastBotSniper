@@ -178,8 +178,29 @@ export async function runBinanceScanner() {
       if (trend === 'FLAT' && rvol > 1.5) score += 1.5; // Bonus for high volume chop
 
       // Minimum score threshold to consider valid
-      const scoreThreshold = isBeastMode ? 1 : 2.5; 
+      const scoreThreshold = (isBeastMode || settings.useBeastAuditorEngine) ? 1 : 2.5; 
       if (score >= scoreThreshold) {
+        // Fetch actual Open Interest history to replace the simulated FLAT trend
+        let oiTrend: 'UP' | 'DOWN' | 'FLAT' = 'FLAT';
+        try {
+          const oiHistRes = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist?symbol=${symbol}&period=15m&limit=6`, { timeout: 4000 });
+          if (Array.isArray(oiHistRes.data) && oiHistRes.data.length >= 2) {
+            const hist = oiHistRes.data;
+            const firstOI = parseFloat(hist[0].sumOpenInterest);
+            const lastOI = parseFloat(hist[hist.length - 1].sumOpenInterest);
+            if (firstOI > 0) {
+              const oiChangePerc = ((lastOI - firstOI) / firstOI) * 100;
+              if (oiChangePerc > 0.5) {
+                oiTrend = 'UP';
+              } else if (oiChangePerc < -0.5) {
+                oiTrend = 'DOWN';
+              }
+            }
+          }
+        } catch (e: any) {
+          // Keep FLAT as fallback if error or timeout
+        }
+
         candidates.push({
             symbol,
             price,
@@ -189,7 +210,7 @@ export async function runBinanceScanner() {
             rvol,
             spread,
             trend,
-            oiTrend: 'FLAT',
+            oiTrend,
             score,
             checks
           });
