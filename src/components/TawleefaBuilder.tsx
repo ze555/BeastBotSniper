@@ -49,7 +49,7 @@ export type RuleAction = 'LONG' | 'SHORT' | 'EXIT_ALL' | 'ALERT_ONLY' | 'DUAL';
 export interface ConditionRow {
   id: string;
   metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND';
-  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT';
+  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT' | 'IS_RISING' | 'IS_FALLING';
   valueType: 'NUMBER' | 'METRIC';
   valueNumber: number;
   valueMetric?: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE';
@@ -59,7 +59,7 @@ export interface ConditionRow {
 
 export interface DynamicExitCondition {
   metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND';
-  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT';
+  operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT' | 'IS_RISING' | 'IS_FALLING';
   valueNumber: number;
 }
 
@@ -1467,6 +1467,15 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     longGate: 'AND',
     longConditions: [
       {
+        id: 'beast_long_ema',
+        metric: 'EMA50_TREND',
+        operator: 'EXPECT_LONG',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
         id: 'beast_long_rvol',
         metric: 'RVOL',
         operator: 'GREATER_THAN',
@@ -1505,6 +1514,15 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     ],
     shortGate: 'AND',
     shortConditions: [
+      {
+        id: 'beast_short_ema',
+        metric: 'EMA50_TREND',
+        operator: 'EXPECT_SHORT',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
       {
         id: 'beast_short_rvol',
         metric: 'RVOL',
@@ -1618,17 +1636,19 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     ],
     longGate: 'AND',
     longConditions: [
-      { id: '100l_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100l_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.8, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100l_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100l_ema', metric: 'EMA50_TREND', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
+      { id: '100l_ema', metric: 'EMA50_TREND', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 23, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100l_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.1, timeframe: '5m', sensitivity: 1.0 }
     ],
     shortGate: 'AND',
     shortConditions: [
-      { id: '100s_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100s_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.8, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100s_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100s_ema', metric: 'EMA50_TREND', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
+      { id: '100s_ema', metric: 'EMA50_TREND', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 23, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100s_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.9, timeframe: '5m', sensitivity: 1.0 }
     ],
     minMarketConfidence: 70,
     leverage: 10,
@@ -3268,6 +3288,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                           <option value="FUNDING_RATE">معدل التمويل (Funding Rate)</option>
                           <option value="RSI">مؤشر القوة النسبية (RSI)</option>
                           <option value="ADX">قوة الاتجاه العام (ADX)</option>
+                          <option value="EMA50_TREND">متوسط 50 (EMA50 Trend)</option>
                         </select>
                       </div>
 
@@ -3287,6 +3308,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                           <option value="DIVERGENCING">انحراف غير متوافق (Divergence)</option>
                           <option value="SWEEP_LOW_HIGH">كسر واقتناص القيعان/القمم (Sweep Action)</option>
                           <option value="EXHAUSTION">إجهاد وامتصاص الزخم (Exhaustion)</option>
+                          <option value="EXPECT_LONG">إيجابي صاعد (Expect Long)</option>
+                          <option value="EXPECT_SHORT">سلبي هابط (Expect Short)</option>
+                          <option value="IS_RISING">اكتساب وتسارع (Is Rising)</option>
+                          <option value="IS_FALLING">فقدان وضعف (Is Falling)</option>
                         </select>
                       </div>
 
@@ -3298,7 +3323,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                           step="any"
                           value={cond.valueNumber}
                           onChange={e => updateConditionRow(cond.id, 'valueNumber', parseFloat(e.target.value) || 0)}
-                          disabled={['DIVERGENCING', 'SWEEP_LOW_HIGH', 'EXHAUSTION'].includes(cond.operator)}
+                          disabled={['DIVERGENCING', 'SWEEP_LOW_HIGH', 'EXHAUSTION', 'EXPECT_LONG', 'EXPECT_SHORT', 'IS_RISING', 'IS_FALLING'].includes(cond.operator)}
                           className="w-full bg-slate-905 border border-slate-800 focus:border-emerald-500 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none text-left font-mono disabled:opacity-30"
                         />
                       </div>

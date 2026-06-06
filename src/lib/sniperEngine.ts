@@ -1009,6 +1009,7 @@ export class SniperEngine {
       btcTrend?: "LONG" | "SHORT";
       klines?: any[];
       fundingRate?: number;
+      isAdxRising?: boolean;
     },
   ) {
     const trade = this.activeTrades.get(symbol);
@@ -1021,6 +1022,20 @@ export class SniperEngine {
     const rsi = indicators?.rsi || 50;
     const adx = indicators?.adx || 25;
     const fundingRate = indicators?.fundingRate;
+
+    let currentEma50 = currentPrice;
+    if (klines && klines.length >= 50) {
+        const period = 50;
+        const k = 2 / (period + 1);
+        let sum = 0;
+        for (let i = 0; i < period; i++) {
+            sum += parseFloat(klines[i][4]);
+        }
+        currentEma50 = sum / period;
+        for (let i = period; i < klines.length; i++) {
+            currentEma50 = (parseFloat(klines[i][4]) - currentEma50) * k + currentEma50;
+        }
+    }
 
     if (fundingRate !== undefined) {
       trade.fundingRate = fundingRate;
@@ -1207,7 +1222,7 @@ export class SniperEngine {
               case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
               case 'RSI': actualVal = rsiVal; break;
               case 'ADX': actualVal = adxVal; break;
-              case 'EMA50_TREND': actualVal = condition.ema50 ? (currentPrice > condition.ema50 ? 1 : -1) : 0; break;
+              case 'EMA50_TREND': actualVal = currentEma50 ? (currentPrice > currentEma50 ? 1 : -1) : 0; break;
               default: actualVal = currentPrice;
             }
 
@@ -1226,6 +1241,12 @@ export class SniperEngine {
               isTrue = actualVal > 0;
             } else if (cond.operator === 'EXPECT_SHORT') {
               isTrue = actualVal < 0;
+            } else if (cond.operator === 'IS_RISING') {
+              if (cond.metric === 'ADX') isTrue = indicators?.isAdxRising === true;
+              else isTrue = false;
+            } else if (cond.operator === 'IS_FALLING') {
+              if (cond.metric === 'ADX') isTrue = indicators?.isAdxRising === false;
+              else isTrue = false;
             } else {
               isTrue = actualVal > cond.valueNumber;
             }

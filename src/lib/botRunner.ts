@@ -172,6 +172,7 @@ export async function runTradeLoop() {
                 }
 
                 // Calculate RSI/ADX if klines available
+                let currentAdxRising = false;
                 if (klines && klines.length >= 15) {
                   const calcRSI = (endIdx: number, period: number) => {
                     let gains = 0, losses = 0;
@@ -185,6 +186,12 @@ export async function runTradeLoop() {
                     return avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
                   };
                   currentRsi = calcRSI(klines.length - 1, 14);
+                  
+                  const { RegimeEngine } = await import('./engine/RegimeEngine.js');
+                  const completedKlines = klines.length > 2 ? klines.slice(0, -1) : klines;
+                  currentAdx = RegimeEngine.calculateADX(completedKlines);
+                  const prevAdx = RegimeEngine.calculateADX(completedKlines.slice(0, -1));
+                  currentAdxRising = currentAdx > prevAdx;
                 }
 
                 // Unified Manage Trades call
@@ -192,6 +199,7 @@ export async function runTradeLoop() {
                   emaTrend: klines && klines.length > 0 && currentPx > parseFloat(klines[klines.length - 1][4]) ? 'LONG' : 'SHORT',
                   rsi: currentRsi,
                   adx: currentAdx,
+                  isAdxRising: currentAdxRising,
                   klines: klines,
                   fundingRate: currentFundingRate
                 });

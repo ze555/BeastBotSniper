@@ -164,6 +164,13 @@ export class CoreEngine {
                     isTrue = actualVal > 0;
                   } else if (cond.operator === 'EXPECT_SHORT') {
                     isTrue = actualVal < 0;
+                  } else if (cond.operator === 'IS_RISING') {
+                    if (cond.metric === 'ADX') isTrue = metricsObj.isAdxRising === true;
+                    // Other metrics can optionally check if prev metric values are stored somewhere
+                    else isTrue = false; 
+                  } else if (cond.operator === 'IS_FALLING') {
+                    if (cond.metric === 'ADX') isTrue = metricsObj.isAdxRising === false;
+                    else isTrue = false;
                   } else {
                     isTrue = actualVal > cond.valueNumber;
                   }
