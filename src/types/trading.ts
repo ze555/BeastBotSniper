@@ -122,6 +122,7 @@ export interface Trade {
   };
   adaptiveHistoryLogs?: any[];
   entryRegime?: string;
+  exitRegime?: string;
   stopMoved?: boolean;
   partial1Taken?: boolean;
   partial2Taken?: boolean;

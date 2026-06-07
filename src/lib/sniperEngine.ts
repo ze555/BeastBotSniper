@@ -24,7 +24,7 @@ import {
   TrapType,
   GlobalContext,
 } from "../types/trading.js";
-import { addLog } from "./botRunner.js";
+import { addLog, getGlobalMarketContext } from "./botRunner.js";
 
 export class SniperEngine {
   private mode: "PAPER" | "LIVE" = "PAPER";
@@ -2512,6 +2512,11 @@ export class SniperEngine {
     trade.exitPrice = exitPrice;
     trade.status = "CLOSED";
     trade.exitTime = Date.now();
+    try {
+      trade.exitRegime = RegimeEngine.evaluateRegime(getGlobalMarketContext());
+    } catch (e) {
+      trade.exitRegime = 'UNKNOWN';
+    }
 
     // --- PnL Calculation Logic (Internal Strategy View) ---
     const priceChangePerc =

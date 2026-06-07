@@ -29,6 +29,8 @@ export default function App() {
   const [histSortField, setHistSortField] = useState<string>('exitTime');
   const [histSortDir, setHistSortDir] = useState<'asc' | 'desc'>('desc');
   const [histPage, setHistPage] = useState<number>(1);
+  const [histEntryRegimeFilter, setHistEntryRegimeFilter] = useState<string>('ALL');
+  const [histExitRegimeFilter, setHistExitRegimeFilter] = useState<string>('ALL');
   const histPageSize = 10;
 
   const [adeSortField, setAdeSortField] = useState<string>('time');
@@ -355,7 +357,13 @@ export default function App() {
   const paginatedWatchlist = sortedWatchlist.slice((wlPage - 1) * wlPageSize, wlPage * wlPageSize);
 
   // Closed Trades (History) sorting logic
-  const sortedHistory = [...historyTrades].sort((a, b) => {
+  const filteredHistory = historyTrades.filter(t => {
+    if (histEntryRegimeFilter !== 'ALL' && t.entryRegime !== histEntryRegimeFilter) return false;
+    if (histExitRegimeFilter !== 'ALL' && t.exitRegime !== histExitRegimeFilter) return false;
+    return true;
+  });
+
+  const sortedHistory = [...filteredHistory].sort((a, b) => {
     let valA: any = a[histSortField];
     let valB: any = b[histSortField];
 
@@ -910,6 +918,32 @@ export default function App() {
                     <BarChart2 className="w-5 h-5 text-emerald-400" />
                     سجل الصفقات المغلقة (القناص)
                   </h3>
+                  <div className="flex gap-4 items-center">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-400">ريجيم الدخول:</label>
+                      <select value={histEntryRegimeFilter} onChange={e => setHistEntryRegimeFilter(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-md text-xs px-2 py-1 text-slate-300">
+                        <option value="ALL">الكل</option>
+                        <option value="TRENDING">TRENDING</option>
+                        <option value="MOMENTUM_MODE">MOMENTUM_MODE</option>
+                        <option value="LIQUIDITY_SWEEP">LIQUIDITY_SWEEP</option>
+                        <option value="COMPRESSION">COMPRESSION</option>
+                        <option value="DEAD_CHOP">DEAD_CHOP</option>
+                        <option value="VIOLENT_VOLATILITY">VIOLENT_VOLATILITY</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-400">ريجيم الخروج:</label>
+                      <select value={histExitRegimeFilter} onChange={e => setHistExitRegimeFilter(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-md text-xs px-2 py-1 text-slate-300">
+                         <option value="ALL">الكل</option>
+                        <option value="TRENDING">TRENDING</option>
+                        <option value="MOMENTUM_MODE">MOMENTUM_MODE</option>
+                        <option value="LIQUIDITY_SWEEP">LIQUIDITY_SWEEP</option>
+                        <option value="COMPRESSION">COMPRESSION</option>
+                        <option value="DEAD_CHOP">DEAD_CHOP</option>
+                        <option value="VIOLENT_VOLATILITY">VIOLENT_VOLATILITY</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-right text-sm text-slate-300 font-sans">
@@ -918,6 +952,8 @@ export default function App() {
                         <SortableHeader label="العملة" field="symbol" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الآلية" field="source" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="النوع" field="type" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="دخول ريجيم" field="entryRegime" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="خروج ريجيم" field="exitRegime" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الحجم الأصلي" field="amount" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الرافعة" field="leverage" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الدخول" field="entryPrice" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
@@ -959,6 +995,8 @@ export default function App() {
                                     t.type === 'LONG' ? <span className="text-emerald-500 font-bold">LONG</span> : <span className="text-rose-500 font-bold">SHORT</span>
                                  )}
                               </td>
+                              <td className="px-5 py-4 text-[11px] font-mono whitespace-nowrap text-amber-400/80">{t.entryRegime || 'UNKNOWN'}</td>
+                              <td className="px-5 py-4 text-[11px] font-mono whitespace-nowrap text-purple-400/80">{t.exitRegime || 'UNKNOWN'}</td>
                               <td className="px-5 py-4 font-mono text-slate-400">
                                 ${(t as any).originalAmount ? parseFloat((t as any).originalAmount).toFixed(2) : parseFloat(t.amount as any).toFixed(2)}
                               </td>
