@@ -130,6 +130,11 @@ export interface TawleefaConfig {
   shortConditions?: ConditionRow[];
   shortGate?: LogicGate;
 
+  longExitConditions?: ConditionRow[];
+  longExitGate?: LogicGate;
+  shortExitConditions?: ConditionRow[];
+  shortExitGate?: LogicGate;
+
   createdAt: string;
 }
 
@@ -1657,20 +1662,37 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     stopLossValue: 1.5,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.5,
+    longExitGate: 'AND',
+    longExitConditions: [
+      { id: '100lex_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.95, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100lex_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -1, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100lex_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 18, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    shortExitGate: 'AND',
+    shortExitConditions: [
+      { id: '100sex_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.05, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100sex_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -1, timeframe: '5m', sensitivity: 1.0 },
+      { id: '100sex_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 18, timeframe: '5m', sensitivity: 1.0 }
+    ],
     dynamicExitProfiles: [
       {
         regime: "TRENDING",
-        breakevenR: 0.8,
-        partials: [{ profitR: 1.5, closePercent: 20 }],
+        breakevenR: 1.0,
+        partials: [
+          { profitR: 2.0, closePercent: 20 },
+          { profitR: 4.0, closePercent: 30 }
+        ],
         exitConditions: [],
         longExitConditions: [
-          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
-          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
+          { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 },
+          { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: -1 },
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 18 }
         ],
         longExitGate: "AND",
         shortExitConditions: [
-          { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
-          { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.02 }
+          { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.05 },
+          { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: -1 },
+          { metric: "ADX", operator: "LESS_THAN", valueNumber: 18 }
         ],
         shortExitGate: "AND",
         exitGate: "AND"
@@ -1791,6 +1813,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
   const [longGate, setLongGate] = useState<LogicGate>('AND');
   const [shortConditions, setShortConditions] = useState<ConditionRow[]>([]);
   const [shortGate, setShortGate] = useState<LogicGate>('AND');
+  const [longExitConditions, setLongExitConditions] = useState<ConditionRow[]>([]);
+  const [longExitGate, setLongExitGate] = useState<LogicGate>('AND');
+  const [shortExitConditions, setShortExitConditions] = useState<ConditionRow[]>([]);
+  const [shortExitGate, setShortExitGate] = useState<LogicGate>('AND');
   const [activeDualTab, setActiveDualTab] = useState<'LONG' | 'SHORT'>('LONG');
 
   // Load Tawleefas from local storage on mount
@@ -1888,6 +1914,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setLongGate(t.longGate || t.gate || 'AND');
     setShortConditions(t.shortConditions || []);
     setShortGate(t.shortGate || 'AND');
+    setLongExitConditions(t.longExitConditions || []);
+    setLongExitGate(t.longExitGate || 'AND');
+    setShortExitConditions(t.shortExitConditions || []);
+    setShortExitGate(t.shortExitGate || 'AND');
   };
 
   const loadPresetIntoForm = (t: TawleefaConfig) => {
@@ -1913,6 +1943,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setLongGate(t.longGate || t.gate || 'AND');
     setShortConditions((t.shortConditions || []).map(c => ({ ...c, id: Math.random().toString(36).substr(2, 9) })));
     setShortGate(t.shortGate || 'AND');
+    setLongExitConditions((t.longExitConditions || []).map(c => ({ ...c, id: Math.random().toString(36).substr(2, 9) })));
+    setLongExitGate(t.longExitGate || 'AND');
+    setShortExitConditions((t.shortExitConditions || []).map(c => ({ ...c, id: Math.random().toString(36).substr(2, 9) })));
+    setShortExitGate(t.shortExitGate || 'AND');
   };
 
   const addConditionRow = () => {
@@ -1925,43 +1959,74 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       timeframe: '5m',
       sensitivity: 1.0
     };
-    if (action === 'DUAL') {
-      if (activeDualTab === 'LONG') {
-        setLongConditions([...longConditions, newCond]);
+    if (activeEngineSubTab === 'EXIT') {
+      if (action === 'DUAL') {
+        if (activeDualTab === 'LONG') {
+          setLongExitConditions([...longExitConditions, newCond]);
+        } else {
+          setShortExitConditions([...shortExitConditions, newCond]);
+        }
       } else {
-        setShortConditions([...shortConditions, newCond]);
+        setLongExitConditions([...longExitConditions, newCond]); // Default to long logic for non-dual exit array mapping if we reuse it
       }
     } else {
-      setConditions([...conditions, newCond]);
+      if (action === 'DUAL') {
+        if (activeDualTab === 'LONG') {
+          setLongConditions([...longConditions, newCond]);
+        } else {
+          setShortConditions([...shortConditions, newCond]);
+        }
+      } else {
+        setConditions([...conditions, newCond]);
+      }
     }
   };
 
   const removeConditionRow = (id: string) => {
-    if (action === 'DUAL') {
-      if (activeDualTab === 'LONG') {
-        setLongConditions(longConditions.filter(c => c.id !== id));
+    if (activeEngineSubTab === 'EXIT') {
+      if (action === 'DUAL') {
+        if (activeDualTab === 'LONG') {
+          setLongExitConditions(longExitConditions.filter(c => c.id !== id));
+        } else {
+          setShortExitConditions(shortExitConditions.filter(c => c.id !== id));
+        }
       } else {
-        setShortConditions(shortConditions.filter(c => c.id !== id));
+        setLongExitConditions(longExitConditions.filter(c => c.id !== id));
       }
     } else {
-      setConditions(conditions.filter(c => c.id !== id));
+      if (action === 'DUAL') {
+        if (activeDualTab === 'LONG') {
+          setLongConditions(longConditions.filter(c => c.id !== id));
+        } else {
+          setShortConditions(shortConditions.filter(c => c.id !== id));
+        }
+      } else {
+        setConditions(conditions.filter(c => c.id !== id));
+      }
     }
   };
 
   const updateConditionRow = (id: string, field: keyof ConditionRow, val: any) => {
-    if (action === 'DUAL') {
-      if (activeDualTab === 'LONG') {
-        setLongConditions(longConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+    if (activeEngineSubTab === 'EXIT') {
+      if (action === 'DUAL') {
+        if (activeDualTab === 'LONG') {
+          setLongExitConditions(longExitConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+        } else {
+          setShortExitConditions(shortExitConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+        }
       } else {
-        setShortConditions(shortConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+        setLongExitConditions(longExitConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
       }
     } else {
-      setConditions(conditions.map(c => {
-        if (c.id === id) {
-          return { ...c, [field]: val };
+      if (action === 'DUAL') {
+        if (activeDualTab === 'LONG') {
+          setLongConditions(longConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+        } else {
+          setShortConditions(shortConditions.map(c => c.id === id ? { ...c, [field]: val } : c));
         }
-        return c;
-      }));
+      } else {
+        setConditions(conditions.map(c => c.id === id ? { ...c, [field]: val } : c));
+      }
     }
   };
 
@@ -2071,6 +2136,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       longGate,
       shortConditions,
       shortGate,
+      longExitConditions,
+      longExitGate,
+      shortExitConditions,
+      shortExitGate,
       createdAt: activeTawleefa?.createdAt || new Date().toISOString()
     };
 
@@ -2132,7 +2201,11 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
         longConditions,
         longGate,
         shortConditions,
-        shortGate
+        shortGate,
+        longExitConditions,
+        longExitGate,
+        shortExitConditions,
+        shortExitGate
       }
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(raw, null, 2));
@@ -2172,6 +2245,10 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           setLongGate(cfg.longGate || cfg.gate || 'AND');
           setShortConditions(cfg.shortConditions || []);
           setShortGate(cfg.shortGate || 'AND');
+          setLongExitConditions(cfg.longExitConditions || []);
+          setLongExitGate(cfg.longExitGate || 'AND');
+          setShortExitConditions(cfg.shortExitConditions || []);
+          setShortExitGate(cfg.shortExitGate || 'AND');
           setActiveTawleefa(null);
           alert('تم استيراد التوليفة ومواصفات الفلو بنجاح! يمكنك مراجعتها وحفظها.');
         } else {
@@ -3125,6 +3202,27 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           )}
 
           {/* Decision Gating & Conditions Header */}
+          <div className="flex bg-slate-900 border border-slate-800 rounded-lg p-1 mb-4 overflow-hidden">
+            <button
+              onClick={() => setActiveEngineSubTab('ENTRY')}
+              className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center gap-2 transition-all ${
+                activeEngineSubTab === 'ENTRY' ? 'bg-indigo-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              شروط الدخول (Entry Phase)
+            </button>
+            <button
+              onClick={() => setActiveEngineSubTab('EXIT')}
+              className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center gap-2 transition-all ${
+                activeEngineSubTab === 'EXIT' ? 'bg-rose-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              شروط الخروج الديناميكية الشاملة (Dynamic Exits)
+            </button>
+          </div>
+
           <div className="space-y-4">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-950 border border-slate-800/80 p-4 rounded-xl">
               <div className="flex items-center gap-3">
@@ -3132,16 +3230,82 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                 <div className="flex p-0.5 bg-slate-900 rounded-lg border border-slate-800">
                   {action === 'DUAL' ? (
                     activeDualTab === 'LONG' ? (
+                      activeEngineSubTab === 'ENTRY' ? (
+                        <>
+                          <button
+                            onClick={() => setLongGate('AND')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق الكل (AND)
+                          </button>
+                          <button
+                            onClick={() => setLongGate('OR')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق أي شرط (OR)
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setLongExitGate('AND')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${longExitGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق الكل (AND)
+                          </button>
+                          <button
+                            onClick={() => setLongExitGate('OR')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${longExitGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق أي شرط (OR)
+                          </button>
+                        </>
+                      )
+                    ) : (
+                      activeEngineSubTab === 'ENTRY' ? (
+                        <>
+                          <button
+                            onClick={() => setShortGate('AND')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق الكل (AND)
+                          </button>
+                          <button
+                            onClick={() => setShortGate('OR')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق أي شرط (OR)
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setShortExitGate('AND')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortExitGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق الكل (AND)
+                          </button>
+                          <button
+                            onClick={() => setShortExitGate('OR')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortExitGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            تطابق أي شرط (OR)
+                          </button>
+                        </>
+                      )
+                    )
+                  ) : (
+                    activeEngineSubTab === 'ENTRY' ? (
                       <>
                         <button
-                          onClick={() => setLongGate('AND')}
-                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          onClick={() => setGate('AND')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                         >
                           تطابق الكل (AND)
                         </button>
                         <button
-                          onClick={() => setLongGate('OR')}
-                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          onClick={() => setGate('OR')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                         >
                           تطابق أي شرط (OR)
                         </button>
@@ -3149,34 +3313,19 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                     ) : (
                       <>
                         <button
-                          onClick={() => setShortGate('AND')}
-                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          onClick={() => setLongExitGate('AND')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${longExitGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                         >
                           تطابق الكل (AND)
                         </button>
                         <button
-                          onClick={() => setShortGate('OR')}
-                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          onClick={() => setLongExitGate('OR')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${longExitGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                         >
                           تطابق أي شرط (OR)
                         </button>
                       </>
                     )
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setGate('AND')}
-                        className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        تطابق الكل (AND)
-                      </button>
-                      <button
-                        onClick={() => setGate('OR')}
-                        className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        تطابق أي شرط (OR)
-                      </button>
-                    </>
                   )}
                 </div>
               </div>
@@ -3218,14 +3367,14 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                   className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeDualTab === 'LONG' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  شروط الاتجاه الصعودي (LONG) - {longConditions.length}
+                  {activeEngineSubTab === 'ENTRY' ? 'شروط الاتجاه الصعودي (LONG)' : 'شروط خروج صفقات LONG'} - {activeEngineSubTab === 'ENTRY' ? longConditions.length : longExitConditions.length}
                 </button>
                 <button
                   onClick={() => setActiveDualTab('SHORT')}
                   className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeDualTab === 'SHORT' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/25' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                  شروط الاتجاه الهبوطي (SHORT) - {shortConditions.length}
+                  {activeEngineSubTab === 'ENTRY' ? 'شروط الاتجاه الهبوطي (SHORT)' : 'شروط خروج صفقات SHORT'} - {activeEngineSubTab === 'ENTRY' ? shortConditions.length : shortExitConditions.length}
                 </button>
               </div>
             )}
@@ -3235,18 +3384,18 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1">
                   <Layers className="text-emerald-400 w-3.5 h-3.5" />
-                  قائمة شروط وبلوكات الفلو الهيكلي ({action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions.length : shortConditions.length) : conditions.length})
+                  {activeEngineSubTab === 'ENTRY' ? 'قائمة شروط وبلوكات الفلو الهيكلي' : 'شروط الخروج الديناميكية العامة'} ({activeEngineSubTab === 'EXIT' ? (action === 'DUAL' ? (activeDualTab === 'LONG' ? longExitConditions.length : shortExitConditions.length) : longExitConditions.length) : (action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions.length : shortConditions.length) : conditions.length)})
                 </h4>
                 <button
                   onClick={addConditionRow}
                   className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20 text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  إضافة شرط هيكلي جديد
+                  {activeEngineSubTab === 'ENTRY' ? 'إضافة شرط هيكلي لـ ENTRY' : 'إضافة شرط خروج ديناميكي EXIT'}
                 </button>
               </div>
 
-              {(action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions.length === 0 : shortConditions.length === 0) : conditions.length === 0) ? (
+              {(activeEngineSubTab === 'EXIT' ? (action === 'DUAL' ? (activeDualTab === 'LONG' ? longExitConditions.length === 0 : shortExitConditions.length === 0) : longExitConditions.length === 0) : (action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions.length === 0 : shortConditions.length === 0) : conditions.length === 0)) ? (
                 <div className="text-center py-10 bg-slate-950/20 border border-slate-800/80 rounded-xl space-y-2">
                   <Info className="mx-auto text-slate-600 w-8 h-8" />
                   <p className="text-xs text-slate-500">لا توجد أي شروط مضافة حتى الآن لهذه التوليفة!</p>
@@ -3259,7 +3408,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                  {(action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions : shortConditions) : conditions).map((cond, idx) => (
+                  {(activeEngineSubTab === 'EXIT' ? (action === 'DUAL' ? (activeDualTab === 'LONG' ? longExitConditions : shortExitConditions) : longExitConditions) : (action === 'DUAL' ? (activeDualTab === 'LONG' ? longConditions : shortConditions) : conditions)).map((cond, idx) => (
                     <div 
                       key={cond.id} 
                       className="group bg-slate-950/80 border border-slate-800/80 hover:border-slate-700 p-4 rounded-xl flex flex-col md:flex-row items-stretch md:items-center gap-3 relative transition-all"

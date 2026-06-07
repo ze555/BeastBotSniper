@@ -50,7 +50,8 @@ export interface Trade {
   mode: TradeMode;
   entryPrice: number;
   entryTime: number;
-  amount: number;      // Position size
+  amount: number;      // Position size (current remaining if partials taken)
+  originalAmount?: number; // Original position size before partials
   leverage?: number;   // Leverage used
   
   // Risk Management
@@ -65,8 +66,16 @@ export interface Trade {
   exitTime?: number;
   exitReason?: string;
   currentPrice?: number; // Added to track current price for open trades
-  pnl?: number;        // Profit/Loss in dollars
+  pnl?: number;        // Profit/Loss in dollars (current open portion)
   realizedPnl?: number; // PnL generated from partial exits
+  partialHistory?: {
+    closePercent: number;
+    amountClosed: number;
+    realizedPnl: number;
+    exitPrice: number;
+    time: number;
+    targetR: number;
+  }[];
   pnlPerc?: number;    // Profit/Loss percentage
   score: number;       // The 5/5 score that triggered it
   source?: string;     // The engine that triggered the trade (e.g. 'WAIT_ENGINE')
@@ -236,6 +245,7 @@ export interface BotSettings {
   
   // Smart Control (التحكم الذكي الفائق)
   useSmartControl?: boolean;        // تفعيل التحكم الذكي
+  enableInverseExecution?: boolean; // تفعيل الصفقات المعاكسة في بايننس
   smartTpUsd?: number;              // هدف الربح السريع بالدولار (مثال 1$)
   smartTrailingStartUsd?: number;   // نقل الوقف للدخول بعد ربح (مثال 0.4$)
   smartTimeDecayMinutes?: number;   // إغلاق زمني إذا لم يتحرك السعر (مثال 5 دقائق)

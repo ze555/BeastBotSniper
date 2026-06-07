@@ -586,19 +586,41 @@ export default function App() {
                                 <p className="text-xs text-slate-400 mt-1">السعر الحالي: <span className="font-mono text-slate-300">{t.currentPrice ? parseFloat(t.currentPrice as any).toFixed(4) : '...'}</span></p>
                                 <p className="text-xs text-slate-400 mt-1">الدخول: <span className="font-mono text-slate-300">{parseFloat(t.entryPrice as any).toFixed(4)}</span></p>
                                 <p className="text-xs text-slate-400 mt-1">تاريخ الدخول: <span className="font-mono text-emerald-400 font-medium">{new Date(t.entryTime || Date.now()).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}</span></p>
-                                <p className="text-xs text-slate-400 mt-1 flex items-center justify-between">
-                                  <span>حجم الصفقة: <span className="font-mono text-slate-300">${parseFloat(t.amount as any).toFixed(2)}</span></span>
-                                  <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-mono">{(t as any).leverage || 10}x</span>
-                                </p>
-                                <p className="text-xs text-slate-400 mt-1">القيمة الحالية: <span className="font-mono text-slate-300">${(parseFloat(t.amount as any) + getDisplayPnL(t.pnl || 0, t.amount || 0)).toFixed(2)}</span></p>
+                                <div className="mt-2 space-y-1 bg-slate-950/50 p-2 rounded border border-slate-800">
+                                  <p className="text-xs text-slate-400 flex items-center justify-between">
+                                    <span>الحجم الأصلي:</span>
+                                    <span className="font-mono text-slate-300">${(parseFloat((t as any).originalAmount || t.amount)).toFixed(2)} <span className="text-[10px] text-slate-500">({(t as any).leverage || 10}x)</span></span>
+                                  </p>
+                                  {t.partialHistory && t.partialHistory.length > 0 && (
+                                    <>
+                                      <p className="text-[10px] text-emerald-400/80 flex items-center justify-between border-t border-slate-800/50 pt-1">
+                                        <span>الأرباح المحققة (مغلق):</span>
+                                        <span className="font-mono">+${(t.realizedPnl || 0).toFixed(2)}</span>
+                                      </p>
+                                      <p className="text-xs text-amber-500/80 flex items-center justify-between">
+                                        <span>الحجم المتبقي النشط:</span>
+                                        <span className="font-mono">${parseFloat(t.amount as any).toFixed(2)}</span>
+                                      </p>
+                                    </>
+                                  )}
+                                  <p className="text-xs text-slate-300 flex items-center justify-between border-t border-slate-700/50 pt-1 mt-1 font-bold">
+                                    <span>القيمة الحالية (شاملة الأرباح):</span>
+                                    <span className="font-mono">${(parseFloat(t.amount as any) + getDisplayPnL(t.pnl || 0, t.amount || 0)).toFixed(2)}</span>
+                                  </p>
+                                </div>
                              </div>
-                             <div className="text-left">
+                             <div className="text-left flex flex-col items-end">
                                 <span className={`font-mono font-bold text-lg ${getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                   {getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) >= 0 ? '+' : ''}{getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10)?.toFixed(2)}%
                                 </span>
-                                <p className={`text-xs font-mono text-right ${getDisplayPnL(t.pnl || 0, t.amount || 0) >= 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
-                                  ${getDisplayPnL(t.pnl || 0, t.amount || 0)?.toFixed(2)}
-                                </p>
+                                <div className={`text-xs font-mono text-right ${getDisplayPnL(t.pnl || 0, t.amount || 0) >= 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
+                                  الإجمالي: ${getDisplayPnL(t.pnl || 0, t.amount || 0)?.toFixed(2)}
+                                </div>
+                                {t.partialHistory && t.partialHistory.length > 0 && (
+                                  <div className="text-[10px] font-mono text-amber-400/70 mt-1">
+                                    (غير محقق: ${(getDisplayPnL(t.pnl || 0, t.amount || 0) - (t.realizedPnl || 0)).toFixed(2)})
+                                  </div>
+                                )}
                              </div>
                            </div>
                            
@@ -896,19 +918,21 @@ export default function App() {
                         <SortableHeader label="العملة" field="symbol" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الآلية" field="source" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="النوع" field="type" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الحجم الأصلي" field="amount" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الرافعة" field="leverage" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الدخول" field="entryPrice" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الخروج" field="exitPrice" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="PnL %" field="pnlPerc" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
-                        <SortableHeader label="الربح ($)" field="pnl" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <SortableHeader label="الربح الاجمالي ($)" field="pnl" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الحالة" field="exitReason" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <th className="px-5 py-3 font-semibold text-slate-300 text-right">معلومات الأجزاء المغلقة (Partials)</th>
                         <th className="px-5 py-3 font-semibold text-slate-300 text-right">تقرير كاسكيد</th>
                       </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700/50">
                         {paginatedHistory.length === 0 ? (
                            <tr>
-                             <td colSpan={10} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد أو لا توجد صفقات مطابقة.</td>
+                             <td colSpan={12} className="py-8 text-center text-slate-500">لم يتم إغلاق أي صفقة بعد أو لا توجد صفقات مطابقة.</td>
                            </tr>
                         ) : paginatedHistory.map((t, i) => (
                            <tr key={i} className="hover:bg-slate-700/20 transition-colors">
@@ -935,9 +959,12 @@ export default function App() {
                                     t.type === 'LONG' ? <span className="text-emerald-500 font-bold">LONG</span> : <span className="text-rose-500 font-bold">SHORT</span>
                                  )}
                               </td>
+                              <td className="px-5 py-4 font-mono text-slate-400">
+                                ${(t as any).originalAmount ? parseFloat((t as any).originalAmount).toFixed(2) : parseFloat(t.amount as any).toFixed(2)}
+                              </td>
                               <td className="px-5 py-4 font-mono text-slate-400">{(t as any).leverage || 10}x</td>
                               <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.entryPrice).toFixed(4)}</td>
-                              <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.exitPrice).toFixed(4)}</td>
+                              <td className="px-5 py-4 font-mono text-slate-400">{parseFloat(t.exitPrice || 0).toFixed(4)}</td>
                               <td className={`px-5 py-4 font-mono font-bold ${getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) > 0 ? 'text-emerald-400' : getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) === 0 ? 'text-slate-400' : 'text-rose-400'}`}>
                                 {getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10) > 0 ? '+' : ''}{getDisplayPnLPerc(t.pnlPerc || 0, t.amount || 0, t.leverage || 10)?.toFixed(2)}%
                               </td>
@@ -948,6 +975,30 @@ export default function App() {
                                 <span className={`px-2 py-1 text-[10px] rounded ${getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'bg-emerald-500/20 text-emerald-400' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'}`}>
                                   {getDisplayPnL(t.pnl || 0, t.amount || 0) > 0 ? 'ربح محقق 🎯' : (t.isBreakeven || getDisplayPnL(t.pnl || 0, t.amount || 0) === 0) ? 'حماية الدخول 🛡️' : 'خسارة محددة 🛑'}
                                 </span>
+                              </td>
+                              <td className="px-5 py-4">
+                                {t.partialHistory && t.partialHistory.length > 0 ? (
+                                  <div className="flex flex-col gap-1 items-start whitespace-nowrap min-w-[140px]">
+                                    {t.partialHistory.map((ph: any, phi: number) => (
+                                      <div key={phi} className="text-[10px] bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded flex items-center justify-between w-full">
+                                        <span className="text-slate-400 text-right">أُغلق {ph.closePercent}% بـ ${ph.amountClosed.toFixed(2)}</span>
+                                        <span className={getDisplayPnL(ph.realizedPnl, t.amount || 0) >= 0 ? "text-emerald-400 font-mono pl-2" : "text-rose-400 font-mono pl-2"}>
+                                          {getDisplayPnL(ph.realizedPnl, t.amount || 0) >= 0 ? "+" : ""}{getDisplayPnL(ph.realizedPnl, t.amount || 0).toFixed(2)}$
+                                        </span>
+                                      </div>
+                                    ))}
+                                    <div className="text-[10px] text-sky-400 font-bold border-t border-slate-800 pt-1 w-full text-right mt-1 flex justify-between">
+                                      <span>الجزء الباقي:</span>
+                                      <span className="font-mono">${parseFloat(t.amount as any).toFixed(2)}</span>
+                                    </div>
+                                    <div className="text-[9px] text-slate-500 w-full text-right flex justify-between">
+                                      <span>(الربح من المتبقي):</span>
+                                      <span className="font-mono">{getDisplayPnL(t.pnl || 0, t.amount || 0) - (t.partialHistory.reduce((acc, ph) => acc + getDisplayPnL(ph.realizedPnl, t.amount || 0), 0)) > 0 ? '+' : ''}{(getDisplayPnL(t.pnl || 0, t.amount || 0) - (t.partialHistory.reduce((acc, ph) => acc + getDisplayPnL(ph.realizedPnl, t.amount || 0), 0))).toFixed(2)}$</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 text-center block">— إغلاق كامل —</span>
+                                )}
                               </td>
                               <td className="px-5 py-4">
                                 <button

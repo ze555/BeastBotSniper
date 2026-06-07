@@ -355,6 +355,18 @@ export class SniperEngine {
     }
   }
 
+  private getLiveEntrySide(tradeType: 'LONG' | 'SHORT') {
+    return this.settings.enableInverseExecution 
+      ? (tradeType === 'LONG' ? 'sell' : 'buy') 
+      : (tradeType === 'LONG' ? 'buy' : 'sell');
+  }
+
+  private getLiveExitSide(tradeType: 'LONG' | 'SHORT') {
+    return this.settings.enableInverseExecution 
+      ? (tradeType === 'LONG' ? 'buy' : 'sell') 
+      : (tradeType === 'LONG' ? 'sell' : 'buy');
+  }
+
   public getStats() {
     const closed = this.tradeHistory.filter((t) => t.status === "CLOSED");
     const wins = closed.filter((t) => (t.pnlPerc || 0) > 0).length;
@@ -427,13 +439,16 @@ export class SniperEngine {
     // Real-time live PnL and ROE updates so that front-end/UI displays latest metrics under Fierce Exit
     const totalFeeRate = this.settings.tradingFeeRate ?? 0.001;
     const leverage = trade.leverage || this.settings.leverage || 10;
-    const roePerc = (priceChangePerc - (totalFeeRate * 100)) * leverage;
     
     let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
     if (trade.realizedPnl) {
         currentPnl += trade.realizedPnl;
     }
     
+    const effectiveAmount = trade.originalAmount || trade.amount;
+    const margin = effectiveAmount / leverage;
+    const roePerc = (currentPnl / margin) * 100;
+
     trade.pnl = currentPnl;
     trade.pnlPerc = roePerc;
 
@@ -461,13 +476,27 @@ export class SniperEngine {
     const tp1Goal = rawTpGoal * 0.45; // Secure fast returns
     if (trade.status === 'OPEN' && priceChangePerc >= tp1Goal) {
       if (!trade.isPartialProfitTaken) {
+        if (!trade.originalAmount) trade.originalAmount = trade.amount;
+        if (!trade.partialHistory) trade.partialHistory = [];
+
         trade.isPartialProfitTaken = true;
         trade.status = 'TP1_HIT';
         
         // Liquidate 50% of active value
         const partialPnl = (trade.pnl || 0) * 0.5;
+        const prevAmount = trade.amount;
+        const closedAmount = prevAmount * 0.5;
         trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
-        trade.amount = trade.amount * 0.5;
+        trade.amount = prevAmount * 0.5;
+
+        trade.partialHistory.push({
+          closePercent: 50,
+          amountClosed: closedAmount,
+          realizedPnl: partialPnl,
+          exitPrice: currentPrice,
+          time: Date.now(),
+          targetR: -1 // Savage fast
+        });
 
         // Secure Entry tightly plus lock a fragment of profits (0.15% profit cushion)
         const profitCushion = 1.0015;
@@ -479,10 +508,10 @@ export class SniperEngine {
         
         if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
           try {
-            const side = isLong ? 'sell' : 'buy';
-            const roundedAmount = this.exchange.amountToPrecision(symbol, (trade.amount / currentPrice));
+            const side = this.getLiveExitSide(trade.type);
+            const roundedAmount = this.exchange.amountToPrecision(symbol, (closedAmount / currentPrice));
             console.log(`[BINANCE] 🔄 Savage Partial Order: sending ${side.toUpperCase()} for 50% of size | Qty: ${roundedAmount}`);
-            await this.exchange.createOrder(symbol, 'market', side, roundedAmount);
+            await this.exchange.createOrder(symbol, 'market', side, roundedAmount, undefined, { reduceOnly: true });
           } catch (e: any) {
             console.error(`[BINANCE] Partial Order placement failed: ${e.message}`);
           }
@@ -835,8 +864,8 @@ export class SniperEngine {
 
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
-        // [INVERSE LOGIC] عكس الصفقة عند الإرسال لبايننس
-        const side = trade.type === "LONG" ? "sell" : "buy";
+        // [INVERSE LOGIC] عكس الصفقة عند الإرسال لبايننس إذا كان مفعل
+        const side = this.getLiveEntrySide(trade.type);
         const symbol = trade.symbol;
 
         try {
@@ -955,7 +984,7 @@ export class SniperEngine {
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
         // [INVERSE LOGIC] عكس الصفقة عند الإرسال لبايننس (Quantum)
-        const side = trade.type === "LONG" ? "sell" : "buy";
+        const side = this.getLiveEntrySide(trade.type);
         const symbol = trade.symbol;
 
         try {
@@ -1201,7 +1230,30 @@ export class SniperEngine {
           //--------------------------------
           const evaluationRegime = trade.entryRegime || adaptiveEval.decision || 'TRENDING';
           const exitProfiles = tawleefa.dynamicExitProfiles || [];
-          const profile = exitProfiles.find((p: any) => p.regime === evaluationRegime);
+          let profile = exitProfiles.find((p: any) => p.regime === evaluationRegime);
+
+          // Build a synthetic global profile if no specific regime profile exists, using the Tawleefa level settings
+          if (!profile) {
+            profile = {
+              regime: 'GLOBAL_FALLBACK',
+              longExitConditions: tawleefa.longExitConditions || [],
+              longExitGate: tawleefa.longExitGate || 'AND',
+              shortExitConditions: tawleefa.shortExitConditions || [],
+              shortExitGate: tawleefa.shortExitGate || 'AND',
+              // Add a generic fallback partials mechanism if the user desires
+              partials: [],
+            } as any;
+          } else {
+             // If profile exists, but lacks specific long/short exits, fallback to Tawleefa's globals
+             if ((!profile.longExitConditions || profile.longExitConditions.length === 0) && tawleefa.longExitConditions && tawleefa.longExitConditions.length > 0) {
+               profile.longExitConditions = tawleefa.longExitConditions;
+               profile.longExitGate = tawleefa.longExitGate || 'AND';
+             }
+             if ((!profile.shortExitConditions || profile.shortExitConditions.length === 0) && tawleefa.shortExitConditions && tawleefa.shortExitConditions.length > 0) {
+               profile.shortExitConditions = tawleefa.shortExitConditions;
+               profile.shortExitGate = tawleefa.shortExitGate || 'AND';
+             }
+          }
 
           let decision: 'HOLD' | 'EXIT_NOW' = 'HOLD';
           let exitNowBecauseOfHardExit = false;
@@ -1272,14 +1324,31 @@ export class SniperEngine {
               }
               for (const p of profile.partials) {
                 if (profitR >= p.profitR && !trade.takenPartials.includes(p.profitR)) {
+                  if (!trade.originalAmount) {
+                    trade.originalAmount = trade.amount;
+                  }
+                  if (!trade.partialHistory) {
+                    trade.partialHistory = [];
+                  }
+
                   const reduceFraction = p.closePercent / 100;
                   const currentPnl = trade.pnl || 0;
                   const chunkPnl = currentPnl * reduceFraction;
                   trade.realizedPnl = (trade.realizedPnl || 0) + chunkPnl;
                   
                   const prevAmount = trade.amount;
+                  const closedAmount = prevAmount * reduceFraction;
                   trade.amount = trade.amount * (1 - reduceFraction);
                   
+                  trade.partialHistory.push({
+                    closePercent: p.closePercent,
+                    amountClosed: closedAmount,
+                    realizedPnl: chunkPnl,
+                    exitPrice: currentPrice,
+                    time: Date.now(),
+                    targetR: p.profitR
+                  });
+
                   trade.takenPartials.push(p.profitR);
                   trade.isPartialProfitTaken = true;
                   trade.status = 'TP1_HIT'; // Align with UI expectations
@@ -1289,10 +1358,10 @@ export class SniperEngine {
                   
                   if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
                     try {
-                      const side = trade.type === 'LONG' ? 'sell' : 'buy';
+                      const side = this.getLiveExitSide(trade.type);
                       const quantityToClose = (prevAmount * reduceFraction) / currentPrice;
                       const roundedAmount = this.exchange.amountToPrecision(symbol, quantityToClose);
-                      await this.exchange.createOrder(symbol, 'market', side, roundedAmount);
+                      await this.exchange.createOrder(symbol, 'market', side, roundedAmount, undefined, { reduceOnly: true });
                     } catch (e: any) {
                       console.error(`[BINANCE] Dynamic Tawleefa Partial Order failed: ${e.message}`);
                     }
@@ -1315,61 +1384,74 @@ export class SniperEngine {
               console.log(`[⭐ TAWLEEFA DYNAMIC HARD EXIT] profitR ${profitR.toFixed(2)} >= hardExitR ${profile.hardExitR} for ${symbol}`);
             }
 
-            // D. Dynamic Exit Conditions Evaluation
-            let conditionsToEvaluate = profile.exitConditions || [];
-            let gateRaw = profile.exitGate || 'AND';
-
-            if (trade.type === 'LONG' && profile.longExitConditions && profile.longExitConditions.length > 0) {
-              conditionsToEvaluate = profile.longExitConditions;
-              gateRaw = profile.longExitGate || 'AND';
-            } else if (trade.type === 'SHORT' && profile.shortExitConditions && profile.shortExitConditions.length > 0) {
-              conditionsToEvaluate = profile.shortExitConditions;
-              gateRaw = profile.shortExitGate || 'AND';
+            // C. Emergency Liquidity Exit (System-Level Override)
+            // If the fundamental drivers of a trade collapse abruptly:
+            if (metricsObj.oiChange !== undefined && metricsObj.rvol !== undefined) {
+              if (metricsObj.oiChange <= -5 || metricsObj.rvol < 0.7) {
+                 decision = 'EXIT_NOW';
+                 exitNowBecauseOfHardExit = true;
+                 exitReasonDetail = `خروج طوارئ مبني على انهيار السيولة (Emergency Exit): OIChange=${metricsObj.oiChange.toFixed(2)}% | RVOL=${metricsObj.rvol.toFixed(2)}`;
+                 console.log(`[🚨 EMERGENCY EXIT] Triggered for ${symbol} due to liquidity collapse!`);
+              }
             }
 
-            if (conditionsToEvaluate && conditionsToEvaluate.length > 0) {
-              const condDetails = conditionsToEvaluate.map((cond: any) => {
-                let actualVal = 0;
-                const rsiVal = rsi !== undefined ? rsi : 50;
-                const adxVal = adx !== undefined ? adx : 25;
-                switch (cond.metric) {
-                  case 'PRICE': actualVal = currentPrice; break;
-                  case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
-                  case 'CVD': actualVal = metricsObj.takerRatio; break;
-                  case 'RVOL': actualVal = metricsObj.rvol; break;
-                  case 'TAKER_RATIO': actualVal = metricsObj.takerRatio; break;
-                  case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
-                  case 'RSI': actualVal = rsiVal; break;
-                  case 'ADX': actualVal = adxVal; break;
-                  default: actualVal = currentPrice;
-                }
-                const isTrue = evaluateExitConditionDetail(cond);
-                const opArabic = cond.operator === 'GREATER_THAN' ? 'أكبر من 🡵' :
-                                 cond.operator === 'LESS_THAN' ? 'أصغر من 🡶' :
-                                 cond.operator === 'CROSSES_ABOVE' ? 'تجاوز لأعلى 🡵' :
-                                 cond.operator === 'CROSSES_BELOW' ? 'تجاوز لأسفل 🡶' :
-                                 cond.operator === 'SPIKE' ? 'انفجار قفزة ⚡' : 'يساوي';
-                return {
-                  isTrue,
-                  text: `شرط [${cond.metric}]: القيمة الفعلية (${actualVal.toFixed(3)}) مقارنة بـ ${opArabic} (${cond.valueNumber}) 🡪 [${isTrue ? '✅ محقق' : '❌ غير محقق'}]`
-                };
-              });
+            // D. Dynamic Exit Conditions Evaluation
+            if (decision !== 'EXIT_NOW') {
+              let conditionsToEvaluate = profile.exitConditions || [];
+              let gateRaw = profile.exitGate || 'AND';
 
-              const condResults = condDetails.map((d: any) => d.isTrue);
-              const gate = typeof gateRaw === 'string' ? gateRaw.trim().toUpperCase() : 'AND';
-              let conditionsMet = false;
-              if (gate === 'AND') {
-                conditionsMet = condResults.every((r: boolean) => r);
-              } else {
-                conditionsMet = condResults.some((r: boolean) => r);
+              if (trade.type === 'LONG' && profile.longExitConditions && profile.longExitConditions.length > 0) {
+                conditionsToEvaluate = profile.longExitConditions;
+                gateRaw = profile.longExitGate || 'AND';
+              } else if (trade.type === 'SHORT' && profile.shortExitConditions && profile.shortExitConditions.length > 0) {
+                conditionsToEvaluate = profile.shortExitConditions;
+                gateRaw = profile.shortExitGate || 'AND';
               }
 
-              if (conditionsMet) {
-                decision = 'EXIT_NOW';
-                exitNowBecauseOfConditions = true;
-                const matchedCondsText = condDetails.map((d: any) => d.text).join(" | ");
-                exitReasonDetail = `تطابق شروط الخروج المخصصة تحت البوابة [${gate}]: ${matchedCondsText}`;
-                console.log(`[⭐ TAWLEEFA DYNAMIC CONDITIONS MET] Exit Conditions met under ${evaluationRegime} for ${symbol} using gate ${gate}`);
+              if (conditionsToEvaluate && conditionsToEvaluate.length > 0) {
+                const condDetails = conditionsToEvaluate.map((cond: any) => {
+                  let actualVal = 0;
+                  const rsiVal = rsi !== undefined ? rsi : 50;
+                  const adxVal = adx !== undefined ? adx : 25;
+                  switch (cond.metric) {
+                    case 'PRICE': actualVal = currentPrice; break;
+                    case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
+                    case 'CVD': actualVal = metricsObj.takerRatio; break;
+                    case 'RVOL': actualVal = metricsObj.rvol; break;
+                    case 'TAKER_RATIO': actualVal = metricsObj.takerRatio; break;
+                    case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
+                    case 'RSI': actualVal = rsiVal; break;
+                    case 'ADX': actualVal = adxVal; break;
+                    default: actualVal = currentPrice;
+                  }
+                  const isTrue = evaluateExitConditionDetail(cond);
+                  const opArabic = cond.operator === 'GREATER_THAN' ? 'أكبر من 🡵' :
+                                   cond.operator === 'LESS_THAN' ? 'أصغر من 🡶' :
+                                   cond.operator === 'CROSSES_ABOVE' ? 'تجاوز لأعلى 🡵' :
+                                   cond.operator === 'CROSSES_BELOW' ? 'تجاوز لأسفل 🡶' :
+                                   cond.operator === 'SPIKE' ? 'انفجار قفزة ⚡' : 'يساوي';
+                  return {
+                    isTrue,
+                    text: `شرط [${cond.metric}]: القيمة الفعلية (${actualVal.toFixed(3)}) مقارنة بـ ${opArabic} (${cond.valueNumber}) 🡪 [${isTrue ? '✅ محقق' : '❌ غير محقق'}]`
+                  };
+                });
+
+                const condResults = condDetails.map((d: any) => d.isTrue);
+                const gate = typeof gateRaw === 'string' ? gateRaw.trim().toUpperCase() : 'AND';
+                let conditionsMet = false;
+                if (gate === 'AND') {
+                  conditionsMet = condResults.every((r: boolean) => r);
+                } else {
+                  conditionsMet = condResults.some((r: boolean) => r);
+                }
+
+                if (conditionsMet) {
+                  decision = 'EXIT_NOW';
+                  exitNowBecauseOfConditions = true;
+                  const matchedCondsText = condDetails.map((d: any) => d.text).join(" | ");
+                  exitReasonDetail = `تطابق شروط الخروج المخصصة تحت البوابة [${gate}]: ${matchedCondsText}`;
+                  console.log(`[⭐ TAWLEEFA DYNAMIC CONDITIONS MET] Exit Conditions met under ${evaluationRegime} for ${symbol} using gate ${gate}`);
+                }
               }
             }
           }
@@ -1543,14 +1625,41 @@ export class SniperEngine {
 
       // 2. PARTIAL PROFIT: close 50% and secure entry
       if (steelDecision.decision === 'PARTIAL_PROFIT' && !trade.isPartialProfitTaken) {
+        if (!trade.originalAmount) trade.originalAmount = trade.amount;
+        if (!trade.partialHistory) trade.partialHistory = [];
+
         trade.isPartialProfitTaken = true;
         const entryPrice = trade.entryPrice;
         trade.sl = entryPrice; // secure break even
         const partialPnl = (trade.pnl || 0) * 0.5;
+        const prevAmount = trade.amount;
+        const closedAmount = prevAmount * 0.5;
         trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
-        trade.amount = trade.amount * 0.5;
+        trade.amount = prevAmount * 0.5;
+        
+        trade.partialHistory.push({
+          closePercent: 50,
+          amountClosed: closedAmount,
+          realizedPnl: partialPnl,
+          exitPrice: currentPrice,
+          time: Date.now(),
+          targetR: -1 // Steel Exit
+        });
+
         console.log(`[STEEL EXIT] 💸 DECISION: PARTIAL_PROFIT for ${symbol}. Reason: ${steelDecision.reason}`);
         addLog(`💸 جني جزئي فولاذي: ${symbol} | تم إغلاق 50% وتأمين دخول الوقف عند ${entryPrice.toFixed(4)} | السبب: ${steelDecision.reason}`, 'success');
+        
+        if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
+          try {
+            const side = this.getLiveExitSide(trade.type);
+            const roundedAmount = this.exchange.amountToPrecision(symbol, closedAmount / currentPrice);
+            console.log(`[BINANCE] 🔄 Steel Partial Order: sending ${side.toUpperCase()} for 50% of size | Qty: ${roundedAmount}`);
+            await this.exchange.createOrder(symbol, 'market', side, roundedAmount, undefined, { reduceOnly: true });
+          } catch (e: any) {
+            console.error(`[BINANCE] Steel Partial Order placement failed: ${e.message}`);
+          }
+        }
+        
         updated = true;
       }
 
@@ -1818,12 +1927,40 @@ export class SniperEngine {
       // Tactical Split (Special for fast movers)
       const benchmarkTp = (this.settings.smartTpUsd || 1.5) * timeLimitMultiplier;
       if (trade.pnl >= benchmarkTp && minutesOpen < 2 && !trade.isPartialProfitTaken) {
+        if (!trade.originalAmount) trade.originalAmount = trade.amount;
+        if (!trade.partialHistory) trade.partialHistory = [];
+
         trade.isPartialProfitTaken = true;
-        trade.realizedPnl = (trade.realizedPnl || 0) + (trade.pnl / 2);
-        trade.amount = trade.amount / 2;
+        const partialPnl = trade.pnl / 2;
+        const prevAmount = trade.amount;
+        const closedAmount = prevAmount / 2;
+        trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+        trade.amount = prevAmount / 2;
         trade.isBreakeven = true;
         // Move SL to entry + security
         trade.sl = trade.type === "LONG" ? trade.entryPrice * 1.002 : trade.entryPrice * 0.998;
+        
+        trade.partialHistory.push({
+          closePercent: 50,
+          amountClosed: closedAmount,
+          realizedPnl: partialPnl,
+          exitPrice: currentPrice,
+          time: Date.now(),
+          targetR: -1 // Tactical Kinetic Split
+        });
+
+        if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
+          try {
+            const side = this.getLiveExitSide(trade.type);
+            const quantityToClose = closedAmount / currentPrice;
+            const roundedAmount = this.exchange.amountToPrecision(trade.symbol, quantityToClose);
+            console.log(`[BINANCE] 🔄 Tactical Split Order: sending ${side.toUpperCase()} for 50% of size | Qty: ${roundedAmount}`);
+            await this.exchange.createOrder(trade.symbol, 'market', side, roundedAmount, undefined, { reduceOnly: true });
+          } catch (e: any) {
+            console.error(`[BINANCE] Tactical Split Order placement failed: ${e.message}`);
+          }
+        }
+
         updated = true;
         console.log(`[KINETIC] ⚡ Tactical Split: Secured 50% for ${trade.symbol}`);
       }
@@ -2049,14 +2186,43 @@ export class SniperEngine {
       if (!isTpDisabled && trade.pnl >= benchmarkTp) {
         if (minutesOpen < 1.5 && !trade.isPartialProfitTaken) {
           // Tactical Split
+          if (!trade.originalAmount) trade.originalAmount = trade.amount;
+          if (!trade.partialHistory) trade.partialHistory = [];
+
           trade.isPartialProfitTaken = true;
-          trade.realizedPnl = trade.pnl / 2;
-          trade.amount = trade.amount / 2;
+          const partialPnl = trade.pnl / 2;
+          const prevAmount = trade.amount;
+          const closedAmount = prevAmount / 2;
+
+          trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+          trade.amount = prevAmount / 2;
           trade.isBreakeven = true;
           trade.sl =
             trade.type === "LONG"
               ? trade.entryPrice * 1.002
               : trade.entryPrice * 0.998;
+          
+          trade.partialHistory.push({
+            closePercent: 50,
+            amountClosed: closedAmount,
+            realizedPnl: partialPnl,
+            exitPrice: currentPrice,
+            time: Date.now(),
+            targetR: -1 // Tactical Kinetic Split 2
+          });
+
+          if (this.mode === 'LIVE' && this.exchange && this.binanceInitialized) {
+            try {
+              const side = this.getLiveExitSide(trade.type);
+              const quantityToClose = closedAmount / currentPrice;
+              const roundedAmount = this.exchange.amountToPrecision(trade.symbol, quantityToClose);
+              console.log(`[BINANCE] 🔄 Tactical Split Order: sending ${side.toUpperCase()} for 50% of size | Qty: ${roundedAmount}`);
+              await this.exchange.createOrder(trade.symbol, 'market', side, roundedAmount, undefined, { reduceOnly: true });
+            } catch (e: any) {
+              console.error(`[BINANCE] Tactical Split Order placement failed: ${e.message}`);
+            }
+          }
+
           updated = true;
         } else if (
           trade.isPartialProfitTaken &&
@@ -2322,9 +2488,8 @@ export class SniperEngine {
 
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
       try {
-        // [INVERSE LOGIC] لإغلاق الصفقة المعكوسة، نستخدم نفس اتجاه القرار الأصلي
-        // إذا كان القرار الأصلي LONG (فُتح بـ SELL)، نغلقه بـ BUY
-        const side = trade.type === "LONG" ? "buy" : "sell";
+        // نغلق الصفقة بمعاكسة لاتجاه العقد المفتوح فعلياً
+        const side = this.getLiveExitSide(trade.type);
         const symbol = trade.symbol;
         const market = this.exchange.market(symbol);
         const quantity = trade.amount / trade.entryPrice;
@@ -2382,8 +2547,9 @@ export class SniperEngine {
     trade.pnl = finalPnl;
     
     // ROE % = (Final PnL / Margin) * 100
-    // This gives the exact ROE shown on Binance
-    const margin = trade.amount / leverage;
+    // This gives the exact ROE. Use originalAmount for accurate total ROE if partials were taken.
+    const effectiveAmount = trade.originalAmount || trade.amount;
+    const margin = effectiveAmount / leverage;
     trade.pnlPerc = (finalPnl / margin) * 100;
 
     // --- ENHANCED COMPARATIVE ARABIC INSTITUTIONAL EXIT LOG SYSTEM ---

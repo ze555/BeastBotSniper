@@ -129,6 +129,19 @@ export function SettingsView({
                     <input type="password" placeholder="لاستخدام .env اتركه فارغاً..." className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-emerald-400 font-mono focus:border-emerald-500 outline-none transition-all text-left" value={settings.binanceSecretKey || ''} onChange={e => setSettings({...settings, binanceSecretKey: e.target.value})} />
                   </div>
                 </div>
+
+                <div className="mt-6 bg-purple-500/10 border border-purple-500/20 p-6 rounded-2xl flex items-center justify-between text-right">
+                  <div className="ml-6">
+                    <h4 className="font-bold text-purple-400 flex items-center gap-2">
+                       عكس التنفيذ المباشر في المنصة (Inverse Execution)
+                    </h4>
+                    <p className="text-[11px] text-purple-400/80 mt-2 leading-relaxed">
+                      عند التفعيل، سيرسل النظام أوامر بيع/شراء <strong>معاكسة تماماً</strong> لقرارات التداول الداخلية لمنصة Binance. (يقوم بفتح Short بدلاً من Long والعكس). يستخدم للتحوط وحسابات التحديات، ولا يؤثر داخلياً على التقارير وحساب الأرباح في واجهة النظام.
+                    </p>
+                  </div>
+                  <input type="checkbox" checked={!!settings.enableInverseExecution} onChange={e => setSettings({...settings, enableInverseExecution: e.target.checked})} className="w-8 h-8 flex-shrink-0 accent-purple-500 cursor-pointer" />
+                </div>
+
                 <div className="flex flex-wrap items-center gap-4 border-t border-slate-800 pt-8 justify-end">
                   {serverIp && <div className="text-[10px] text-slate-500 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">IP السيرفر: <span className="text-white font-mono select-all">{serverIp}</span></div>}
                   <button type="button" onClick={handleTestConnection} disabled={testing} className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl text-sm font-black flex items-center gap-3 transition-all">
