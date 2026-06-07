@@ -1384,17 +1384,6 @@ export class SniperEngine {
               console.log(`[⭐ TAWLEEFA DYNAMIC HARD EXIT] profitR ${profitR.toFixed(2)} >= hardExitR ${profile.hardExitR} for ${symbol}`);
             }
 
-            // C. Emergency Liquidity Exit (System-Level Override)
-            // If the fundamental drivers of a trade collapse abruptly:
-            if (metricsObj.oiChange !== undefined && metricsObj.rvol !== undefined) {
-              if (metricsObj.oiChange <= -5 || metricsObj.rvol < 0.7) {
-                 decision = 'EXIT_NOW';
-                 exitNowBecauseOfHardExit = true;
-                 exitReasonDetail = `خروج طوارئ مبني على انهيار السيولة (Emergency Exit): OIChange=${metricsObj.oiChange.toFixed(2)}% | RVOL=${metricsObj.rvol.toFixed(2)}`;
-                 console.log(`[🚨 EMERGENCY EXIT] Triggered for ${symbol} due to liquidity collapse!`);
-              }
-            }
-
             // D. Dynamic Exit Conditions Evaluation
             if (decision !== 'EXIT_NOW') {
               let conditionsToEvaluate = profile.exitConditions || [];
