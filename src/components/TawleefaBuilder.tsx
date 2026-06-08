@@ -164,6 +164,78 @@ interface SimulatorScenario {
 // Professional preset templates that the user can start with or modify
 const PRESET_TEMPLATES: TawleefaConfig[] = [
   {
+    id: 'high_prob_strict_1_3_v1',
+    name: 'قناص الانفجار الصارم (1:3 Risk/Reward Strict)',
+    description: 'توليفة قاسية ومقيدة صُممت خصيصاً لاقتناص الحركات الانفجارية والاتجاهات الواضحة بمعدل ربح 3 أضعاف المخاطرة (1:3). تضمن الدخول فقط في أوقات تدفق السيولة الواضحة وتحميرأس المال بقوة عبر الوقف المرن والشروط المزدوجة.',
+    creator: 'AI Assistant',
+    action: 'DUAL',
+    gate: 'AND',
+    conditions: [],
+    allowedRegimes: ['TREND_EXPANSION', 'MOMENTUM_MODE'],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 75,
+    leverage: 10,
+    riskPerTrade: 2.0,
+    stopLossMode: 'ATR_DYNAMIC',
+    stopLossValue: 1.2,
+    takeProfitMode: 'FUSION_CASCADE',
+    takeProfitValue: 3.5,
+    longGate: 'AND',
+    longConditions: [
+      { id: 'l_rvo', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_oi', metric: 'OPEN_INTEREST', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_ema', metric: 'EMA50_TREND', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.05, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    shortGate: 'AND',
+    shortConditions: [
+      { id: 's_rvo', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_oi', metric: 'OPEN_INTEREST', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ema', metric: 'EMA50_TREND', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.95, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    longExitGate: 'OR',
+    longExitConditions: [
+      { id: 'le_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'le_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    shortExitGate: 'OR',
+    shortExitConditions: [
+      { id: 'se_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'se_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 }
+    ],
+    dynamicExitProfiles: [
+      {
+        regime: 'TREND_EXPANSION',
+        breakevenR: 1.0,
+        hardExitR: 3.5,
+        partials: [
+          { profitR: 1.5, closePercent: 30 }
+        ],
+        exitGate: 'OR',
+        exitConditions: [
+          { metric: 'ADX', operator: 'LESS_THAN', valueNumber: 20 },
+          { metric: 'RVOL', operator: 'LESS_THAN', valueNumber: 0.8 }
+        ]
+      },
+      {
+        regime: 'MOMENTUM_MODE',
+        breakevenR: 1.0,
+        hardExitR: 3.5,
+        partials: [
+          { profitR: 1.5, closePercent: 40 }
+        ],
+        exitGate: 'OR',
+        exitConditions: [
+          { metric: 'ADX', operator: 'LESS_THAN', valueNumber: 20 }
+        ]
+      }
+    ],
+    createdAt: new Date().toISOString()
+  },
+  {
     id: 'early_breakout_v1',
     name: 'توليفة بداية الانفجار المبكر (Early Breakout - Momentum Focus)',
     description: 'توليفة حديثة لصيد بداية حركة الأسعار وتدفق الأموال الجديدة (OI + RVOL) قبل تأكيد الاتجاه المعترف به، تعتمد على ADX 18 ومراقبة تسارع الفائدة المفتوحة بقوة.',
@@ -2617,6 +2689,17 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     let activeShortConditions = shortConditions;
     let activeShortGate = shortGate;
 
+    // Exit tracking setup
+    let activeLongExitConditions = longExitConditions;
+    let activeLongExitGate = longExitGate;
+    let activeShortExitConditions = shortExitConditions;
+    let activeShortExitGate = shortExitGate;
+
+    // Dynamic exit profiles handling
+    let dynamicExitProfileMatch = false;
+    let activeExitBreakevenR: number | undefined;
+    let activeExitPartials: any[] | undefined;
+    
     // Use currentProfiles state if activeTawleefa doesn't contain it yet
     const currentProfiles = activeTawleefa?.dynamicRegimeProfiles || dynamicRegimeProfiles;
     if (currentProfiles && Array.isArray(currentProfiles) && currentProfiles.length > 0) {
@@ -2636,6 +2719,21 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
         activeShortConditions = matchedProfile.shortConditions || [];
         activeShortGate = matchedProfile.shortGate || 'AND';
         logs.push(`[⭐ نظام متكيف] تم التعرف على ريجيم السوق المالي المفعّل [${scenario.regime}] تلقائياً وتحويل المحرك إلى التوليفة الفرعية المطابقة بنجاح! ⚡`);
+      }
+    }
+    
+    // Fallback/override with dynamicExitProfiles if defined and matches regime
+    const curExitProfiles = activeTawleefa?.dynamicExitProfiles || dynamicExitProfiles;
+    if (curExitProfiles && Array.isArray(curExitProfiles) && curExitProfiles.length > 0) {
+      const matchedExit = curExitProfiles.find((p: any) => p.regime === scenario.regime);
+      if (matchedExit) {
+        dynamicExitProfileMatch = true;
+        activeLongExitConditions = matchedExit.exitConditions || [];
+        activeLongExitGate = matchedExit.exitGate || 'AND';
+        activeShortExitConditions = matchedExit.exitConditions || [];
+        activeShortExitGate = matchedExit.exitGate || 'AND';
+        activeExitBreakevenR = matchedExit.breakevenR;
+        activeExitPartials = matchedExit.partials;
       }
     }
 
@@ -2849,6 +2947,13 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
         maxDrawdown = Math.min(maxDrawdown, tickPnL);
         pnl = tickPnL;
 
+        // Dynamic ATR Trailing (New Feature for true dynamic persistence)
+        if (activeStopLossMode === 'ATR_DYNAMIC' && !isBreakeven) {
+          const atrTrailStop = isLong ? currentPrice - (tick.atr * activeStopLossValue * 0.8) : currentPrice + (tick.atr * activeStopLossValue * 0.8);
+          if (isLong && atrTrailStop > slPrice) slPrice = atrTrailStop;
+          else if (!isLong && atrTrailStop < slPrice) slPrice = atrTrailStop;
+        }
+
         // Check if hit SL or TP
         let hitSL = false;
         let hitTP = false;
@@ -2856,8 +2961,57 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
 
         const isSavageExitMode = activeTakeProfitMode === 'FUSION_CASCADE' || activeTakeProfitMode === 'TRAILING_MOMENTUM';
 
+        // 0. DYNAMIC EXIT CONDITIONS FROM BUILDER (NEW)
+        const relevantExitConds = isLong ? activeLongExitConditions : activeShortExitConditions;
+        const relevantExitGate = isLong ? activeLongExitGate : activeShortExitGate;
+        const rRThreshold = slPrice && entryPrice ? Math.abs((currentPrice - entryPrice) / (entryPrice - slPrice)) : 0;
+        
+        let shouldDynamicExit = false;
+        if (relevantExitConds && relevantExitConds.length > 0) {
+           const evalExitConds = evaluateConds(relevantExitConds, tick, rvol, isOISpiking, rsiCrossoverAbove30, lowPriceSweep, cvdDivergening, momentumExhaustion, isAdxRising);
+           const passedCount = evalExitConds.filter(c => c.isTrue).length;
+           
+           if (relevantExitGate === 'AND') {
+             shouldDynamicExit = passedCount === relevantExitConds.length;
+           } else if (relevantExitGate === '2_OF_3') {
+             shouldDynamicExit = passedCount >= 2;
+           } else {
+             shouldDynamicExit = passedCount > 0;
+           }
+        }
+        
+        if (!closedBySavage && shouldDynamicExit && priceChangePerc > -0.2) { // Avoid panic exit at minor red
+           closedBySavage = true;
+           eventMsg = `⚡ [خروج ديناميكي مبكر] تحققت شروط الخروج التكتيكية المخصصة! استباق الانهيار وتأمين: ${priceChangePerc.toFixed(2)}%`;
+           pnl = tickPnL;
+           resultStatus = priceChangePerc > 0 ? 'SUCCESS' : 'STOPPED_OUT';
+           position = null;
+        }
+
+        // 0.5. PROFILE DYNAMIC BREAKEVEN & PARTIALS (NEW)
+        if (!closedBySavage && dynamicExitProfileMatch) {
+           // check breakeven
+           if (activeExitBreakevenR && activeExitBreakevenR > 0 && rRThreshold >= activeExitBreakevenR && !isBreakeven) {
+              const buffer = 1.0006;
+              slPrice = isLong ? entryPrice * buffer : entryPrice * (2 - buffer);
+              isBreakeven = true;
+              eventMsg = `🛡️ [تأمين الدخول المتكيف] صعود أكثر من ${activeExitBreakevenR}R، نقل الوقف لنقطة الدخول!`;
+           }
+           // check partials
+           if (activeExitPartials && activeExitPartials.length > 0 && !isPartialProfitTaken) {
+              const nextPartial = activeExitPartials[0];
+              if (rRThreshold >= nextPartial.profitR) {
+                 isPartialProfitTaken = true;
+                 eventMsg = `💸 [تسييل جزئي متكيف] إغلاق ${nextPartial.closePercent}% من الصفقة عند ${nextPartial.profitR}R ربح (${priceChangePerc.toFixed(2)}%)`;
+                 const baseProfitBuffer = isLong ? (currentPrice + entryPrice)/2 : (currentPrice + entryPrice)/2; 
+                 // Move stop near average if taking big partials
+                 slPrice = isLong ? entryPrice * 1.002 : entryPrice * 0.998;
+              }
+           }
+        }
+
         // 1. ULTRA-FAST BREAKEVEN GUARD (التأمين الفولاذي اللحظي المستميت)
-        if (isSavageExitMode && !isBreakeven && priceChangePerc >= 0.20) {
+        if (isSavageExitMode && !isBreakeven && priceChangePerc >= 0.20 && !dynamicExitProfileMatch) {
           const buffer = 1.0006;
           slPrice = isLong ? entryPrice * buffer : entryPrice * (2 - buffer);
           isBreakeven = true;
@@ -2866,7 +3020,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
 
         // 2. CASCADING PARTIAL TAKE PROFIT (جني الأرباح المتدرج الصارم)
         const tp1Goal = activeTakeProfitValue * 0.45;
-        if (isSavageExitMode && !isPartialProfitTaken && priceChangePerc >= tp1Goal) {
+        if (isSavageExitMode && !isPartialProfitTaken && priceChangePerc >= tp1Goal && !dynamicExitProfileMatch) {
           isPartialProfitTaken = true;
           eventMsg = `💸 [جني جزئي شرس] تسييل 50% من العقود لتثبيت الأرباح بمعدل +${priceChangePerc.toFixed(2)}%! سحب الوقف لـ +0.15% أرباح مأمونة!`;
           const profitCushion = 1.0015;

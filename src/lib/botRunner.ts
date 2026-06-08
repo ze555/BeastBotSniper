@@ -210,6 +210,59 @@ export async function runTradeLoop() {
                   if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) return;
                 }
 
+                // 🤖 3. GROQ AI EVALUATION (Snapshots every 15s, Groq Evaluation every 60s)
+                if (settings.useGroqAI) {
+                   const lastSnapshot = (t as any).lastSnapshot || 0;
+                   if (Date.now() - lastSnapshot > 15000) { // 15 seconds
+                      const report = {
+                         time: new Date().toISOString(),
+                         symbol: t.symbol,
+                         type: t.type,
+                         entryPrice: t.entryPrice,
+                         currentPrice: currentPx,
+                         pnlPerc: t.type === 'LONG' ? ((currentPx - t.entryPrice)/t.entryPrice)*100 : ((t.entryPrice - currentPx)/t.entryPrice)*100,
+                         klinesSummary: klines.slice(-5).map((k: any) => ({ open: k[1], high: k[2], low: k[3], close: k[4], vol: k[5] })),
+                         rsi: currentRsi,
+                         adx: currentAdx,
+                         isAdxRising: currentAdxRising,
+                         takerRatio: currentTakerRatio,
+                         fundingRate: currentFundingRate,
+                         openInterest: currentOI
+                      };
+                      
+                      if (!t.reportHistory) t.reportHistory = [];
+                      t.reportHistory.push({ ...report, klinesSummary: undefined }); // store lightweight version for history
+                      if (t.reportHistory.length > 120) t.reportHistory.shift(); // Keep up to 30 minutes of 15s interval history
+                      (t as any).lastSnapshot = Date.now();
+
+                      const lastGroqCheck = (t as any).lastGroqCheck || 0;
+                      if (Date.now() - lastGroqCheck > 60000) { // 60 seconds
+                         try {
+                            const { askGroqDecision } = await import('./groq.js');
+                            const groqDecision = await askGroqDecision({ 
+                               message: `Evaluate trade ${t.symbol}. We have ${t.reportHistory.length * 15} seconds of historical snapshots.`,
+                               currentReport: report, 
+                               historicalReports: t.reportHistory,
+                               context: globalContext 
+                            });
+                            (t as any).lastGroqCheck = Date.now();
+                            
+                            addLog(`🤖 تقرير Groq للعملة ${t.symbol}: ${groqDecision.decision} | الثقة: ${groqDecision.confidence}% | السبب: ${groqDecision.reason}`, groqDecision.decision === 'EXIT' ? 'warn' : 'info');
+
+                            // If Groq says EXIT with high confidence, close the trade.
+                            if (groqDecision.decision === 'EXIT' && groqDecision.confidence > 75) {
+                               await sniper.closeTrade(t.symbol, currentPx, 'GROQ_AI_DECISION');
+                               addLog(`🛑 اغلاق ذكي للعملة ${t.symbol} بناءً على قرار Groq!`, 'warn');
+                               return; // Trade closed
+                            }
+                         } catch (err: any) {
+                            console.error(`[BOT RUNNER] Groq AI Check Failed for ${t.symbol}:`, err.message);
+                            // Don't fail the whole loop, just skip Groq for now
+                         }
+                      }
+                   }
+                }
+
                 if (settings.useSmartExit) {
                   // The Adaptive Flow in SniperEngine now handles the core exit validation,
                   // but we keep the specific SmartExit reversal logic if enabled.
@@ -560,7 +613,34 @@ export async function runTradeLoop() {
                               atr: 0 
                           };
                           
-                          if (settings.useSteelEngine) {
+                          let proceedWithTrade = true;
+
+                          if (settings.useGroqAI) {
+                             try {
+                                const { askGroqDecision } = await import('./groq.js');
+                                const report = {
+                                    symbol: coin.symbol,
+                                    proposedAction: decision.type,
+                                    currentPrice: currentPx,
+                                    klinesSummary: klines.slice(-5).map((k: any) => ({ open: k[1], high: k[2], low: k[3], close: k[4], vol: k[5] })),
+                                    takerRatio: takerRatio,
+                                    engineReason: decision.reason
+                                };
+                                const groqDecision = await askGroqDecision({ phase: "ENTRY_CHECK", data: report });
+                                
+                                if (groqDecision.decision === 'EXIT') {
+                                   proceedWithTrade = false;
+                                   addLog(`🤖 Groq رفض صفقة ${decision.type} للعملة ${coin.symbol} (الثقة: ${groqDecision.confidence}% - ${groqDecision.reason})`, 'warn');
+                                } else {
+                                   addLog(`🤖 Groq وافق على الدخول للعملة ${coin.symbol} بنسبة ثقة ${groqDecision.confidence}%`, 'info');
+                                }
+                             } catch (e: any) {
+                                console.log('[BOT RUNNER] Groq Entry Check Failed:', e.message);
+                             }
+                          }
+
+                          if (proceedWithTrade) {
+                              if (settings.useSteelEngine) {
                               addLog(`⚡ الفولاذي TRIGGERED: ${decision.type} ${coin.symbol} (الاحتمالية: ${decision.confidence.toFixed(0)}%)`, 'success');
                               if ((decision as any).marketNarrative) {
                                   addLog(`💬 سياق الصفقة الفولاذية: ${(decision as any).marketNarrative}`, 'info');
@@ -572,8 +652,9 @@ export async function runTradeLoop() {
                               }
                            } else {
                               addLog(`🚀 ENTRY TRIGGERED: ${decision.type} ${coin.symbol} (${decision.reason})`, 'success');
-                           }
-                          await sniper.executeQuantumTrade(condition, settings.useSteelEngine ? `STEEL_${decision.reason}` : settings.useCreativeEngine ? `CREATIVE_${decision.reason}` : `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                             }
+                              await sniper.executeQuantumTrade(condition, settings.useSteelEngine ? `STEEL_${decision.reason}` : settings.useCreativeEngine ? `CREATIVE_${decision.reason}` : `QUANTUM_${decision.reason}`, decision.takeProfitPerc, decision.stopLossPerc);
+                          }
                           
                      } else {
                          rejectedCount++;

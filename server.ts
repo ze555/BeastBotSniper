@@ -75,6 +75,18 @@ async function startServer() {
     res.json({ success: true, panicActive: active });
   });
 
+  app.post("/api/groq/decision", async (req, res) => {
+    try {
+      const { askGroqDecision } = await import("./src/lib/groq.js");
+      const reportData = req.body;
+      const decision = await askGroqDecision(reportData);
+      res.json({ success: true, data: decision });
+    } catch (e: any) {
+      console.error('Groq API Error:', e.message);
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
   app.get("/api/settings", (req, res) => {
     const settings = { ...sniper.getSettings() };
     // Mask sensitive keys

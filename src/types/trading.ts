@@ -89,6 +89,7 @@ export interface Trade {
   tickHistory?: number[]; // Live Data: Tracks every incoming price tick
   oiHistory?: number[]; // Open Interest history
   volHistory?: number[]; // Volume history
+  reportHistory?: any[]; // Full report history for Groq AI
   latestAdaptiveResult?: {
     time: number;
     decision: string;
@@ -387,6 +388,10 @@ export interface BotSettings {
   useTawleefaEngine?: boolean;          // تفعيل محرك التوليفات المخصصة بالقرارات
   activeTawleefaJson?: string;          // ملف التوليفة النشطة المشفر بصيغة JSON
   useBeastAuditorEngine?: boolean;      // تفعيل مدقق الوحش العملاق (خمس شروط مطلقة)
+
+  // 🤖 Groq LLM Assistant (المساعد الذكي للقرار)
+  useGroqAI?: boolean;                  // تفعيل المساعد للقرار
+  groqApiKey?: string;                  // مفتاح الاستخدام
 
   // 🦅 Savage & Fierce Exit Engine (محرك الخروج الشرس المستقل)
   useFierceExitEngine?: boolean;        // تفعيل محرك الخروج الشرس المستقل لأي محرك دخول

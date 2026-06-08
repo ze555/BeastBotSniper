@@ -969,6 +969,51 @@ export function SettingsView({
                   </div>
                 </div>
 
+                {/* 🤖 Groq AI Assistant (المساعد الذكي لمراجعة القرارات) */}
+                <div className="bg-gradient-to-r from-emerald-950/20 via-slate-900 to-indigo-950/20 border-2 border-emerald-500/30 rounded-3xl p-6 md:p-8 space-y-6 relative overflow-hidden shadow-[0_0_25px_rgba(16,185,129,0.1)]">
+                  <div className="absolute top-0 right-0 p-2 opacity-5"><BrainCircuit className="w-32 h-32 text-emerald-500" /></div>
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-800 pb-4 relative z-10 gap-4" dir="rtl">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 text-emerald-400">
+                        <BrainCircuit className="w-7 h-7 text-emerald-500" />
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-2 justify-end">
+                          <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">LLAMA 70B AI</span>
+                          <h4 className="font-extrabold text-emerald-500 text-lg">المدقق الآلي الذكي (Groq AI)</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                          إرسال تقرير شامل ومفصل لجميع البيانات الحالية للعملة إلى ذكاء اصطناعي فائق السرعة لاتخاذ قرار الاستمرار أو الخروج بدقة غير مسبوقة.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 self-end md:self-center ml-0 mr-auto">
+                      <input 
+                         type="checkbox" 
+                         checked={!!settings.useGroqAI} 
+                         onChange={e => setSettings({...settings, useGroqAI: e.target.checked})} 
+                         className="w-7 h-7 accent-emerald-500 cursor-pointer" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className={`space-y-4 relative z-10 transition-all ${!settings.useGroqAI ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
+                    <div className="space-y-2 text-right">
+                      <label className="text-sm font-bold text-slate-300">مفتاح API الخاص بـ GROQ</label>
+                      <input 
+                        type="password" 
+                        value={settings.groqApiKey || ''} 
+                        onChange={e => setSettings({...settings, groqApiKey: e.target.value})}
+                        placeholder="استخدم .env أو ضعه هنا (gsk_...)"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-emerald-400 font-mono focus:border-emerald-500 outline-none transition-all text-left"
+                      />
+                      <p className="text-[10px] text-slate-500">سيتخذ الذكاء الاصطناعي القرار النهائي في كل دورة مراقبة. ينصح بضبطه للمساعدة في قرارات الخروج الصعبة.</p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Section 1: المفاتيح الهجومية للعمليات الخاطفة */}
                 <div className="bg-slate-950/40 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6">
                   <h3 className="text-lg font-black text-white flex items-center gap-2 border-b border-slate-800 pb-4">
