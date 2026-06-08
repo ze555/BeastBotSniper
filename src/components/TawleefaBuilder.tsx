@@ -43,7 +43,7 @@ import {
 } from 'recharts';
 
 // Define the type structures for our custom rules engine (Tawleefa)
-export type LogicGate = 'AND' | 'OR';
+export type LogicGate = 'AND' | 'OR' | '2_OF_3';
 export type RuleAction = 'LONG' | 'SHORT' | 'EXIT_ALL' | 'ALERT_ONLY' | 'DUAL';
 
 export interface ConditionRow {
@@ -73,11 +73,11 @@ export interface DynamicExitProfile {
   breakevenR?: number;
   partials?: DynamicExitPartial[];
   exitConditions?: DynamicExitCondition[];
-  exitGate?: 'AND' | 'OR';
+  exitGate?: 'AND' | 'OR' | '2_OF_3';
   longExitConditions?: DynamicExitCondition[];
-  longExitGate?: 'AND' | 'OR';
+  longExitGate?: 'AND' | 'OR' | '2_OF_3';
   shortExitConditions?: DynamicExitCondition[];
-  shortExitGate?: 'AND' | 'OR';
+  shortExitGate?: 'AND' | 'OR' | '2_OF_3';
   hardExitR?: number;
 }
 
@@ -265,7 +265,94 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         sensitivity: 1.0
       }
     ],
-    dynamicRegimeProfiles: []
+    dynamicRegimeProfiles: [],
+    longExitGate: '2_OF_3',
+    longExitConditions: [
+      {
+        id: 'long_exit_taker',
+        metric: 'TAKER_RATIO',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.00,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'long_exit_oi',
+        metric: 'OPEN_INTEREST',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'long_exit_adx',
+        metric: 'ADX',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 20,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    shortExitGate: '2_OF_3',
+    shortExitConditions: [
+      {
+        id: 'short_exit_taker',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.00,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'short_exit_oi',
+        metric: 'OPEN_INTEREST',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'short_exit_adx',
+        metric: 'ADX',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 20,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    dynamicExitProfiles: [
+      {
+        regime: 'TREND_EXPANSION',
+        breakevenR: 1.0,
+        partials: [{ profitR: 2.0, closePercent: 25 }]
+      },
+      {
+        regime: 'MOMENTUM_MODE',
+        breakevenR: 1.0,
+        partials: [{ profitR: 2.0, closePercent: 25 }]
+      },
+      {
+        regime: 'TRENDING',
+        breakevenR: 1.0,
+        partials: [{ profitR: 2.0, closePercent: 25 }]
+      },
+      {
+        regime: 'LIQUIDITY_SWEEP',
+        breakevenR: 1.0,
+        partials: [{ profitR: 2.0, closePercent: 25 }]
+      },
+      {
+        regime: 'COMPRESSION',
+        breakevenR: 1.0,
+        partials: [{ profitR: 2.0, closePercent: 25 }]
+      }
+    ]
   },
   {
     id: 'golden_sniper_balanced_v1',
@@ -2185,7 +2272,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setDynamicExitProfiles(updated);
   };
 
-  const handleUpdateExitGate = (regimeReg: string, gateVal: 'AND' | 'OR') => {
+  const handleUpdateExitGate = (regimeReg: string, gateVal: 'AND' | 'OR' | '2_OF_3') => {
     const updated = dynamicExitProfiles.map(p => {
       if (p.regime === regimeReg) {
         return {
@@ -3343,6 +3430,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                             تطابق الكل (AND)
                           </button>
                           <button
+                            onClick={() => setLongGate('2_OF_3')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === '2_OF_3' ? 'bg-indigo-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            إثنان من ثلاثة (2 OF 3)
+                          </button>
+                          <button
                             onClick={() => setLongGate('OR')}
                             className={`px-3 py-1 rounded text-xs font-bold transition-all ${longGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                           >
@@ -3356,6 +3449,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                             className={`px-3 py-1 rounded text-xs font-bold transition-all ${longExitGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                           >
                             تطابق الكل (AND)
+                          </button>
+                          <button
+                            onClick={() => setLongExitGate('2_OF_3')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${longExitGate === '2_OF_3' ? 'bg-indigo-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            إثنان من ثلاثة (2 OF 3)
                           </button>
                           <button
                             onClick={() => setLongExitGate('OR')}
@@ -3375,6 +3474,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                             تطابق الكل (AND)
                           </button>
                           <button
+                            onClick={() => setShortGate('2_OF_3')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === '2_OF_3' ? 'bg-indigo-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            إثنان من ثلاثة (2 OF 3)
+                          </button>
+                          <button
                             onClick={() => setShortGate('OR')}
                             className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortGate === 'OR' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                           >
@@ -3388,6 +3493,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                             className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortExitGate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                           >
                             تطابق الكل (AND)
+                          </button>
+                          <button
+                            onClick={() => setShortExitGate('2_OF_3')}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all ${shortExitGate === '2_OF_3' ? 'bg-indigo-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                            إثنان من ثلاثة (2 OF 3)
                           </button>
                           <button
                             onClick={() => setShortExitGate('OR')}
@@ -3406,6 +3517,12 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                           className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === 'AND' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                         >
                           تطابق الكل (AND)
+                        </button>
+                        <button
+                          onClick={() => setGate('2_OF_3')}
+                          className={`px-3 py-1 rounded text-xs font-bold transition-all ${gate === '2_OF_3' ? 'bg-indigo-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          إثنان من ثلاثة (2 OF 3)
                         </button>
                         <button
                           onClick={() => setGate('OR')}

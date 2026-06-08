@@ -1434,6 +1434,8 @@ export class SniperEngine {
                 let conditionsMet = false;
                 if (gate === 'AND') {
                   conditionsMet = condResults.every((r: boolean) => r);
+                } else if (gate === '2_OF_3') {
+                  conditionsMet = condResults.filter((r: boolean) => r).length >= 2;
                 } else {
                   conditionsMet = condResults.some((r: boolean) => r);
                 }

@@ -217,13 +217,15 @@ export class CoreEngine {
                 const shortGateValRaw = activeConfig.shortGate || 'AND';
                 const shortGateVal = typeof shortGateValRaw === 'string' ? shortGateValRaw.trim().toUpperCase() : 'AND';
 
-                const longTriggered = longConds.length > 0 && (longGateVal === 'AND' 
-                  ? detailedLong.every(c => c.isMet) 
-                  : detailedLong.some(c => c.isMet));
+                const evaluateGate = (gate: string, conditions: any[]) => {
+                  if (conditions.length === 0) return false;
+                  if (gate === 'AND') return conditions.every(c => c.isMet);
+                  if (gate === '2_OF_3') return conditions.filter(c => c.isMet).length >= 2;
+                  return conditions.some(c => c.isMet);
+                };
 
-                const shortTriggered = shortConds.length > 0 && (shortGateVal === 'AND' 
-                  ? detailedShort.every(c => c.isMet) 
-                  : detailedShort.some(c => c.isMet));
+                const longTriggered = evaluateGate(longGateVal, detailedLong);
+                const shortTriggered = evaluateGate(shortGateVal, detailedShort);
 
                 if (longTriggered && !shortTriggered) {
                   botBias = 'LONG';
@@ -253,6 +255,8 @@ export class CoreEngine {
                 if (detailedConditions.length > 0) {
                   if (activeGate === 'AND') {
                     triggerSignal = conditionsEvaluation.every((v: boolean) => v);
+                  } else if (activeGate === '2_OF_3') {
+                    triggerSignal = conditionsEvaluation.filter((v: boolean) => v).length >= 2;
                   } else {
                     triggerSignal = conditionsEvaluation.some((v: boolean) => v);
                   }
