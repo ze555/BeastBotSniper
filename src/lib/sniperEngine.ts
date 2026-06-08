@@ -1295,9 +1295,13 @@ export class SniperEngine {
               isTrue = actualVal < 0;
             } else if (cond.operator === 'IS_RISING') {
               if (cond.metric === 'ADX') isTrue = indicators?.isAdxRising === true;
+              else if (cond.metric === 'OPEN_INTEREST') isTrue = actualVal > 0.05;
+              else if (cond.metric === 'RVOL') isTrue = actualVal > 1.05;
               else isTrue = false;
             } else if (cond.operator === 'IS_FALLING') {
               if (cond.metric === 'ADX') isTrue = indicators?.isAdxRising === false;
+              else if (cond.metric === 'OPEN_INTEREST') isTrue = actualVal < -0.05;
+              else if (cond.metric === 'RVOL') isTrue = actualVal < 0.95;
               else isTrue = false;
             } else {
               isTrue = actualVal > cond.valueNumber;

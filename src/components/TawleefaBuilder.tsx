@@ -164,6 +164,110 @@ interface SimulatorScenario {
 // Professional preset templates that the user can start with or modify
 const PRESET_TEMPLATES: TawleefaConfig[] = [
   {
+    id: 'early_breakout_v1',
+    name: 'توليفة بداية الانفجار المبكر (Early Breakout - Momentum Focus)',
+    description: 'توليفة حديثة لصيد بداية حركة الأسعار وتدفق الأموال الجديدة (OI + RVOL) قبل تأكيد الاتجاه المعترف به، تعتمد على ADX 18 ومراقبة تسارع الفائدة المفتوحة بقوة.',
+    creator: 'Custom User',
+    action: 'DUAL',
+    gate: 'AND',
+    conditions: [
+      {
+        id: 'global_oi_spike',
+        metric: 'OPEN_INTEREST',
+        operator: 'SPIKE',
+        valueType: 'NUMBER',
+        valueNumber: 1.2,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_oi_accel',
+        metric: 'OPEN_INTEREST',
+        operator: 'IS_RISING',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '1m',
+        sensitivity: 0.5
+      },
+      {
+        id: 'global_rvol_13',
+        metric: 'RVOL',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.3,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'global_adx_18',
+        metric: 'ADX',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 18,
+        timeframe: '15m',
+        sensitivity: 1.0
+      }
+    ],
+    allowedRegimes: [
+      'TREND_EXPANSION',
+      'MOMENTUM_MODE',
+      'TRENDING',
+      'LIQUIDITY_SWEEP',
+      'COMPRESSION'
+    ],
+    btcAlignmentRequired: false,
+    minMarketConfidence: 40,
+    leverage: 10,
+    riskPerTrade: 1.0,
+    stopLossMode: 'NONE',
+    stopLossValue: 1.5,
+    takeProfitMode: 'TRAILING_MOMENTUM',
+    takeProfitValue: 5.0,
+    longGate: 'AND',
+    longConditions: [
+      {
+        id: 'long_taker_115',
+        metric: 'TAKER_RATIO',
+        operator: 'GREATER_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 1.15,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'long_ema50',
+        metric: 'EMA50_TREND',
+        operator: 'EXPECT_LONG',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    shortGate: 'AND',
+    shortConditions: [
+      {
+        id: 'short_taker_85',
+        metric: 'TAKER_RATIO',
+        operator: 'LESS_THAN',
+        valueType: 'NUMBER',
+        valueNumber: 0.85,
+        timeframe: '5m',
+        sensitivity: 1.0
+      },
+      {
+        id: 'short_ema50',
+        metric: 'EMA50_TREND',
+        operator: 'EXPECT_SHORT',
+        valueType: 'NUMBER',
+        valueNumber: 0,
+        timeframe: '5m',
+        sensitivity: 1.0
+      }
+    ],
+    dynamicRegimeProfiles: []
+  },
+  {
     id: 'golden_sniper_balanced_v1',
     name: 'توليفة القناص الذهبي المتوازن (Golden Sniper Balanced)',
     description: 'نسخة متقنة تجمع بين دقة الدخول في الريجيمات السوقية الخمسة وإستراتيجيات الخروج الديناميكية الصارمة لعامة الأصول الرقمية.',

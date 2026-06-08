@@ -166,10 +166,13 @@ export class CoreEngine {
                     isTrue = actualVal < 0;
                   } else if (cond.operator === 'IS_RISING') {
                     if (cond.metric === 'ADX') isTrue = metricsObj.isAdxRising === true;
-                    // Other metrics can optionally check if prev metric values are stored somewhere
+                    else if (cond.metric === 'OPEN_INTEREST') isTrue = (metricsObj.oiChange !== undefined && metricsObj.oiChange > 0.05);
+                    else if (cond.metric === 'RVOL') isTrue = metricsObj.rvol > 1.05;
                     else isTrue = false; 
                   } else if (cond.operator === 'IS_FALLING') {
                     if (cond.metric === 'ADX') isTrue = metricsObj.isAdxRising === false;
+                    else if (cond.metric === 'OPEN_INTEREST') isTrue = (metricsObj.oiChange !== undefined && metricsObj.oiChange < -0.05);
+                    else if (cond.metric === 'RVOL') isTrue = metricsObj.rvol < 0.95;
                     else isTrue = false;
                   } else {
                     isTrue = actualVal > cond.valueNumber;
