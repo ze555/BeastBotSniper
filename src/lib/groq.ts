@@ -38,7 +38,7 @@ Output nothing else, just the JSON.
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'llama3-70b-8192', // Or 'mixtral-8x7b-32768' / 'llama-3.1-70b-versatile'
+      model: 'llama-3.3-70b-versatile',
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage }
