@@ -469,8 +469,8 @@ export async function runTradeLoop() {
                              signalFoundInThisLoop = true;
                              const biasType = isLongMatch ? 'LONG' : 'SHORT';
                              
-                             const slPerc = settings.strictMaxRisk || 1.5;
-                             const tpPerc = settings.strictFastBreakevenPerc || 3.5;
+                             const slPerc = (settings.quantumSlScale ?? 1.0) * (settings.strictMaxRisk || 1.5);
+                             const tpPerc = (settings.quantumTpScale ?? 1.5) * 2.33; // Scales default 3.5% with TpScale
                              const slDistance = (slPerc / 100) * currentPx;
                              const support = currentPx - slDistance;
                              const resistance = currentPx + slDistance;
