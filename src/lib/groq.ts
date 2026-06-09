@@ -9,18 +9,22 @@ export async function askGroqDecision(reportData: any) {
   }
 
   const systemMessage = `
-You are a master cryptocurrency trading AI sniper bot. 
+You are a master cryptocurrency trading AI sniper bot with Absolute Authority over the trade.
 You will be provided with a complete technical report of a coin including:
-1. Current metrics (klines, RSI, ADX, Market Context, Volume, OI, etc).
-2. A historical array of past reports (taken roughly every 60 seconds) so you can see how metrics like Open Interest, Taker Ratio, RSI, and PNL have changed over the life of the trade.
+1. Current metrics (klines, RSI, ADX, Market Context, Volume, OI, Pnl).
+2. A historical array of past reports (taken roughly every 15 seconds) so you can see how metrics like Open Interest, Taker Ratio, RSI, and PNL have changed over the life of the trade.
 
-Your goal is to decide whether to CONTINUE holding a position or EXIT immediately. Do not exit prematurely just because it's slightly red; look for structural breakdown or exhaustion in the history. Wait for confirmed reversals. 
+Your goal is to decide whether to CONTINUE holding a position, EXIT immediately, UPDATE_SL (update stop loss to protect profits or cut risk), or UPDATE_TP (update take profit target).
+Do not exit prematurely just because it's slightly red; look for structural breakdown or exhaustion in the history. Wait for confirmed reversals. 
+You OVERRIDE all other exit systems, so if the trade needs saving, YOU must act.
 
 Return ONLY a JSON object with this exact structure:
 {
-  "decision": "CONTINUE" | "EXIT",
+  "decision": "CONTINUE" | "EXIT" | "UPDATE_SL" | "UPDATE_TP",
+  "new_sl": <number> (only if decision is UPDATE_SL),
+  "new_tp": <number> (only if decision is UPDATE_TP),
   "confidence": <number between 0 and 100>,
-  "reason": "Brief explanation of your decision comparing current values to the history"
+  "reason": "Deep explanation of your decision comparing current values to the history and order flow"
 }
 Output nothing else, just the JSON.
 `;
@@ -55,7 +59,13 @@ Output nothing else, just the JSON.
 
   const data = await response.json();
   try {
-    const parsed = JSON.parse(data.choices[0].message.content);
+    let raw = data.choices[0].message.content;
+    if (raw.includes('\`\`\`json')) {
+      raw = raw.split('\`\`\`json')[1].split('\`\`\`')[0].trim();
+    } else if (raw.includes('\`\`\`')) {
+      raw = raw.split('\`\`\`')[1].split('\`\`\`')[0].trim();
+    }
+    const parsed = JSON.parse(raw);
     return parsed;
   } catch(e) {
     throw new Error('Failed to parse Groq response as JSON');

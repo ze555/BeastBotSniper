@@ -905,6 +905,11 @@ export class SniperEngine {
     saveTrade(trade);
   }
 
+  public forceUpdateTrade(trade: Trade) {
+    saveTrade(trade);
+    this.activeTrades.set(trade.symbol, trade);
+  }
+
   public async executeQuantumTrade(
     cond: MarketCondition,
     source: string,
@@ -1180,6 +1185,30 @@ export class SniperEngine {
       if (trade.adaptiveHistoryLogs.length > 50) {
         trade.adaptiveHistoryLogs.shift();
       }
+    }
+
+    // --- 0000. GROQ AI ABSOLUTE AUTHORITY ---
+    if (this.settings.useGroqAI) {
+      const managerVerdict = this.manager.manage(trade as any, currentPrice, {
+        strictFastBreakevenPerc: this.settings.strictFastBreakevenPerc,
+        tradingFeeRate: this.settings.tradingFeeRate,
+        leverage: this.settings.leverage
+      });
+
+      if (managerVerdict.updatedTrade) {
+        Object.assign(trade, managerVerdict.updatedTrade);
+        saveTrade(trade);
+        this.activeTrades.set(symbol, trade);
+      }
+      
+      const isLong = trade.type === 'LONG';
+      const slHit = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+      if (slHit) {
+         addLog(`🚨 تصفية طارئة للحد من الخسارة لـ ${symbol} رغم تفعيل جروك! السعر ضرب الوقف ${trade.sl}`, 'warn');
+         await this.closeTrade(trade, currentPrice, 'GROQ_HARD_SL_HIT');
+         return;
+      }
+      return; // Absolute authority complete handoff - Bypass all other logics
     }
 
     // --- 000. EVALUATE CUSTOM TAWLEEFA EXIT ONLY ---

@@ -205,7 +205,7 @@ export async function runTradeLoop() {
                 });
 
                 // 2. SMART & WISE EXIT LOGIC (Reusing fetched data)
-                if (settings.useWiseExit && klines && klines.length > 0) {
+                if (!settings.useGroqAI && settings.useWiseExit && klines && klines.length > 0) {
                   await sniper.wiseExit(t.symbol, currentPx, klines);
                   if (!sniper.getActiveTrades().find(at => at.symbol === t.symbol)) return;
                 }
@@ -214,18 +214,30 @@ export async function runTradeLoop() {
                 if (settings.useGroqAI) {
                    const lastSnapshot = (t as any).lastSnapshot || 0;
                    if (Date.now() - lastSnapshot > 15000) { // 15 seconds
+                      const pnlPerc = t.type === 'LONG' ? ((currentPx - t.entryPrice)/t.entryPrice)*100 : ((t.entryPrice - currentPx)/t.entryPrice)*100;
+                      // Calculate MFE (Maximum Favorable Excursion)
+                      const highestPx = t.highestPrice || currentPx;
+                      const mfePerc = t.type === 'LONG' ? ((highestPx - t.entryPrice)/t.entryPrice)*100 : ((t.entryPrice - highestPx)/t.entryPrice)*100;
+                      
+                      const last20Vols = klines.slice(-20).map((k: any) => parseFloat(k[5]));
+                      const avgVol20 = last20Vols.reduce((a: number, b: number) => a + b, 0) / 20;
+                      const rvol = avgVol20 > 0 ? (parseFloat(klines[klines.length - 1][5]) / avgVol20) : 1.0;
+
                       const report = {
                          time: new Date().toISOString(),
                          symbol: t.symbol,
                          type: t.type,
                          entryPrice: t.entryPrice,
                          currentPrice: currentPx,
-                         pnlPerc: t.type === 'LONG' ? ((currentPx - t.entryPrice)/t.entryPrice)*100 : ((t.entryPrice - currentPx)/t.entryPrice)*100,
+                         highestPrice: highestPx,
+                         pnlPerc: pnlPerc,
+                         mfePerc: mfePerc,
                          klinesSummary: klines.slice(-5).map((k: any) => ({ open: k[1], high: k[2], low: k[3], close: k[4], vol: k[5] })),
                          rsi: currentRsi,
                          adx: currentAdx,
                          isAdxRising: currentAdxRising,
                          takerRatio: currentTakerRatio,
+                         rvol: rvol,
                          fundingRate: currentFundingRate,
                          openInterest: currentOI
                       };
@@ -251,12 +263,22 @@ export async function runTradeLoop() {
 
                             // If Groq says EXIT with high confidence, close the trade.
                             if (groqDecision.decision === 'EXIT' && groqDecision.confidence > 75) {
-                               await sniper.closeTrade(t.symbol, currentPx, 'GROQ_AI_DECISION');
-                               addLog(`🛑 اغلاق ذكي للعملة ${t.symbol} بناءً على قرار Groq!`, 'warn');
+                               await sniper.closeTrade(t.symbol, currentPx, `GROQ_AI_DECISION: ${groqDecision.reason}`);
+                               addLog(`🛑 قرار حاسم ومطلق لجروك! إغلاق فوري ذكي للعملة ${t.symbol} بناءً على التاريخ والمؤشرات! الثقة: %${groqDecision.confidence}! (السبب: ${groqDecision.reason})`, 'warn');
                                return; // Trade closed
+                            } else if (groqDecision.decision === 'UPDATE_SL' && groqDecision.new_sl) {
+                               t.sl = groqDecision.new_sl;
+                               sniper.forceUpdateTrade(t);
+                               addLog(`🛡️ قرار عبقري لجروك! تحديث وقف الخسارة للعملة ${t.symbol} القيمة الجديدة: ${groqDecision.new_sl}. (السبب: ${groqDecision.reason})`, 'success');
+                            } else if (groqDecision.decision === 'UPDATE_TP' && groqDecision.new_tp) {
+                               if (!t.tp1) t.tp1 = groqDecision.new_tp;
+                               else t.tp1 = groqDecision.new_tp;
+                               sniper.forceUpdateTrade(t);
+                               addLog(`🎯 قرار عبقري لجروك! تحديث هدف الربح للعملة ${t.symbol} القيمة الجديدة: ${groqDecision.new_tp}. (السبب: ${groqDecision.reason})`, 'success');
                             }
                          } catch (err: any) {
                             console.error(`[BOT RUNNER] Groq AI Check Failed for ${t.symbol}:`, err.message);
+                            addLog(`⚠️ تحذير: فشل تنفيذ تحليل جروك الذكي للعملة ${t.symbol}: ${err.message}`, 'warn');
                             // Don't fail the whole loop, just skip Groq for now
                          }
                       }
@@ -636,6 +658,7 @@ export async function runTradeLoop() {
                                 }
                              } catch (e: any) {
                                 console.log('[BOT RUNNER] Groq Entry Check Failed:', e.message);
+                                addLog(`⚠️ تحذير: فشل فحص جروك للدخول للعملة ${coin.symbol}: ${e.message}`, 'warn');
                              }
                           }
 
