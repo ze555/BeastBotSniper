@@ -1203,11 +1203,20 @@ export class SniperEngine {
       
       const isLong = trade.type === 'LONG';
       const slHit = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+      const tp1Hit = trade.tp1 && (isLong ? currentPrice >= trade.tp1 : currentPrice <= trade.tp1);
+      
       if (slHit) {
          addLog(`🚨 تصفية طارئة للحد من الخسارة لـ ${symbol} رغم تفعيل جروك! السعر ضرب الوقف ${trade.sl}`, 'warn');
-         await this.closeTrade(trade, currentPrice, 'GROQ_HARD_SL_HIT');
+         await this.forceCloseTrade(trade, currentPrice, 'GROQ_HARD_SL_HIT');
          return;
       }
+
+      if (tp1Hit) {
+         addLog(`🎯 تصفية طارئة لجني الربح لـ ${symbol} رغم تفعيل جروك! السعر ضرب الهدف ${trade.tp1}`, 'success');
+         await this.forceCloseTrade(trade, currentPrice, 'GROQ_HARD_TP_HIT');
+         return;
+      }
+
       return; // Absolute authority complete handoff - Bypass all other logics
     }
 
@@ -2494,6 +2503,54 @@ export class SniperEngine {
     } else {
       return Math.min(currentSl, candidateSl);
     }
+  }
+
+  public async forceCloseTrade(trade: Trade, exitPrice: number, reason: string) {
+    if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
+      try {
+        const side = this.getLiveExitSide(trade.type);
+        const symbol = trade.symbol;
+        const quantity = trade.amount / trade.entryPrice;
+        const roundedAmount = this.exchange.amountToPrecision(symbol, quantity);
+
+        console.log(
+          `[BINANCE] 🏁 Closing INVERSE LIVE ${trade.type} on ${symbol} | Order: ${side.toUpperCase()} | Reason: ${reason} (FORCE CLOSE)`,
+        );
+        const order = await this.exchange.createOrder(
+          symbol,
+          "market",
+          side,
+          roundedAmount,
+          undefined,
+          { reduceOnly: true },
+        );
+        console.log(`[BINANCE] 🏁 Close Order Success: ${order.id}`);
+        const finalPnl =
+          trade.type === "LONG"
+            ? (exitPrice - trade.entryPrice) * quantity
+            : (trade.entryPrice - exitPrice) * quantity;
+        trade.pnl = finalPnl;
+      } catch (e: any) {
+        console.error(
+          `[BINANCE] Failed to close live trade ${trade.symbol}: ${e.message}`,
+        );
+      }
+    }
+
+    const finalPnl = trade.type === "LONG" 
+        ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * trade.amount 
+        : ((trade.entryPrice - exitPrice) / trade.entryPrice) * trade.amount;
+    
+    trade.pnl = finalPnl;
+    trade.status = "CLOSED";
+    trade.exitDate = Date.now();
+
+    console.log(
+      `[SNIPER] ${reason}: Trade FORCE Closed on ${trade.symbol}. Final PnL: $${trade.pnl.toFixed(2)}`
+    );
+    this.activeTrades.delete(trade.symbol);
+    this.tradeHistory.unshift({ ...trade });
+    saveTrade(trade);
   }
 
   private async closeTrade(trade: Trade, exitPrice: number, reason: string) {

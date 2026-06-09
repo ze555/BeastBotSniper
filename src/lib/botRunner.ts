@@ -244,11 +244,11 @@ export async function runTradeLoop() {
                       
                       if (!t.reportHistory) t.reportHistory = [];
                       t.reportHistory.push({ ...report, klinesSummary: undefined }); // store lightweight version for history
-                      if (t.reportHistory.length > 120) t.reportHistory.shift(); // Keep up to 30 minutes of 15s interval history
+                      if (t.reportHistory.length > 20) t.reportHistory.shift(); // Keep up to 5 minutes of 15s interval history to prevent rate limit
                       (t as any).lastSnapshot = Date.now();
 
                       const lastGroqCheck = (t as any).lastGroqCheck || 0;
-                      if (Date.now() - lastGroqCheck > 60000) { // 60 seconds
+                      if (Date.now() - lastGroqCheck > 30000) { // 30 seconds
                          try {
                             const { askGroqDecision } = await import('./groq.js');
                             const groqDecision = await askGroqDecision({ 
@@ -263,7 +263,7 @@ export async function runTradeLoop() {
 
                             // If Groq says EXIT with high confidence, close the trade.
                             if (groqDecision.decision === 'EXIT' && groqDecision.confidence > 75) {
-                               await sniper.closeTrade(t.symbol, currentPx, `GROQ_AI_DECISION: ${groqDecision.reason}`);
+                               await sniper.forceCloseTrade(t, currentPx, `GROQ_AI_DECISION: ${groqDecision.reason}`);
                                addLog(`🛑 قرار حاسم ومطلق لجروك! إغلاق فوري ذكي للعملة ${t.symbol} بناءً على التاريخ والمؤشرات! الثقة: %${groqDecision.confidence}! (السبب: ${groqDecision.reason})`, 'warn');
                                return; // Trade closed
                             } else if (groqDecision.decision === 'UPDATE_SL' && groqDecision.new_sl) {
