@@ -1,5 +1,54 @@
 import { sniper } from './sniperEngine.js';
 
+let cachedAvailableModels: string[] = [];
+let lastModelsFetchTime = 0;
+
+async function getAvailableModels(apiKey: string): Promise<string[]> {
+  const PREFERRED_ORDER = [
+    "groq/compound",
+    "groq/compound-mini",
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "qwen/qwen3-32b",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant"
+  ];
+
+  try {
+    if (cachedAvailableModels.length > 0 && Date.now() - lastModelsFetchTime < 3600 * 1000) {
+      return cachedAvailableModels;
+    }
+
+    const response = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const apiModels = data.data.map((m: any) => m.id);
+      
+      // Preserve preferred order based on what is actually available in the API
+      const intersecting = PREFERRED_ORDER.filter(m => apiModels.includes(m));
+      
+      // Add other remaining text models from API as ultimate fallbacks, skip whisper as it's audio
+      const others = apiModels.filter((m: string) => !PREFERRED_ORDER.includes(m) && !m.includes('whisper'));
+      
+      cachedAvailableModels = intersecting.length > 0 ? [...intersecting, ...others] : apiModels;
+      lastModelsFetchTime = Date.now();
+      return cachedAvailableModels;
+    }
+  } catch (error) {
+    console.error("Failed to fetch Groq models", error);
+  }
+
+  // Fallback if API fails
+  return PREFERRED_ORDER;
+}
+
 export async function askGroqDecision(reportData: any) {
   const settings = sniper.getSettings();
   const apiKey = settings.groqApiKey || process.env.GROQ_API_KEY || process.env.GROQ_KEY || process.env.grok_key || "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";
@@ -31,13 +80,7 @@ Output nothing else, just the JSON.
 
   const userMessage = JSON.stringify(reportData, null, 2);
 
-  const models = [
-    'llama-3.1-8b-instant',
-    'llama3-8b-8192',
-    'llama-3.3-70b-versatile',
-    'llama3-70b-8192',
-    'mixtral-8x7b-32768'
-  ];
+  const models = await getAvailableModels(apiKey);
 
   let lastError: any = null;
 
