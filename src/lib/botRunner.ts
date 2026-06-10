@@ -248,11 +248,20 @@ export async function runTradeLoop() {
                       (t as any).lastSnapshot = Date.now();
 
                       const lastGroqCheck = (t as any).lastGroqCheck || 0;
-                      if (Date.now() - lastGroqCheck > 30000) { // 30 seconds
-                         try {
-                            const { askGroqDecision } = await import('./groq.js');
-                            const groqDecision = await askGroqDecision({ 
-                               message: `Evaluate trade ${t.symbol}. We have ${t.reportHistory.length * 15} seconds of historical snapshots.`,
+                      // Ensure this specific trade hasn't been checked in 30 seconds
+                      if (Date.now() - lastGroqCheck > 30000) {
+                         // Check global rate limit: only ONE trade evaluation every 10 seconds across all trades
+                         const nowTime = Date.now();
+                         const globalRateLimit = (globalThis as any).__lastGlobalGroqCall || 0;
+                         
+                         if (nowTime - globalRateLimit > 10000) {
+                             // Immediately claim the lock to prevent other async map iterations from entering
+                             (globalThis as any).__lastGlobalGroqCall = nowTime;
+                             
+                             try {
+                                const { askGroqDecision } = await import('./groq.js');
+                                const groqDecision = await askGroqDecision({ 
+                                   message: `Evaluate trade ${t.symbol}. We have ${t.reportHistory.length * 15} seconds of historical snapshots.`,
                                currentReport: report, 
                                historicalReports: t.reportHistory,
                                context: globalContext 
@@ -281,6 +290,7 @@ export async function runTradeLoop() {
                             addLog(`⚠️ تحذير: فشل تنفيذ تحليل جروك الذكي للعملة ${t.symbol}: ${err.message}`, 'warn');
                             // Don't fail the whole loop, just skip Groq for now
                          }
+                         } // End of global rate limit if
                       }
                    }
                 }
