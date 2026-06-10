@@ -262,24 +262,230 @@ export async function runTradeLoop() {
                              try {
                                 const { askGroqDecision } = await import('./groq.js');
                                 
-                                // Compress history to at most 15 evenly distributed points to represent the full timeline without exceeding token limits
+                                // Compress history to at most 50 evenly distributed points to represent the full timeline without exceeding token limits
                                 let compressedHistory = t.reportHistory;
-                                if (compressedHistory.length > 15) {
-                                   compressedHistory = Array.from({ length: 15 }, (_, i) => {
-                                      const index = Math.floor(i * (t.reportHistory.length - 1) / (15 - 1));
+                                if (compressedHistory.length > 50) {
+                                   compressedHistory = Array.from({ length: 50 }, (_, i) => {
+                                      const index = Math.floor(i * (t.reportHistory.length - 1) / (50 - 1));
                                       return t.reportHistory[index];
                                    });
                                 }
 
+                                const highs = klines.map((k: any) => parseFloat(k[2]));
+                                const lows = klines.map((k: any) => parseFloat(k[3]));
+                                const closes = klines.map((k: any) => parseFloat(k[4]));
+                                const len = klines.length;
+
+                                const maxHigh = highs.length >= 20 ? Math.max(...highs.slice(-20)) : Math.max(...highs);
+                                const minLow = lows.length >= 20 ? Math.min(...lows.slice(-20)) : Math.min(...lows);
+                                const distanceToSupport = ((currentPx - minLow) / minLow) * 100;
+                                const distanceToResistance = ((maxHigh - currentPx) / currentPx) * 100;
+
+                                const isHH = len > 3 ? currentPx > highs[len-2] && highs[len-2] > highs[len-3] : false;
+                                const isLL = len > 3 ? currentPx < lows[len-2] && lows[len-2] < lows[len-3] : false;
+                                const isHL = len > 3 ? currentPx > lows[len-2] && lows[len-2] > lows[len-3] : false;
+                                const isLH = len > 3 ? currentPx < highs[len-2] && highs[len-2] < highs[len-3] : false;
+
+                                const marketStructure = { higherHigh: isHH, higherLow: isHL, lowerHigh: isLH, lowerLow: isLL, distanceToSupport, distanceToResistance };
+
+                                const calcLogEma = (period: number) => {
+                                  if (closes.length < period) return null;
+                                  return closes.slice(-period).reduce((a: number, b: number) => a + b, 0) / period;
+                                };
+                                const sma20 = calcLogEma(20);
+                                const sma50 = calcLogEma(50);
+                                const sma200 = calcLogEma(200);
+
+                                const ema20_distance = sma20 ? ((currentPx - sma20) / sma20) * 100 : 0;
+                                const ema50_distance = sma50 ? ((currentPx - sma50) / sma50) * 100 : 0;
+                                const ema200_distance = sma200 ? ((currentPx - sma200) / sma200) * 100 : 0;
+
+                                const cvd_5m = klines.slice(-Math.min(5, len)).reduce((acc: number, k: any) => acc + (parseFloat(k[9]) - (parseFloat(k[5]) - parseFloat(k[9]))), 0);
+                                const cvd_15m = klines.slice(-Math.min(15, len)).reduce((acc: number, k: any) => acc + (parseFloat(k[9]) - (parseFloat(k[5]) - parseFloat(k[9]))), 0);
+                                const deltaVolume = len > 0 ? parseFloat(klines[len-1][9]) - (parseFloat(klines[len-1][5]) - parseFloat(klines[len-1][9])) : 0;
+
+                                const oiHistory = compressedHistory.map((h: any) => h.openInterest).filter((x: any) => x !== undefined && x !== null);
+
+                                let spotCvd15m = 0;
+                                let askAbsorption = 0;
+                                let bidAbsorption = 0;
+                                let longLiquidations = 0;
+                                let shortLiquidations = 0;
+                                let spotVolumePercent = 50;
+                                let futuresVolumePercent = 50;
+                                let bidLiquidity = 0;
+                                let askLiquidity = 0;
+                                let orderBookImbalance = 0;
+                                
+                                try {
+                                  const spotKlinesRes = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${t.symbol}&interval=1m&limit=15`, { timeout: 2000 });
+                                  spotCvd15m = spotKlinesRes.data.reduce((acc: number, k: any) => acc + (parseFloat(k[9]) - (parseFloat(k[5]) - parseFloat(k[9]))), 0);
+                                  
+                                  const spotVol = spotKlinesRes.data.reduce((acc: number, k: any) => acc + parseFloat(k[5]), 0);
+                                  const futVol = klines.slice(-15).reduce((acc: number, k: any) => acc + parseFloat(k[5]), 0);
+                                  const totalVolForRatio = spotVol + futVol;
+                                  if (totalVolForRatio > 0) {
+                                      spotVolumePercent = (spotVol / totalVolForRatio) * 100;
+                                      futuresVolumePercent = (futVol / totalVolForRatio) * 100;
+                                  }
+
+                                  const depthRes = await axios.get(`https://fapi.binance.com/fapi/v1/depth?symbol=${t.symbol}&limit=500`, { timeout: 2000 });
+                                  const asks = depthRes.data.asks || [];
+                                  const bids = depthRes.data.bids || [];
+                                  askAbsorption = asks.reduce((acc: number, val: any) => parseFloat(val[0]) <= currentPx * 1.01 ? acc + parseFloat(val[1]) : acc, 0);
+                                  bidAbsorption = bids.reduce((acc: number, val: any) => parseFloat(val[0]) >= currentPx * 0.99 ? acc + parseFloat(val[1]) : acc, 0);
+                                  
+                                  bidLiquidity = bids.reduce((acc: number, val: any) => parseFloat(val[0]) >= currentPx * 0.95 ? acc + parseFloat(val[1]) : acc, 0);
+                                  askLiquidity = asks.reduce((acc: number, val: any) => parseFloat(val[0]) <= currentPx * 1.05 ? acc + parseFloat(val[1]) : acc, 0);
+                                  if (askLiquidity + bidLiquidity > 0) {
+                                    orderBookImbalance = ((bidLiquidity - askLiquidity) / (bidLiquidity + askLiquidity)) * 100;
+                                  }
+                                  
+                                  const forceRes = await axios.get(`https://fapi.binance.com/fapi/v1/allForceOrders?symbol=${t.symbol}&limit=50`, { timeout: 2000 });
+                                  const nowTimeForLiqs = Date.now();
+                                  (forceRes.data || []).forEach((fo: any) => {
+                                      if (nowTimeForLiqs - fo.time < 15 * 60 * 1000) { 
+                                          if (fo.side === 'BUY') shortLiquidations += parseFloat(fo.executedQty); 
+                                          if (fo.side === 'SELL') longLiquidations += parseFloat(fo.executedQty);
+                                      }
+                                  });
+                                } catch (extraCtxErr) {
+                                  console.log('Could not fetch extra true tick data for', t.symbol);
+                                }
+
+                                let fundingRate = 0;
+                                let fundingHistory: number[] = [];
+                                let topTradersLongShortRatio = 1;
+                                let topAccountsLongShortRatio = 1;
+                                const higherTimeframes: any = {};
+                                
+                                try {
+                                    const fundingRes = await axios.get(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${t.symbol}&limit=5`, { timeout: 2000 });
+                                    fundingHistory = fundingRes.data.map((f: any) => parseFloat(f.fundingRate));
+                                    fundingRate = fundingHistory.length > 0 ? fundingHistory[fundingHistory.length - 1] : 0;
+                                    
+                                    const topTradersRes = await axios.get(`https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=${t.symbol}&period=5m&limit=1`, { timeout: 2000 });
+                                    const topAccountsRes = await axios.get(`https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${t.symbol}&period=5m&limit=1`, { timeout: 2000 });
+                                    topTradersLongShortRatio = topTradersRes.data.length > 0 ? parseFloat(topTradersRes.data[0].longShortRatio) : 1;
+                                    topAccountsLongShortRatio = topAccountsRes.data.length > 0 ? parseFloat(topAccountsRes.data[0].longShortRatio) : 1;
+                                    
+                                    const [klines5m, klines15m, klines1h] = await Promise.all([
+                                        axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=5m&limit=14`, { timeout: 2000 }).then(res => res.data),
+                                        axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=15m&limit=14`, { timeout: 2000 }).then(res => res.data),
+                                        axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${t.symbol}&interval=1h&limit=14`, { timeout: 2000 }).then(res => res.data)
+                                    ]);
+                                    
+                                    const calcRsi = (klam: any[]) => {
+                                        let gains = 0, losses = 0;
+                                        for (let i = 1; i < klam.length; i++) {
+                                            const diff = parseFloat(klam[i][4]) - parseFloat(klam[i-1][4]);
+                                            if (diff > 0) gains += diff; else losses -= diff;
+                                        }
+                                        if (losses === 0) return 100;
+                                        return 100 - (100 / (1 + (gains / losses)));
+                                    };
+                                    higherTimeframes.rsi_5m = calcRsi(klines5m);
+                                    higherTimeframes.rsi_15m = calcRsi(klines15m);
+                                    higherTimeframes.rsi_1h = calcRsi(klines1h);
+                                    higherTimeframes.trend_5m = parseFloat(klines5m[klines5m.length-1][4]) > parseFloat(klines5m[0][4]) ? "UP" : "DOWN";
+                                    higherTimeframes.trend_15m = parseFloat(klines15m[klines15m.length-1][4]) > parseFloat(klines15m[0][4]) ? "UP" : "DOWN";
+                                    higherTimeframes.trend_1h = parseFloat(klines1h[klines1h.length-1][4]) > parseFloat(klines1h[0][4]) ? "UP" : "DOWN";
+                                } catch(e) {
+                                    console.log('Error fetching extra contextual features', e.message);
+                                }
+                                
+                                const oiSlope = oiHistory.length >= 2 ? (oiHistory[oiHistory.length - 1] - oiHistory[0]) / Math.max(1, oiHistory.length) : 0;
+                                const cvdSlope = cvd_15m / 15;
+                                const volumeProfileArr = compressedHistory.map((h: any) => h.klinesSummary?.[0]?.vol).filter(Boolean);
+                                const volumeSlope = volumeProfileArr.length >= 2 ? (parseFloat(volumeProfileArr[volumeProfileArr.length - 1]) - parseFloat(volumeProfileArr[0])) / Math.max(1, volumeProfileArr.length) : 0;
+                                
+                                let trueRanges = [];
+                                for (let i = 1; i < len; i++) {
+                                    const high = parseFloat(klines[i][2]);
+                                    const low = parseFloat(klines[i][3]);
+                                    const prevClose = parseFloat(klines[i-1][4]);
+                                    trueRanges.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+                                }
+                                const atr = trueRanges.length > 0 ? trueRanges.slice(-14).reduce((a,b)=>a+b, 0) / Math.min(14, trueRanges.length) : 0;
+                                
+                                const barsInTrade = t.reportHistory.length;
+                                
+                                const entryPx = t.entryPrice;
+                                const slPx = t.sl || entryPx * 0.99;
+                                const tpPx = t.tp1 || entryPx * 1.01;
+                                const riskDist = Math.abs(entryPx - slPx);
+                                const rewardDist = Math.abs(tpPx - entryPx);
+                                const riskReward = riskDist > 0 ? rewardDist / riskDist : 0;
+                                const position = { stopLoss: slPx, takeProfit: tpPx, riskReward };
+
+                                const numBuckets = 10;
+                                const bucketSize = (maxHigh - minLow) / numBuckets;
+                                const volumeProfile = new Array(numBuckets).fill(0);
+                                for (let i = Math.max(0, len - 20); i < len; i++) {
+                                  const k = klines[i];
+                                  const h = parseFloat(k[2]);
+                                  const l = parseFloat(k[3]);
+                                  const v = parseFloat(k[5]);
+                                  const mid = (h + l) / 2;
+                                  const bucketIndex = bucketSize === 0 ? 0 : Math.floor((mid - minLow) / bucketSize);
+                                  const index = Math.min(Math.max(bucketIndex, 0), numBuckets - 1);
+                                  volumeProfile[index] += v;
+                                }
+                                const maxVolBucket = volumeProfile.indexOf(Math.max(...volumeProfile));
+                                const vpoc = bucketSize === 0 ? currentPx : minLow + (maxVolBucket + 0.5) * bucketSize;
+
+                                const sortedVolumes = [...volumeProfile].sort((a, b) => b - a);
+                                const vpoHighBucket = volumeProfile.indexOf(sortedVolumes[1] || 0);
+                                const vpoLowBucket = volumeProfile.indexOf(sortedVolumes[sortedVolumes.length - 1] || 0);
+
+                                const highVolumeNode = bucketSize === 0 ? currentPx : minLow + (vpoHighBucket + 0.5) * bucketSize;
+                                const lowVolumeNode = bucketSize === 0 ? currentPx : minLow + (vpoLowBucket + 0.5) * bucketSize;
+
+                                const enhancedReport = {
+                                  ...report,
+                                  marketStructure,
+                                  ema20_distance,
+                                  ema50_distance,
+                                  ema200_distance,
+                                  cvd_5m,
+                                  cvd_15m,
+                                  spotCvd15m,
+                                  deltaVolume,
+                                  vpoc,
+                                  highVolumeNode,
+                                  lowVolumeNode,
+                                  askAbsorption,
+                                  bidAbsorption,
+                                  longLiquidations,
+                                  shortLiquidations,
+                                  spotVolumePercent,
+                                  futuresVolumePercent,
+                                  bidLiquidity,
+                                  askLiquidity,
+                                  orderBookImbalance,
+                                  fundingRate,
+                                  fundingHistory,
+                                  topTradersLongShortRatio,
+                                  topAccountsLongShortRatio,
+                                  higherTimeframes,
+                                  oiSlope,
+                                  cvdSlope,
+                                  volumeSlope,
+                                  atr,
+                                  barsInTrade,
+                                  position,
+                                  oiHistory
+                                };
+
                                 const groqDecision = await askGroqDecision({ 
-                                   message: `Evaluate trade ${t.symbol}. This is a compressed timeline summary of the trade from start to present.`,
-                               currentReport: report, 
-                               historicalReports: compressedHistory,
-                               context: globalContext 
-                            });
-                            (t as any).lastGroqCheck = Date.now();
-                            
-                            addLog(`🤖 تقرير Groq للعملة ${t.symbol}: ${groqDecision.decision} | الثقة: ${groqDecision.confidence}% | السبب: ${groqDecision.reason}`, groqDecision.decision === 'EXIT' ? 'warn' : 'info');
+                                   message: `Evaluate trade ${t.symbol}. Determine whether the current move is Trend Continuation, Profit Taking, Short Squeeze Risk, Long Liquidation Cascade, or Exhaustion Reversal. Use the fully enriched context provided.`,
+                                   currentReport: enhancedReport, 
+                                   historicalReports: compressedHistory.map((h: any) => ({ time: h.time, price: h.currentPrice, rsi: h.rsi, oi: h.openInterest, takerRatio: h.takerRatio, volume: h.klinesSummary?.[h.klinesSummary.length-1]?.vol, pnl: h.pnlPerc })),
+                                   context: globalContext 
+                                });
+                                (t as any).lastGroqCheck = Date.now();
+                                
+                                addLog(`🤖 تقرير Groq للعملة ${t.symbol}: ${groqDecision.decision} | الثقة: ${groqDecision.confidence}% | السبب: ${groqDecision.reason}`, groqDecision.decision === 'EXIT' ? 'warn' : 'info');
 
                             // If Groq says EXIT with high confidence, close the trade.
                             if (groqDecision.decision === 'EXIT' && groqDecision.confidence > 75) {
@@ -495,9 +701,14 @@ export async function runTradeLoop() {
                      };
 
                      if (settings.useBeastAuditorEngine) {
-                                                   const liveRvolVal = (coin as any).beastMetrics?.rvol ?? coin.rvol ?? 1.0;
-                          const isLongMatch = liveRvolVal >= 1.15 && takerRatio >= 1.05 && Math.abs(oiChangeVal) >= 0.5 && adxCurrent >= 20 && isAdxRising;
-                         const isShortMatch = liveRvolVal >= 1.15 && takerRatio <= 0.95 && Math.abs(oiChangeVal) >= 0.5 && adxCurrent >= 20 && isAdxRising;
+                          const liveRvolVal = (coin as any).beastMetrics?.rvol ?? coin.rvol ?? 1.0;
+                          let isLongMatch = liveRvolVal >= 1.15 && takerRatio >= 1.05 && Math.abs(oiChangeVal) >= 0.5 && adxCurrent >= 20 && isAdxRising;
+                          let isShortMatch = liveRvolVal >= 1.15 && takerRatio <= 0.95 && Math.abs(oiChangeVal) >= 0.5 && adxCurrent >= 20 && isAdxRising;
+
+                          if (isStrict && btcTrend !== 'FLAT') {
+                              if (btcTrend !== 'LONG') isLongMatch = false;
+                              if (btcTrend !== 'SHORT') isShortMatch = false;
+                          }
 
                          (coin as any).decision = {
                              regime: 'ANY',
@@ -621,6 +832,14 @@ export async function runTradeLoop() {
                         : settings.useCreativeEngine
                         ? creativeEngine.analyze(klines, takerRatio, sniper.getSettings())
                         : quantum.analyze(klines, takerRatio, sniper.getSettings());
+
+                     // Filter against BTC trend in Strict Mode
+                     if (isStrict && btcTrend !== 'FLAT' && decision.shouldEnter) {
+                         if (decision.type !== btcTrend) {
+                             decision.shouldEnter = false;
+                             decision.reason = 'REJECTED_BY_BTC_TREND';
+                         }
+                     }
 
                      // Saveconventional engine decision in the coin
                      (coin as any).decision = {
