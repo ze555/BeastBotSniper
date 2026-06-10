@@ -244,7 +244,7 @@ export async function runTradeLoop() {
                       
                       if (!t.reportHistory) t.reportHistory = [];
                       t.reportHistory.push({ ...report, klinesSummary: undefined }); // store lightweight version for history
-                      if (t.reportHistory.length > 20) t.reportHistory.shift(); // Keep up to 5 minutes of 15s interval history to prevent rate limit
+                      // Keeping full history as requested by user
                       (t as any).lastSnapshot = Date.now();
 
                       const lastGroqCheck = (t as any).lastGroqCheck || 0;
