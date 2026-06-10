@@ -31,43 +31,60 @@ Output nothing else, just the JSON.
 
   const userMessage = JSON.stringify(reportData, null, 2);
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'llama-3.1-8b-instant',
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
-    })
-  });
+  const models = [
+    'llama-3.1-8b-instant',
+    'llama3-8b-8192',
+    'llama-3.3-70b-versatile',
+    'llama3-70b-8192',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it'
+  ];
 
-  if (!response.ok) {
-    let errorMsg = 'Failed to fetch from Groq API';
+  let lastError: any = null;
+
+  for (const model of models) {
     try {
-      const errorData = await response.json();
-      errorMsg = JSON.stringify(errorData);
-    } catch (e) {}
-    throw new Error(errorMsg);
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: userMessage }
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.1,
+        })
+      });
+
+      if (!response.ok) {
+        let errorMsg = `Failed to fetch from Groq API with model ${model}`;
+        try {
+          const errorData = await response.json();
+          errorMsg = JSON.stringify(errorData);
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      const data = await response.json();
+      let raw = data.choices[0].message.content;
+      if (raw.includes('\`\`\`json')) {
+        raw = raw.split('\`\`\`json')[1].split('\`\`\`')[0].trim();
+      } else if (raw.includes('\`\`\`')) {
+        raw = raw.split('\`\`\`')[1].split('\`\`\`')[0].trim();
+      }
+      const parsed = JSON.parse(raw);
+      return parsed;
+    } catch (e: any) {
+      lastError = e;
+      console.warn(`[Groq AI] Model ${model} failed: ${e.message}. Trying next model...`);
+      continue;
+    }
   }
 
-  const data = await response.json();
-  try {
-    let raw = data.choices[0].message.content;
-    if (raw.includes('\`\`\`json')) {
-      raw = raw.split('\`\`\`json')[1].split('\`\`\`')[0].trim();
-    } else if (raw.includes('\`\`\`')) {
-      raw = raw.split('\`\`\`')[1].split('\`\`\`')[0].trim();
-    }
-    const parsed = JSON.parse(raw);
-    return parsed;
-  } catch(e) {
-    throw new Error('Failed to parse Groq response as JSON');
-  }
+  throw new Error(`All Groq models failed. Last error: ${lastError?.message || 'Unknown error'}`);
 }
