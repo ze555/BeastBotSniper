@@ -244,7 +244,8 @@ export async function runTradeLoop() {
                       
                       if (!t.reportHistory) t.reportHistory = [];
                       t.reportHistory.push({ ...report, klinesSummary: undefined }); // store lightweight version for history
-                      // Keeping full history as requested by user
+                      // Keep history for up to 24 hours of 15s snapshots (~5760 items) max in memory
+                      if (t.reportHistory.length > 5760) t.reportHistory.shift();
                       (t as any).lastSnapshot = Date.now();
 
                       const lastGroqCheck = (t as any).lastGroqCheck || 0;
@@ -260,10 +261,20 @@ export async function runTradeLoop() {
                              
                              try {
                                 const { askGroqDecision } = await import('./groq.js');
+                                
+                                // Compress history to at most 15 evenly distributed points to represent the full timeline without exceeding token limits
+                                let compressedHistory = t.reportHistory;
+                                if (compressedHistory.length > 15) {
+                                   compressedHistory = Array.from({ length: 15 }, (_, i) => {
+                                      const index = Math.floor(i * (t.reportHistory.length - 1) / (15 - 1));
+                                      return t.reportHistory[index];
+                                   });
+                                }
+
                                 const groqDecision = await askGroqDecision({ 
-                                   message: `Evaluate trade ${t.symbol}. We have ${t.reportHistory.length * 15} seconds of historical snapshots.`,
+                                   message: `Evaluate trade ${t.symbol}. This is a compressed timeline summary of the trade from start to present.`,
                                currentReport: report, 
-                               historicalReports: t.reportHistory,
+                               historicalReports: compressedHistory,
                                context: globalContext 
                             });
                             (t as any).lastGroqCheck = Date.now();
