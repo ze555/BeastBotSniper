@@ -307,6 +307,7 @@ export async function runTradeLoop() {
                                 const oiHistory = compressedHistory.map((h: any) => h.openInterest).filter((x: any) => x !== undefined && x !== null);
 
                                 let spotCvd15m = 0;
+                                let spotCvd5m = 0;
                                 let askAbsorption = 0;
                                 let bidAbsorption = 0;
                                 let longLiquidations = 0;
@@ -320,6 +321,7 @@ export async function runTradeLoop() {
                                 try {
                                   const spotKlinesRes = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${t.symbol}&interval=1m&limit=15`, { timeout: 2000 });
                                   spotCvd15m = spotKlinesRes.data.reduce((acc: number, k: any) => acc + (parseFloat(k[9]) - (parseFloat(k[5]) - parseFloat(k[9]))), 0);
+                                  spotCvd5m = spotKlinesRes.data.slice(-5).reduce((acc: number, k: any) => acc + (parseFloat(k[9]) - (parseFloat(k[5]) - parseFloat(k[9]))), 0);
                                   
                                   const spotVol = spotKlinesRes.data.reduce((acc: number, k: any) => acc + parseFloat(k[5]), 0);
                                   const futVol = klines.slice(-15).reduce((acc: number, k: any) => acc + parseFloat(k[5]), 0);
@@ -441,48 +443,74 @@ export async function runTradeLoop() {
                                 const highVolumeNode = bucketSize === 0 ? currentPx : minLow + (vpoHighBucket + 0.5) * bucketSize;
                                 const lowVolumeNode = bucketSize === 0 ? currentPx : minLow + (vpoLowBucket + 0.5) * bucketSize;
 
-                                const enhancedReport = {
-                                  ...report,
+                                const priceProfileArr = compressedHistory.map((h: any) => h.currentPrice).filter(Boolean);
+                                const priceSlope = priceProfileArr.length >= 2 ? (parseFloat(priceProfileArr[priceProfileArr.length - 1]) - parseFloat(priceProfileArr[0])) / Math.max(1, priceProfileArr.length) : 0;
+                                const spotCvdSlope = spotCvd15m / 15;
+                                
+                                const groqPayload = {
+                                  symbol: t.symbol,
+                                  positionSide: t.type,
+                                  entryPrice: t.entryPrice,
+                                  currentPrice: currentPx,
+                                  stopLoss: t.sl,
+                                  takeProfit: t.tp1 || t.entryPrice,
+                                  roiPercent: (currentPx - t.entryPrice) / t.entryPrice * 100 * (t.type === 'LONG' ? 1 : -1) * t.leverage,
+                                  unrealizedProfit: t.unrealizedProfit,
+                                  leverage: t.leverage,
                                   marketStructure,
+                                  rsi_1m: report.rsi,
+                                  rsi_5m: higherTimeframes.rsi_5m || 50,
+                                  rsi_15m: higherTimeframes.rsi_15m || 50,
+                                  adx_1m: report.adx,
+                                  adx_5m: higherTimeframes.adx_5m || 0,
+                                  adx_15m: higherTimeframes.adx_15m || 0,
                                   ema20_distance,
                                   ema50_distance,
                                   ema200_distance,
                                   cvd_5m,
                                   cvd_15m,
-                                  spotCvd15m,
+                                  spotCvd_5m: spotCvd5m || 0,
+                                  spotCvd_15m: spotCvd15m || 0,
                                   deltaVolume,
-                                  vpoc,
-                                  highVolumeNode,
-                                  lowVolumeNode,
-                                  askAbsorption,
-                                  bidAbsorption,
+                                  oiCurrent: report.openInterest,
+                                  oiHistory: oiHistory.slice(-10),
+                                  takerBuySellRatio: report.takerRatio,
+                                  fundingRate,
                                   longLiquidations,
                                   shortLiquidations,
-                                  spotVolumePercent,
-                                  futuresVolumePercent,
                                   bidLiquidity,
                                   askLiquidity,
                                   orderBookImbalance,
-                                  fundingRate,
-                                  fundingHistory,
+                                  bidAbsorption,
+                                  askAbsorption,
                                   topTradersLongShortRatio,
                                   topAccountsLongShortRatio,
-                                  higherTimeframes,
-                                  oiSlope,
-                                  cvdSlope,
-                                  volumeSlope,
+                                  vpoc,
+                                  highVolumeNode,
+                                  lowVolumeNode,
                                   atr,
                                   barsInTrade,
-                                  position,
-                                  oiHistory
+                                  btcTrend: globalContext.btcTrend || 'UNKNOWN',
+                                  marketSentiment: globalContext.marketSentiment || 'NEUTRAL',
+                                  slopes: {
+                                    oiSlope,
+                                    cvdSlope,
+                                    spotCvdSlope,
+                                    volumeSlope,
+                                    priceSlope
+                                  },
+                                  history: compressedHistory.slice(-15).map((h: any) => ({
+                                    time: h.time, 
+                                    price: h.currentPrice, 
+                                    rsi: h.rsi, 
+                                    oi: h.openInterest, 
+                                    takerRatio: h.takerRatio, 
+                                    volume: h.klinesSummary?.[h.klinesSummary.length-1]?.vol, 
+                                    pnl: h.pnlPerc
+                                  }))
                                 };
 
-                                const groqDecision = await askGroqDecision({ 
-                                   message: `Evaluate trade ${t.symbol}. Determine whether the current move is Trend Continuation, Profit Taking, Short Squeeze Risk, Long Liquidation Cascade, or Exhaustion Reversal. Use the fully enriched context provided.`,
-                                   currentReport: enhancedReport, 
-                                   historicalReports: compressedHistory.map((h: any) => ({ time: h.time, price: h.currentPrice, rsi: h.rsi, oi: h.openInterest, takerRatio: h.takerRatio, volume: h.klinesSummary?.[h.klinesSummary.length-1]?.vol, pnl: h.pnlPerc })),
-                                   context: globalContext 
-                                });
+                                const groqDecision = await askGroqDecision(groqPayload);
                                 (t as any).lastGroqCheck = Date.now();
                                 
                                 addLog(`🤖 تقرير Groq للعملة ${t.symbol}: ${groqDecision.decision} | الثقة: ${groqDecision.confidence}% | السبب: ${groqDecision.reason}`, groqDecision.decision === 'EXIT' ? 'warn' : 'info');
