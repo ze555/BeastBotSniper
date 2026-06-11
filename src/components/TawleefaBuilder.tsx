@@ -2543,10 +2543,29 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       })
       .catch(() => {});
 
-    // Force wipe all old configurations and load the new master Tawleefa configuration
-    localStorage.setItem('cust_tawleefas_v1', JSON.stringify(PRESET_TEMPLATES));
-    setTawleefas(PRESET_TEMPLATES);
-    loadTawleefaToForm(PRESET_TEMPLATES[0]);
+    // Load existing Tawleefas or fallback to PRESET_TEMPLATES
+    try {
+      const stored = localStorage.getItem('cust_tawleefas_v1');
+      let loaded = stored ? JSON.parse(stored) : null;
+      if (!loaded || loaded.length === 0) {
+        loaded = PRESET_TEMPLATES;
+        localStorage.setItem('cust_tawleefas_v1', JSON.stringify(loaded));
+      } else {
+        // Merge missing presets
+        const existingIds = new Set(loaded.map((t: any) => t.id));
+        const missingPresets = PRESET_TEMPLATES.filter(pt => !existingIds.has(pt.id));
+        if (missingPresets.length > 0) {
+          loaded = [...loaded, ...missingPresets];
+          localStorage.setItem('cust_tawleefas_v1', JSON.stringify(loaded));
+        }
+      }
+      setTawleefas(loaded);
+      loadTawleefaToForm(loaded[0]);
+    } catch (e) {
+      localStorage.setItem('cust_tawleefas_v1', JSON.stringify(PRESET_TEMPLATES));
+      setTawleefas(PRESET_TEMPLATES);
+      loadTawleefaToForm(PRESET_TEMPLATES[0]);
+    }
   }, []);
 
   const handleActivateOnLiveBot = async (t: TawleefaConfig) => {
@@ -2614,6 +2633,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setRiskPerTrade(t.riskPerTrade ?? 1.0);
     setStopLossMode(t.stopLossMode ?? 'ATR_DYNAMIC');
     setStopLossValue(t.stopLossValue ?? 1.5);
+    setIgnoreInitialStopLoss(t.ignoreInitialStopLoss ?? false);
     setTakeProfitMode(t.takeProfitMode ?? 'TRAILING_MOMENTUM');
     setTakeProfitValue(t.takeProfitValue ?? 2.0);
     setDynamicRegimeProfiles(t.dynamicRegimeProfiles || undefined);
@@ -2643,6 +2663,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
     setRiskPerTrade(t.riskPerTrade ?? 1.0);
     setStopLossMode(t.stopLossMode ?? 'ATR_DYNAMIC');
     setStopLossValue(t.stopLossValue ?? 1.5);
+    setIgnoreInitialStopLoss(t.ignoreInitialStopLoss ?? false);
     setTakeProfitMode(t.takeProfitMode ?? 'TRAILING_MOMENTUM');
     setTakeProfitValue(t.takeProfitValue ?? 2.0);
     setDynamicRegimeProfiles(t.dynamicRegimeProfiles || undefined);
