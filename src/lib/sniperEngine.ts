@@ -1303,6 +1303,7 @@ export class SniperEngine {
             let actualVal = 0;
             const rsiVal = rsi !== undefined ? rsi : 50;
             const adxVal = adx !== undefined ? adx : 25;
+            const enriched = (trade as any).latestEnrichedData || {};
             switch (cond.metric) {
               case 'PRICE': actualVal = currentPrice; break;
               case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
@@ -1313,6 +1314,17 @@ export class SniperEngine {
               case 'RSI': actualVal = rsiVal; break;
               case 'ADX': actualVal = adxVal; break;
               case 'EMA50_TREND': actualVal = currentEma50 ? (currentPrice > currentEma50 ? 1 : -1) : 0; break;
+              case 'OI_SLOPE': actualVal = enriched.oiSlope || 0; break;
+              case 'CVD_SLOPE': actualVal = enriched.cvdSlope || 0; break;
+              case 'SPOT_CVD': actualVal = enriched.spotCvd_5m || 0; break;
+              case 'SPOT_CVD_SLOPE': actualVal = enriched.spotCvdSlope || 0; break;
+              case 'PRICE_SLOPE': actualVal = enriched.priceSlope || 0; break;
+              case 'VOLUME_SLOPE': actualVal = enriched.volumeSlope || 0; break;
+              case 'DELTA_VOLUME': actualVal = enriched.deltaVolume || 0; break;
+              case 'BID_ABSORPTION': actualVal = enriched.bidAbsorption || 0; break;
+              case 'ASK_ABSORPTION': actualVal = enriched.askAbsorption || 0; break;
+              case 'HH_HL': actualVal = enriched.marketStructure?.higherHigh && enriched.marketStructure?.higherLow ? 1 : 0; break;
+              case 'LH_LL': actualVal = enriched.marketStructure?.lowerHigh && enriched.marketStructure?.lowerLow ? 1 : 0; break;
               default: actualVal = currentPrice;
             }
 
@@ -1444,6 +1456,8 @@ export class SniperEngine {
                   let actualVal = 0;
                   const rsiVal = rsi !== undefined ? rsi : 50;
                   const adxVal = adx !== undefined ? adx : 25;
+                  const enriched = (trade as any).latestEnrichedData || {};
+                  
                   switch (cond.metric) {
                     case 'PRICE': actualVal = currentPrice; break;
                     case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
@@ -1453,6 +1467,18 @@ export class SniperEngine {
                     case 'FUNDING_RATE': actualVal = metricsObj.fundingRate; break;
                     case 'RSI': actualVal = rsiVal; break;
                     case 'ADX': actualVal = adxVal; break;
+                    case 'EMA50_TREND': actualVal = currentEma50 ? (currentPrice > currentEma50 ? 1 : -1) : 0; break;
+                    case 'OI_SLOPE': actualVal = enriched.oiSlope || 0; break;
+                    case 'CVD_SLOPE': actualVal = enriched.cvdSlope || 0; break;
+                    case 'SPOT_CVD': actualVal = enriched.spotCvd_5m || 0; break;
+                    case 'SPOT_CVD_SLOPE': actualVal = enriched.spotCvdSlope || 0; break;
+                    case 'PRICE_SLOPE': actualVal = enriched.priceSlope || 0; break;
+                    case 'VOLUME_SLOPE': actualVal = enriched.volumeSlope || 0; break;
+                    case 'DELTA_VOLUME': actualVal = enriched.deltaVolume || 0; break;
+                    case 'BID_ABSORPTION': actualVal = enriched.bidAbsorption || 0; break;
+                    case 'ASK_ABSORPTION': actualVal = enriched.askAbsorption || 0; break;
+                    case 'HH_HL': actualVal = enriched.marketStructure?.higherHigh && enriched.marketStructure?.higherLow ? 1 : 0; break;
+                    case 'LH_LL': actualVal = enriched.marketStructure?.lowerHigh && enriched.marketStructure?.lowerLow ? 1 : 0; break;
                     default: actualVal = currentPrice;
                   }
                   const isTrue = evaluateExitConditionDetail(cond);

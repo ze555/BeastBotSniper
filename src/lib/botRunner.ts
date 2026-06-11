@@ -510,6 +510,13 @@ export async function runTradeLoop() {
                                   }))
                                 };
 
+                                (t as any).latestEnrichedData = Object.assign({}, groqPayload, { 
+                                   cvdSlope, spotCvdSlope, oiSlope, volumeSlope, priceSlope, 
+                                   spotCvd_5m: spotCvd5m, spotCvd_15m: spotCvd15m,
+                                   bidAbsorption, askAbsorption,
+                                   marketStructure
+                                });
+
                                 const groqDecision = await askGroqDecision(groqPayload);
                                 (t as any).lastGroqCheck = Date.now();
                                 

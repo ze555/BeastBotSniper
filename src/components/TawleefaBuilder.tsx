@@ -48,7 +48,7 @@ export type RuleAction = 'LONG' | 'SHORT' | 'EXIT_ALL' | 'ALERT_ONLY' | 'DUAL';
 
 export interface ConditionRow {
   id: string;
-  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND';
+  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND' | 'OI_SLOPE' | 'CVD_SLOPE' | 'SPOT_CVD' | 'SPOT_CVD_SLOPE' | 'PRICE_SLOPE' | 'VOLUME_SLOPE' | 'DELTA_VOLUME' | 'BID_ABSORPTION' | 'ASK_ABSORPTION' | 'HH_HL' | 'LH_LL';
   operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT' | 'IS_RISING' | 'IS_FALLING';
   valueType: 'NUMBER' | 'METRIC';
   valueNumber: number;
@@ -58,7 +58,7 @@ export interface ConditionRow {
 }
 
 export interface DynamicExitCondition {
-  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND';
+  metric: 'PRICE' | 'OPEN_INTEREST' | 'CVD' | 'RVOL' | 'TAKER_RATIO' | 'FUNDING_RATE' | 'RSI' | 'ADX' | 'LIQUIDITY_CLUSTER' | 'EMA50_TREND' | 'OI_SLOPE' | 'CVD_SLOPE' | 'SPOT_CVD' | 'SPOT_CVD_SLOPE' | 'PRICE_SLOPE' | 'VOLUME_SLOPE' | 'DELTA_VOLUME' | 'BID_ABSORPTION' | 'ASK_ABSORPTION' | 'HH_HL' | 'LH_LL';
   operator: 'GREATER_THAN' | 'LESS_THAN' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'SPIKE' | 'DIVERGENCING' | 'SWEEP_LOW_HIGH' | 'EXHAUSTION' | 'EXPECT_LONG' | 'EXPECT_SHORT' | 'IS_RISING' | 'IS_FALLING';
   valueNumber: number;
 }
@@ -181,31 +181,55 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     stopLossValue: 1.2,
     takeProfitMode: 'FUSION_CASCADE',
     takeProfitValue: 3.5,
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       { id: 'l_rvo', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
       { id: 'l_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
       { id: 'l_oi', metric: 'OPEN_INTEREST', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
       { id: 'l_ema', metric: 'EMA50_TREND', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
-      { id: 'l_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.05, timeframe: '5m', sensitivity: 1.0 }
+      { id: 'l_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.05, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_oi_slope', metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope', metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd', metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope', metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope', metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope', metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume', metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorption', metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl', metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       { id: 's_rvo', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
       { id: 's_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 25, timeframe: '5m', sensitivity: 1.0 },
       { id: 's_oi', metric: 'OPEN_INTEREST', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
       { id: 's_ema', metric: 'EMA50_TREND', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
-      { id: 's_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.95, timeframe: '5m', sensitivity: 1.0 }
+      { id: 's_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.95, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_oi_slope', metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope', metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd', metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope', metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope', metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope', metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume', metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorption', metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll', metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    longExitGate: 'AND',
+    longExitGate: 'OR',
     longExitConditions: [
       { id: 'le_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
-      { id: 'le_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 }
+      { id: 'le_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'le_cvd_slope', metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'le_price_slope', metric: 'PRICE_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.2, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'le_ask_absorption', metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 3.0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortExitGate: 'AND',
+    shortExitGate: 'OR',
     shortExitConditions: [
       { id: 'se_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
-      { id: 'se_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 }
+      { id: 'se_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'se_cvd_slope', metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'se_price_slope', metric: 'PRICE_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.2, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'se_bid_absorption', metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 3.0, timeframe: '5m', sensitivity: 1.0 }
     ],
     dynamicExitProfiles: [
       {
@@ -296,7 +320,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     stopLossValue: 1.5,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 5.0,
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       {
         id: 'long_taker_115',
@@ -315,9 +339,19 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 0,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       {
         id: 'short_taker_85',
@@ -336,7 +370,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 0,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
     dynamicRegimeProfiles: [],
     longExitGate: '2_OF_3',
@@ -460,7 +504,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     stopLossValue: 1.3,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.0,
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       {
         id: 'long_taker',
@@ -470,9 +514,19 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 1.03,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       {
         id: 'short_taker',
@@ -482,7 +536,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 0.97,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
     dynamicRegimeProfiles: [
       {
@@ -508,7 +572,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.05,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -528,7 +602,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.95,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.3,
@@ -558,7 +642,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.5,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -578,7 +672,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.5,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.0,
@@ -599,7 +703,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.05,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -610,7 +724,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.05,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.2,
@@ -631,7 +755,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 0.8
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -642,7 +776,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 0.8
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'SWEEP_LOW_BOUND',
         stopLossValue: 0.3,
@@ -663,7 +807,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -674,7 +828,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.1,
@@ -822,7 +986,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.0,
 
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       {
         id: 'global_long_rvol',
@@ -841,10 +1005,20 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 1.05,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
 
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       {
         id: 'global_short_rvol',
@@ -863,7 +1037,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 0.95,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
 
     dynamicRegimeProfiles: [
@@ -890,7 +1074,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.10,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -910,7 +1104,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.90,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.2,
@@ -940,7 +1144,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.0,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -960,7 +1174,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.0,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.0,
@@ -981,7 +1205,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -992,7 +1226,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'SWEEP_LOW_BOUND',
         stopLossValue: 0.25,
@@ -1022,7 +1266,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1042,7 +1296,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.0,
@@ -1072,7 +1336,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.05,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1092,7 +1366,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.95,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 1.1,
@@ -1265,7 +1549,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     stopLossValue: 2.2,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.5,
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       {
         id: 'global_long_rvol_chop',
@@ -1284,9 +1568,19 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 1.05,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       {
         id: 'global_short_rvol_chop',
@@ -1305,7 +1599,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 0.95,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
     dynamicRegimeProfiles: [
       {
@@ -1331,7 +1635,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.10,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1351,7 +1665,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.90,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 2.2,
@@ -1390,7 +1714,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1419,7 +1753,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 2.0,
@@ -1440,7 +1784,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1451,7 +1805,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'SWEEP_LOW_BOUND',
         stopLossValue: 0.25,
@@ -1481,7 +1845,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1501,7 +1875,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 1.2,
             timeframe: '5m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 2.0,
@@ -1540,7 +1924,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         shortConditions: [
           {
@@ -1569,7 +1963,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 23,
             timeframe: '15m',
             sensitivity: 1.0
-          }
+          },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
         ],
         stopLossMode: 'ATR_DYNAMIC',
         stopLossValue: 2.2,
@@ -1733,7 +2137,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
     stopLossValue: 0.5,
     takeProfitMode: 'TRAILING_MOMENTUM',
     takeProfitValue: 3.5,
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       {
         id: 'beast_long_ema',
@@ -1779,9 +2183,19 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 20,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       {
         id: 'beast_short_ema',
@@ -1827,7 +2241,17 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         valueNumber: 20,
         timeframe: '5m',
         sensitivity: 1.0
-      }
+      },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
     dynamicExitProfiles: [
       {
@@ -1903,21 +2327,41 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         sensitivity: 1.0
       }
     ],
-    longGate: 'AND',
+    longGate: '2_OF_3',
     longConditions: [
       { id: '100l_ema', metric: 'EMA50_TREND', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
       { id: '100l_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 23, timeframe: '5m', sensitivity: 1.0 },
       { id: '100l_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
       { id: '100l_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100l_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.1, timeframe: '5m', sensitivity: 1.0 }
+      { id: '100l_taker', metric: 'TAKER_RATIO', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.1, timeframe: '5m', sensitivity: 1.0 },
+
+      { id: 'l_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_bid_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'BID_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 'l_hh_hl_' + Math.random().toString(36).substr(2, 5), metric: 'HH_HL', operator: 'EXPECT_LONG', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortGate: 'AND',
+    shortGate: '2_OF_3',
     shortConditions: [
       { id: '100s_ema', metric: 'EMA50_TREND', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
       { id: '100s_adx', metric: 'ADX', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 23, timeframe: '5m', sensitivity: 1.0 },
       { id: '100s_rvol', metric: 'RVOL', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
       { id: '100s_oi', metric: 'OPEN_INTEREST', operator: 'SPIKE', valueType: 'NUMBER', valueNumber: 1, timeframe: '5m', sensitivity: 1.0 },
-      { id: '100s_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.9, timeframe: '5m', sensitivity: 1.0 }
+      { id: '100s_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.9, timeframe: '5m', sensitivity: 1.0 },
+
+      { id: 's_oi_slope_' + Math.random().toString(36).substr(2, 5), metric: 'OI_SLOPE', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 0.1, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_spot_cvd_slope_' + Math.random().toString(36).substr(2, 5), metric: 'SPOT_CVD_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_price_slope_' + Math.random().toString(36).substr(2, 5), metric: 'PRICE_SLOPE', operator: 'IS_FALLING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_volume_slope_' + Math.random().toString(36).substr(2, 5), metric: 'VOLUME_SLOPE', operator: 'IS_RISING', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_delta_volume_' + Math.random().toString(36).substr(2, 5), metric: 'DELTA_VOLUME', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_ask_absorp_' + Math.random().toString(36).substr(2, 5), metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
+      { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
     minMarketConfidence: 70,
     leverage: 10,
@@ -3817,6 +4261,17 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                           <option value="RSI">مؤشر القوة النسبية (RSI)</option>
                           <option value="ADX">قوة الاتجاه العام (ADX)</option>
                           <option value="EMA50_TREND">متوسط 50 (EMA50 Trend)</option>
+                          <option value="OI_SLOPE">تسارع العقود المفتوحة (OI Slope)</option>
+                          <option value="CVD_SLOPE">تسارع الشراء ماركت (CVD Slope)</option>
+                          <option value="SPOT_CVD">شراء سبوت تراكمي (Spot CVD 5m)</option>
+                          <option value="SPOT_CVD_SLOPE">تسارع شراء سبوت (Spot CVD Slope)</option>
+                          <option value="PRICE_SLOPE">تسارع السعر (Price Slope)</option>
+                          <option value="VOLUME_SLOPE">تسارع الفوليوم (Volume Slope)</option>
+                          <option value="DELTA_VOLUME">صافي الفوليوم العرضي (Delta Volume)</option>
+                          <option value="BID_ABSORPTION">امتصاص الطلبات (Bid Absorption)</option>
+                          <option value="ASK_ABSORPTION">امتصاص العروض (Ask Absorption)</option>
+                          <option value="HH_HL">هيكلة قمم وقيعان صاعدة (HH + HL)</option>
+                          <option value="LH_LL">هيكلة قمم وقيعان هابطة (LH + LL)</option>
                         </select>
                       </div>
 
