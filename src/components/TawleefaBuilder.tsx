@@ -119,6 +119,7 @@ export interface TawleefaConfig {
   stopLossValue: number; // multiplier or percentage
   takeProfitMode: 'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE';
   takeProfitValue: number; // multiplier or percentage
+  ignoreInitialStopLoss?: boolean; // الاعتماد على الشروط المؤسساتية فقط وتجاهل الوقف المبدئي
   
   // Dynamic regime specific profiles mapping
   dynamicRegimeProfiles?: RegimeProfile[];
@@ -196,12 +197,12 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       { id: 's_ema', metric: 'EMA50_TREND', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 },
       { id: 's_taker', metric: 'TAKER_RATIO', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 0.95, timeframe: '5m', sensitivity: 1.0 }
     ],
-    longExitGate: 'OR',
+    longExitGate: 'AND',
     longExitConditions: [
       { id: 'le_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
       { id: 'le_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortExitGate: 'OR',
+    shortExitGate: 'AND',
     shortExitConditions: [
       { id: 'se_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
       { id: 'se_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 }
@@ -214,7 +215,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         partials: [
           { profitR: 1.5, closePercent: 30 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           { metric: 'ADX', operator: 'LESS_THAN', valueNumber: 20 },
           { metric: 'RVOL', operator: 'LESS_THAN', valueNumber: 0.8 }
@@ -227,7 +228,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         partials: [
           { profitR: 1.5, closePercent: 40 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           { metric: 'ADX', operator: 'LESS_THAN', valueNumber: 20 }
         ]
@@ -690,7 +691,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { profitR: 1.5, closePercent: 25 },
           { profitR: 3.0, closePercent: 25 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           {
             metric: 'ADX',
@@ -712,7 +713,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { profitR: 1.0, closePercent: 30 },
           { profitR: 2.5, closePercent: 20 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           {
             metric: 'OPEN_INTEREST',
@@ -733,7 +734,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         partials: [
           { profitR: 1.5, closePercent: 25 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           {
             metric: 'RVOL',
@@ -754,7 +755,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         partials: [
           { profitR: 1.0, closePercent: 30 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           {
             metric: 'TAKER_RATIO',
@@ -770,7 +771,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         partials: [
           { profitR: 2.0, closePercent: 20 }
         ],
-        exitGate: 'OR',
+        exitGate: 'AND',
         exitConditions: [
           {
             metric: 'RVOL',
@@ -2055,6 +2056,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
   const [stopLossValue, setStopLossValue] = useState(1.5);
   const [takeProfitMode, setTakeProfitMode] = useState<'TRAILING_MOMENTUM' | 'FIXED_R' | 'FUSION_CASCADE'>('TRAILING_MOMENTUM');
   const [takeProfitValue, setTakeProfitValue] = useState(2.0);
+  const [ignoreInitialStopLoss, setIgnoreInitialStopLoss] = useState<boolean>(false);
 
   const [activeOnLiveBotId, setActiveOnLiveBotId] = useState<string | null>(null);
 
@@ -2393,6 +2395,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
       stopLossValue,
       takeProfitMode,
       takeProfitValue,
+      ignoreInitialStopLoss,
       dynamicRegimeProfiles,
       dynamicExitProfiles,
       longConditions,
@@ -2502,6 +2505,7 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           setStopLossValue(cfg.stopLossValue || 1.5);
           setTakeProfitMode(cfg.takeProfitMode || 'TRAILING_MOMENTUM');
           setTakeProfitValue(cfg.takeProfitValue || 2.0);
+          setIgnoreInitialStopLoss(cfg.ignoreInitialStopLoss || false);
           setDynamicRegimeProfiles(cfg.dynamicRegimeProfiles || undefined);
           setDynamicExitProfiles(cfg.dynamicExitProfiles || DEFAULT_DYNAMIC_EXIT_PROFILES);
           setLongConditions(cfg.longConditions || cfg.conditions || []);
@@ -3948,6 +3952,19 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
                   className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-mono text-slate-200"
                 />
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                type="checkbox"
+                id="ignoreInitialStopLoss"
+                checked={ignoreInitialStopLoss}
+                onChange={e => setIgnoreInitialStopLoss(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-800 bg-slate-900 text-teal-500 focus:ring-teal-500/20"
+              />
+              <label htmlFor="ignoreInitialStopLoss" className="text-xs text-slate-300">
+                تجاهل وقف الخسارة المبدئي (اعتماد كامل على الخروج المؤسساتي والديناميكي)
+              </label>
             </div>
 
             {/* Allowed market regime checklist */}

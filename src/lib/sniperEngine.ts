@@ -1504,12 +1504,19 @@ export class SniperEngine {
           const isLong = trade.type === 'LONG';
           const slHit = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
           if (slHit) {
-            console.log(`[⭐ TAWLEEFA SL HIT] Price crossed stop loss ${trade.sl} for ${symbol} at ${currentPrice}`);
-            const isBE = trade.isBreakeven ? "تأمين حماية رأس المال (Break-even)" : "وقف الخسارة المبدئي المحدد";
-            const slDetail = `ضرب خط الدفاع المالي (${isBE}) عند السعر [${trade.sl.toFixed(4)}] ومستوى الوقف [${trade.sl.toFixed(4)}]`;
-            addLog(`🚨 تصفية التوليفة للحماية: تصفية صفقة ${symbol} فوراً لضرب وقف الخسارة عند ${trade.sl.toFixed(4)} (${isBE})`, 'warn');
-            await this.closeTrade(trade, currentPrice, `TAWLEEFA_SL_HIT: ${slDetail}`);
-            return;
+            if (tawleefa.ignoreInitialStopLoss && !trade.isBreakeven) {
+              if (!(trade as any).ignoreSlLogged) {
+                console.log(`[⭐ TAWLEEFA SL HIT IGNORED] Price crossed stop loss ${trade.sl} for ${symbol} but ignoreInitialStopLoss is true`);
+                (trade as any).ignoreSlLogged = true;
+              }
+            } else {
+              console.log(`[⭐ TAWLEEFA SL HIT] Price crossed stop loss ${trade.sl} for ${symbol} at ${currentPrice}`);
+              const isBE = trade.isBreakeven ? "تأمين حماية رأس المال (Break-even)" : "وقف الخسارة المبدئي المحدد";
+              const slDetail = `ضرب خط الدفاع المالي (${isBE}) عند السعر [${trade.sl.toFixed(4)}] ومستوى الوقف [${trade.sl.toFixed(4)}]`;
+              addLog(`🚨 تصفية التوليفة للحماية: تصفية صفقة ${symbol} فوراً لضرب وقف الخسارة عند ${trade.sl.toFixed(4)} (${isBE})`, 'warn');
+              await this.closeTrade(trade, currentPrice, `TAWLEEFA_SL_HIT: ${slDetail}`);
+              return;
+            }
           }
 
           // Bypass standard exit rules since Tawleefa Engine has absolute authority!
