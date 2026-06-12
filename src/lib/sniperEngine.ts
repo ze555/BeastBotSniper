@@ -1458,6 +1458,17 @@ export class SniperEngine {
                   const adxVal = adx !== undefined ? adx : 25;
                   const enriched = (trade as any).latestEnrichedData || {};
                   
+                  // Compute fallbacks for slopes if enriched is empty
+                  if (!enriched.oiSlope && trade.oiHistory && trade.oiHistory.length >= 2) {
+                     enriched.oiSlope = (trade.oiHistory[trade.oiHistory.length - 1] - trade.oiHistory[0]) / trade.oiHistory.length;
+                  }
+                  if (!enriched.priceSlope && trade.tickHistory && trade.tickHistory.length >= 2) {
+                     enriched.priceSlope = (trade.tickHistory[trade.tickHistory.length - 1] - trade.tickHistory[0]) / trade.tickHistory.length;
+                  }
+                  if (!enriched.volumeSlope && trade.volHistory && trade.volHistory.length >= 2) {
+                     enriched.volumeSlope = (trade.volHistory[trade.volHistory.length - 1] - trade.volHistory[0]) / trade.volHistory.length;
+                  }
+                  
                   switch (cond.metric) {
                     case 'PRICE': actualVal = currentPrice; break;
                     case 'OPEN_INTEREST': actualVal = metricsObj.oiChange; break;
@@ -1494,22 +1505,17 @@ export class SniperEngine {
                 });
 
                 const condResults = condDetails.map((d: any) => d.isTrue);
-                const gate = typeof gateRaw === 'string' ? gateRaw.trim().toUpperCase() : 'AND';
                 let conditionsMet = false;
-                if (gate === 'AND') {
-                  conditionsMet = condResults.every((r: boolean) => r);
-                } else if (gate === '2_OF_3') {
-                  conditionsMet = condResults.filter((r: boolean) => r).length >= 2;
-                } else {
-                  conditionsMet = condResults.some((r: boolean) => r);
-                }
+                
+                // USER IMPERATIVE: We force AND logic for Tawleefa exits regardless of the saved 'gate' to guarantee all conditions are met
+                conditionsMet = condResults.every((r: boolean) => r);
 
                 if (conditionsMet) {
                   decision = 'EXIT_NOW';
                   exitNowBecauseOfConditions = true;
-                  const matchedCondsText = condDetails.map((d: any) => d.text).join(" | ");
-                  exitReasonDetail = `تطابق شروط الخروج المخصصة تحت البوابة [${gate}]: ${matchedCondsText}`;
-                  console.log(`[⭐ TAWLEEFA DYNAMIC CONDITIONS MET] Exit Conditions met under ${evaluationRegime} for ${symbol} using gate ${gate}`);
+                  const matchedCondsText = condDetails.map((d: any) => d.text).join(" \n ");
+                  exitReasonDetail = `تطابق جميع شروط الخروج الديناميكية [إلزامي: AND]: \n ${matchedCondsText}`;
+                  console.log(`[⭐ TAWLEEFA DYNAMIC CONDITIONS MET] Exit Conditions met under ${evaluationRegime} for ${symbol} using strict AND`);
                 }
               }
             }
