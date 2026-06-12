@@ -211,7 +211,7 @@ export async function runTradeLoop() {
                 }
 
                 // 🤖 3. GROQ AI EVALUATION (Snapshots every 15s, Groq Evaluation every 60s)
-                if (settings.useGroqAI) {
+                if (settings.useGroqAI || (t.source && t.source.includes("TAWLEEFA"))) {
                    const lastSnapshot = (t as any).lastSnapshot || 0;
                    if (Date.now() - lastSnapshot > 15000) { // 15 seconds
                       const pnlPerc = t.type === 'LONG' ? ((currentPx - t.entryPrice)/t.entryPrice)*100 : ((t.entryPrice - currentPx)/t.entryPrice)*100;
@@ -517,6 +517,7 @@ export async function runTradeLoop() {
                                    marketStructure
                                 });
 
+                                if (settings.useGroqAI) {
                                 const groqDecision = await askGroqDecision(groqPayload);
                                 (t as any).lastGroqCheck = Date.now();
                                 
@@ -537,6 +538,7 @@ export async function runTradeLoop() {
                                sniper.forceUpdateTrade(t);
                                addLog(`🎯 قرار عبقري لجروك! تحديث هدف الربح للعملة ${t.symbol} القيمة الجديدة: ${groqDecision.new_tp}. (السبب: ${groqDecision.reason})`, 'success');
                             }
+                                 }
                          } catch (err: any) {
                             console.error(`[BOT RUNNER] Groq AI Check Failed for ${t.symbol}:`, err.message);
                             addLog(`⚠️ تحذير: فشل تنفيذ تحليل جروك الذكي للعملة ${t.symbol}: ${err.message}`, 'warn');

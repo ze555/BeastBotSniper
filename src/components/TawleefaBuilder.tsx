@@ -215,7 +215,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       { id: 's_ask_absorption', metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 1.5, timeframe: '5m', sensitivity: 1.0 },
       { id: 's_lh_ll', metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    longExitGate: 'OR',
+    longExitGate: 'AND',
     longExitConditions: [
       { id: 'le_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
       { id: 'le_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 },
@@ -223,7 +223,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       { id: 'le_price_slope', metric: 'PRICE_SLOPE', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.2, timeframe: '5m', sensitivity: 1.0 },
       { id: 'le_ask_absorption', metric: 'ASK_ABSORPTION', operator: 'GREATER_THAN', valueType: 'NUMBER', valueNumber: 3.0, timeframe: '5m', sensitivity: 1.0 }
     ],
-    shortExitGate: 'OR',
+    shortExitGate: 'AND',
     shortExitConditions: [
       { id: 'se_adx', metric: 'ADX', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: 20, timeframe: '5m', sensitivity: 1.0 },
       { id: 'se_oi', metric: 'OPEN_INTEREST', operator: 'LESS_THAN', valueType: 'NUMBER', valueNumber: -0.1, timeframe: '5m', sensitivity: 1.0 },
@@ -383,7 +383,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
       { id: 's_lh_ll_' + Math.random().toString(36).substr(2, 5), metric: 'LH_LL', operator: 'EXPECT_SHORT', valueType: 'NUMBER', valueNumber: 0, timeframe: '5m', sensitivity: 1.0 }
     ],
     dynamicRegimeProfiles: [],
-    longExitGate: '2_OF_3',
+    longExitGate: 'AND',
     longExitConditions: [
       {
         id: 'long_exit_taker',
@@ -413,7 +413,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
         sensitivity: 1.0
       }
     ],
-    shortExitGate: '2_OF_3',
+    shortExitGate: 'AND',
     shortExitConditions: [
       {
         id: 'short_exit_taker',
@@ -1412,7 +1412,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.95 // ضعف هيمنة صانعي السوق
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "MOMENTUM_MODE",
@@ -1439,7 +1439,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.0 // خروج العقود المفتوحة يعني انسحاب القوة الدافعة
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "LIQUIDITY_SWEEP",
@@ -1458,7 +1458,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.95 // تراجع العزم لصالح المزايدة المضادة
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "COMPRESSION",
@@ -1481,7 +1481,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: -1 // انخفاض كبير وتفريغ في العقود المفتوحة
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "TRENDING",
@@ -1504,7 +1504,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.98 // فقدان التفوق لصالح الاتجاه المعاكس
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       }
     ],
     createdAt: '2026-06-02T21:30:00Z'
@@ -2007,7 +2007,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.95
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "MOMENTUM_MODE",
@@ -2034,7 +2034,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.0
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "LIQUIDITY_SWEEP",
@@ -2053,7 +2053,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.95
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "COMPRESSION",
@@ -2076,7 +2076,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: -1
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "TRENDING",
@@ -2099,7 +2099,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
             valueNumber: 0.98
           }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       }
     ],
     createdAt: '2026-06-04T10:46:00Z'
@@ -2266,13 +2266,13 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
           { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
         ],
-        longExitGate: "AND",
+        longExitGate: 'AND',
         shortExitConditions: [
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
           { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.02 }
         ],
-        shortExitGate: "AND",
-        exitGate: "AND"
+        shortExitGate: 'AND',
+        exitGate: 'AND'
       },
       {
         regime: "MOMENTUM_MODE",
@@ -2285,7 +2285,7 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 1.0 },
           { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: 0.0 }
         ],
-        exitGate: "AND"
+        exitGate: 'AND'
       },
       {
         regime: "TRENDING",
@@ -2298,13 +2298,13 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
           { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
         ],
-        longExitGate: "AND",
+        longExitGate: 'AND',
         shortExitConditions: [
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
           { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.02 }
         ],
-        shortExitGate: "AND",
-        exitGate: "AND"
+        shortExitGate: 'AND',
+        exitGate: 'AND'
       }
     ],
     createdAt: '2026-06-05T10:00:00Z'
@@ -2396,14 +2396,14 @@ const PRESET_TEMPLATES: TawleefaConfig[] = [
           { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: -1 },
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 18 }
         ],
-        longExitGate: "AND",
+        longExitGate: 'AND',
         shortExitConditions: [
           { metric: "TAKER_RATIO", operator: "GREATER_THAN", valueNumber: 1.05 },
           { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: -1 },
           { metric: "ADX", operator: "LESS_THAN", valueNumber: 18 }
         ],
-        shortExitGate: "AND",
-        exitGate: "AND"
+        shortExitGate: 'AND',
+        exitGate: 'AND'
       }
     ],
     createdAt: '2026-06-05T12:00:00Z'
@@ -2423,7 +2423,7 @@ const DEFAULT_DYNAMIC_EXIT_PROFILES: DynamicExitProfile[] = [
       { metric: "ADX", operator: "LESS_THAN", valueNumber: 20 },
       { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 }
     ],
-    exitGate: "AND"
+    exitGate: 'AND'
   },
   {
     regime: "MOMENTUM_MODE",
@@ -2436,7 +2436,7 @@ const DEFAULT_DYNAMIC_EXIT_PROFILES: DynamicExitProfile[] = [
       { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 1.0 },
       { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: 0.0 }
     ],
-    exitGate: "AND"
+    exitGate: 'AND'
   },
   {
     regime: "LIQUIDITY_SWEEP",
@@ -2448,7 +2448,7 @@ const DEFAULT_DYNAMIC_EXIT_PROFILES: DynamicExitProfile[] = [
     exitConditions: [
       { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.95 }
     ],
-    exitGate: "AND"
+    exitGate: 'AND'
   },
   {
     regime: "COMPRESSION",
@@ -2460,7 +2460,7 @@ const DEFAULT_DYNAMIC_EXIT_PROFILES: DynamicExitProfile[] = [
       { metric: "RVOL", operator: "LESS_THAN", valueNumber: 0.9 },
       { metric: "OPEN_INTEREST", operator: "LESS_THAN", valueNumber: -1 }
     ],
-    exitGate: "AND"
+    exitGate: 'AND'
   },
   {
     regime: "TRENDING",
@@ -2472,7 +2472,7 @@ const DEFAULT_DYNAMIC_EXIT_PROFILES: DynamicExitProfile[] = [
       { metric: "RVOL", operator: "LESS_THAN", valueNumber: 0.9 },
       { metric: "TAKER_RATIO", operator: "LESS_THAN", valueNumber: 0.98 }
     ],
-    exitGate: "AND"
+    exitGate: 'AND'
   }
 ];
 
