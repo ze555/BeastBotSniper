@@ -140,7 +140,8 @@ export const initDB = () => {
           useBeastAuditorEngine INTEGER DEFAULT 0,
           useFierceExitEngine INTEGER DEFAULT 0,
           fierceTakeProfitValue REAL DEFAULT 1.5,
-          fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'
+          fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE',
+          useSovereignEngine INTEGER DEFAULT 0
         )
       `);
       
@@ -245,7 +246,8 @@ export const initDB = () => {
         "useBeastAuditorEngine INTEGER DEFAULT 0",
         "useFierceExitEngine INTEGER DEFAULT 0",
         "fierceTakeProfitValue REAL DEFAULT 1.5",
-        "fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'"
+        "fierceTakeProfitMode TEXT DEFAULT 'FUSION_CASCADE'",
+        "useSovereignEngine INTEGER DEFAULT 0"
       ];
       
       let pending = newCols.length;
@@ -377,7 +379,7 @@ export function saveSettingsToDB(settings: any) {
       isNightmareMode, marketPanicThreshold,
       useFusionEngine, fusionSensitivity, fusionWeightOi, fusionWeightFunding, fusionWeightVol, fusionWeightInst, fusionMinScore, exitUseRsiCheck, overrideAllWithAdaptive, useCreativeEngine, creativeUseAdaptiveExit, disableConsecutiveLoss,
       useSteelEngine, steelMinProbability, steelInfluenceCreative, steelInfluenceQuantum, steelInfluenceFusion, steelTakerWeight, steelOiWeight, steelFundingWeight, steelLiquidityWeight, steelHtfTrendWeight, steelAdaptiveSlTp, steelMaxLossMode, steelReboundSensitivity, steelMinProfitTake,
-      useTawleefaEngine, activeTawleefaJson, useBeastAuditorEngine, useFierceExitEngine, fierceTakeProfitValue, fierceTakeProfitMode
+      useTawleefaEngine, activeTawleefaJson, useBeastAuditorEngine, useFierceExitEngine, fierceTakeProfitValue, fierceTakeProfitMode, useSovereignEngine
     )
     VALUES (
       'default',
@@ -392,7 +394,7 @@ export function saveSettingsToDB(settings: any) {
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?
+      ?, ?, ?, ?, ?
     )
     ON CONFLICT(id) DO UPDATE SET
       portfolioSize=excluded.portfolioSize,
@@ -508,7 +510,8 @@ export function saveSettingsToDB(settings: any) {
       useBeastAuditorEngine=excluded.useBeastAuditorEngine,
       useFierceExitEngine=excluded.useFierceExitEngine,
       fierceTakeProfitValue=excluded.fierceTakeProfitValue,
-      fierceTakeProfitMode=excluded.fierceTakeProfitMode
+      fierceTakeProfitMode=excluded.fierceTakeProfitMode,
+      useSovereignEngine=excluded.useSovereignEngine
   `;
 
   const values = [
@@ -564,7 +567,8 @@ export function saveSettingsToDB(settings: any) {
     settings.useBeastAuditorEngine ? 1 : 0,
     settings.useFierceExitEngine ? 1 : 0,
     settings.fierceTakeProfitValue ?? 1.5,
-    settings.fierceTakeProfitMode || 'FUSION_CASCADE'
+    settings.fierceTakeProfitMode || 'FUSION_CASCADE',
+    settings.useSovereignEngine ? 1 : 0
   ];
 
   db.run(query, values, (err) => {
@@ -628,6 +632,7 @@ export function loadSettingsFromDB(): Promise<any> {
         row.useFierceExitEngine = row.useFierceExitEngine === 1;
         if (row.fierceTakeProfitValue === undefined) row.fierceTakeProfitValue = 1.5;
         if (row.fierceTakeProfitMode === undefined) row.fierceTakeProfitMode = 'FUSION_CASCADE';
+        row.useSovereignEngine = row.useSovereignEngine === 1;
         row.steelAdaptiveSlTp = row.steelAdaptiveSlTp === 1;
         row.steelMaxLossMode = row.steelMaxLossMode === 1;
         if (row.steelReboundSensitivity === undefined) row.steelReboundSensitivity = 0.15;

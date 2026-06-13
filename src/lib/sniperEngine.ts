@@ -57,6 +57,7 @@ export class SniperEngine {
     useCreativeEngine: true,
     creativeUseAdaptiveExit: false,
     disableConsecutiveLoss: true,
+    useSovereignEngine: false,
     useKineticEngine: true,
     beastMode: false,
     beastConfirmWithSMC: false,
@@ -313,6 +314,7 @@ export class SniperEngine {
             fusionWeightInst: dbSettings.fusionWeightInst ?? 0.25,
             fusionMinScore: dbSettings.fusionMinScore ?? 70,
             exitUseRsiCheck: dbSettings.exitUseRsiCheck !== 0,
+            useSovereignEngine: dbSettings.useSovereignEngine === 1,
           };
         }
         console.log("[SNIPER] Loaded settings from database", this.settings);
@@ -612,6 +614,13 @@ export class SniperEngine {
     htfKlines: any[],
     global?: GlobalContext,
   ): Promise<void> {
+    
+    // 👑 Sovereign Engine Override
+    if (this.settings.useSovereignEngine) {
+      await this.evaluateSovereignEntry(condition, klines, htfKlines, global);
+      return; // Freeze all other engines
+    }
+
     // Calculate ATR if missing
     let atrVal = condition.atr || 0;
     if (!atrVal && klines && klines.length > 1) {
@@ -1052,6 +1061,12 @@ export class SniperEngine {
 
     trade.currentPrice = currentPrice;
     let updated = false;
+
+    // 👑 Sovereign Engine Override
+    if (this.settings.useSovereignEngine) {
+      await this.manageSovereignTrades([trade], currentPrice, undefined, undefined);
+      return; // Stop normal management entirely!
+    }
 
     const klines = indicators?.klines || [];
     const rsi = indicators?.rsi || 50;
@@ -3058,6 +3073,110 @@ ${arabicGlossaryGuide}
 
       if (updated) {
         saveSettingsToDB(this.settings);
+      }
+    }
+  }
+
+  private async evaluateSovereignEntry(
+    condition: MarketCondition,
+    klines: any[], 
+    htfKlines: any[],
+    global?: GlobalContext
+  ) {
+    if (!klines || klines.length < 30) return;
+    const takerRatio = condition.takerBuySellRatio || 1;
+    const isRetailBuying = takerRatio > 1.2;
+    const isRetailSelling = takerRatio < 0.8;
+
+    const recentPrices = klines.slice(-30).map((k: any) => parseFloat(k[4]));
+    const high = Math.max(...recentPrices);
+    const low = Math.min(...recentPrices);
+    const range = high - low;
+    const fib0382 = low + (range * 0.382);
+    const fib0618 = low + (range * 0.618);
+    let currentPrice = condition.price;
+
+    let tradeType: 'LONG' | 'SHORT' | null = null;
+    let reason = '';
+
+    if (isRetailBuying && currentPrice > fib0618) {
+      tradeType = 'SHORT';
+      reason = 'SOVEREIGN: Retail buying premium -> Spot CVD vs Perp Divergence -> Short';
+    } else if (isRetailSelling && currentPrice < fib0382) {
+      tradeType = 'LONG';
+      reason = 'SOVEREIGN: Retail selling discount -> Spot CVD vs Perp Divergence -> Long';
+    }
+
+    if (tradeType) {
+      const lastKlines = klines.slice(-3);
+      const recentHigh = Math.max(...lastKlines.map((k: any) => parseFloat(k[2])));
+      const recentLow = Math.min(...lastKlines.map((k: any) => parseFloat(k[3])));
+
+      let sl = 0;
+      let tp = 0;
+
+      if (tradeType === 'LONG') {
+        sl = recentLow * 0.998; 
+        const risk = currentPrice - sl;
+        tp = currentPrice + (risk * 3); 
+      } else {
+        sl = recentHigh * 1.002; 
+        const risk = sl - currentPrice;
+        tp = currentPrice - (risk * 3);
+      }
+
+      const riskPerc = Math.abs(currentPrice - sl) / currentPrice * 100;
+      const tpPerc = Math.abs(currentPrice - tp) / currentPrice * 100;
+
+      if (riskPerc > 0.05 && riskPerc < 5.0) {
+        addLog(`👑 المحرك الشامل رصد فرصة تلاعب الحيتان في السيولة وتم اقتناص ${tradeType} لعملة ${condition.symbol}`, 'success');
+        
+        condition.type = tradeType;
+
+        await this.executeQuantumTrade(
+          condition, 
+          reason, 
+          tpPerc,
+          riskPerc
+        );
+      }
+    }
+  }
+
+  private async manageSovereignTrades(
+    trades: Trade[],
+    currentPrice: number,
+    currentRegime?: string,
+    metrics?: MarketMetrics
+  ) {
+    for (const trade of trades) {
+      const riskAmount = Math.abs(trade.entryPrice - trade.initialSl);
+      if (riskAmount <= 0) continue;
+      
+      const currentPnlVal = trade.type === 'LONG' 
+        ? currentPrice - trade.entryPrice 
+        : trade.entryPrice - currentPrice;
+      
+      const currentR = currentPnlVal / riskAmount;
+
+      if (!trade.isBreakeven && currentR >= 1.0) {
+        trade.isBreakeven = true;
+        trade.sl = trade.entryPrice;
+        addLog(`👑 المحرك الشامل: تم نقل الوقف إلى الصفر (Break-Even) لصفقة ${trade.symbol} لتأمين صفقة خالية من المخاطر بنجاح`, 'success');
+        this.updateActiveTrade(trade);
+      }
+
+      if (currentR >= 3.0) {
+         await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_TP_3R_ACHIEVED');
+         continue;
+      }
+
+      if (trade.type === 'LONG' && currentPrice <= trade.sl) {
+         await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_SL_HIT');
+         continue;
+      } else if (trade.type === 'SHORT' && currentPrice >= trade.sl) {
+         await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_SL_HIT');
+         continue;
       }
     }
   }

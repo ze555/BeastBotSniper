@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key, Trash2,
   ChevronDown, ChevronUp, Gauge, History, BarChart3, Activity, Flame, Shield, Skull,
-  Waves, ShieldAlert, AlertTriangle
+  Waves, ShieldAlert, AlertTriangle, Crown, Eye, Swords, Lock
 } from 'lucide-react';
 
 export function SettingsView({ 
@@ -266,6 +266,72 @@ export function SettingsView({
                   <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
                     <button type="button" onClick={() => setSettings({...settings, isLongTerm: false})} className={`px-8 py-3 rounded-lg text-xs font-black transition-all ${!settings.isLongTerm ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>SCALP (1M)</button>
                     <button type="button" onClick={() => setSettings({...settings, isLongTerm: true})} className={`px-8 py-3 rounded-lg text-xs font-black transition-all ${settings.isLongTerm ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>STRATEGIC (15M+)</button>
+                  </div>
+                </div>
+
+                {/* المحرك الشامل (Sovereign Engine) */}
+                <div className="bg-gradient-to-l from-slate-900 via-amber-950/40 to-yellow-900/40 border-2 border-yellow-500/50 rounded-3xl p-8 space-y-8 overflow-hidden relative shadow-[0_0_30px_rgba(234,179,8,0.15)] mb-8">
+                  <div className="absolute top-0 right-0 p-2 opacity-5"><Crown className="w-40 h-40 text-yellow-400 rotate-12" /></div>
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-yellow-500/20 pb-6 relative z-10 gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-yellow-500/10 rounded-2xl border border-yellow-500/30 text-yellow-400">
+                        <Crown className="w-8 h-8 animate-pulse text-yellow-400" />
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-yellow-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full">محرك كامل ومستقل</span>
+                          <h4 className="font-black text-yellow-500 text-xl">المحرك الشامل (Sovereign Engine)</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2 font-sans max-w-xl">
+                          محرك دخول وخروج يننتهج آلية التداول بنسبة 3:1 من المخاطرة إلى المكافأة. يجمّد أي محرك آخر تماماً فور تفعيله. يستعين بكشف وتطويق تلاعب الحيتان في اختلاف السيولة واختراق وقف الخسائر.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 self-end md:self-center ml-0 mr-auto">
+                      {settings.useSovereignEngine && (
+                        <span className="text-[10px] bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 px-3 py-1.5 rounded-xl font-bold animate-pulse">SOVEREIGN ACTIVE</span>
+                      )}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={!!settings.useSovereignEngine} 
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setSettings(prev => ({
+                              ...prev,
+                              useSovereignEngine: isChecked,
+                            }));
+                          }}
+                        />
+                        <div className="w-14 h-7 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-yellow-500"></div>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className={`space-y-8 transition-all relative z-10 ${!settings.useSovereignEngine ? 'opacity-25 grayscale pointer-events-none' : ''}`}>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div className="bg-slate-900/80 p-5 rounded-2xl border border-yellow-500/10">
+                          <h5 className="text-yellow-400 font-bold mb-2 flex items-center gap-2"><Eye className="w-4 h-4"/> كشف تلاعب السيولة (CVD)</h5>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            يقارن السيولة الفورية (Spot) بالعقود الآجلة (Perps) لتحديد اتجاه الحيتان الحقيقي عند محاولة دفع المستثمرين الأفراد في اتجاه خاطئ.
+                          </p>
+                        </div>
+                        <div className="bg-slate-900/80 p-5 rounded-2xl border border-yellow-500/10">
+                          <h5 className="text-yellow-400 font-bold mb-2 flex items-center gap-2"><Swords className="w-4 h-4"/> هندسة 3 إلى 1 (العقد الذهبي)</h5>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            دخول حصري من مناطق الخصم أو العلاوة للعملات الذهبية، مع الهدف التلقائي والمضمون إلى 3 أضعاف الوقف الذي يُنقل فوراً لنقطة الصفر بمجرد تحقيق ربح مماثل.
+                          </p>
+                        </div>
+                        <div className="bg-slate-900/80 p-5 rounded-2xl border border-yellow-500/10">
+                          <h5 className="text-yellow-400 font-bold mb-2 flex items-center gap-2"><Lock className="w-4 h-4"/> السيطرة المطلقة</h5>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            يُعطّل تمامی محركات الإجماع والمحركات الكلاسيكية تماماً ويعمل بملف ومحرك خاص مستقلاً بالقرار، مما يضمن تدفقاً منطقياً وعقلانياً للمخاطر.
+                          </p>
+                        </div>
+                      </div>
                   </div>
                 </div>
 

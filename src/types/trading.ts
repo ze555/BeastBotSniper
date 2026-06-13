@@ -430,4 +430,7 @@ export interface BotSettings {
   useFierceExitEngine?: boolean;        // تفعيل محرك الخروج الشرس المستقل لأي محرك دخول
   fierceTakeProfitValue?: number;       // هدف جني الأرباح المأمول لمحرك الخروج الشرس (مثل 1.5%)
   fierceTakeProfitMode?: 'FUSION_CASCADE' | 'TRAILING_MOMENTUM'; // وضعية ملاحقة السقف وجني الأرباح للتثبيت الشرس
+  
+  // 👑 The Sovereign Engine (المحرك الشامل)
+  useSovereignEngine?: boolean;
 }
