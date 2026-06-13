@@ -3263,6 +3263,19 @@ export function TawleefaBuilder({ watchlist = [], settings = {} }: TawleefaBuild
           case 'ADX':
             actualVal = tick.adx;
             break;
+          case 'OI_SLOPE':
+          case 'CVD_SLOPE':
+          case 'SPOT_CVD':
+          case 'SPOT_CVD_SLOPE':
+          case 'PRICE_SLOPE':
+          case 'VOLUME_SLOPE':
+          case 'DELTA_VOLUME':
+          case 'BID_ABSORPTION':
+          case 'ASK_ABSORPTION':
+          case 'HH_HL':
+          case 'LH_LL':
+            actualVal = (Math.random() * 2) - 1; // Simulated values between -1 and 1
+            break;
         }
 
         if (cond.operator === 'GREATER_THAN') {

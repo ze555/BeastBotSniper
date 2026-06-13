@@ -132,6 +132,17 @@ export class CoreEngine {
                     case 'RSI': actualVal = metricsObj.rsi; break;
                     case 'ADX': actualVal = metricsObj.adx; break;
                     case 'EMA50_TREND': actualVal = metricsObj.ema50 ? (metricsObj.price > metricsObj.ema50 ? 1 : -1) : 0; break;
+                    case 'OI_SLOPE': actualVal = metricsObj.slopes?.oiSlope ?? 0; break;
+                    case 'CVD_SLOPE': actualVal = metricsObj.slopes?.cvdSlope ?? 0; break;
+                    case 'SPOT_CVD': actualVal = metricsObj.slopes?.spotCvdSlope ?? 0; break;
+                    case 'SPOT_CVD_SLOPE': actualVal = metricsObj.slopes?.spotCvdSlope ?? 0; break;
+                    case 'PRICE_SLOPE': actualVal = metricsObj.slopes?.priceSlope ?? 0; break;
+                    case 'VOLUME_SLOPE': actualVal = metricsObj.slopes?.volumeSlope ?? 0; break;
+                    case 'DELTA_VOLUME': actualVal = metricsObj.slopes?.deltaVolume ?? 0; break;
+                    case 'BID_ABSORPTION': actualVal = metricsObj.slopes?.bidAbsorption ?? 0; break;
+                    case 'ASK_ABSORPTION': actualVal = metricsObj.slopes?.askAbsorption ?? 0; break;
+                    case 'HH_HL': actualVal = metricsObj.slopes?.hhHl ?? 0; break;
+                    case 'LH_LL': actualVal = metricsObj.slopes?.lhLl ?? 0; break;
                     default: actualVal = metricsObj.price;
                   }
 

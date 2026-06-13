@@ -162,6 +162,18 @@ export interface MarketCondition {
   rsi?: number;              // Real-time RSI relative strength
   ema50?: number;            // 50 EMA Trend filter
   isAdxRising?: boolean;     // Whether ADX is currently rising or decreasing
+  slopes?: {
+    oiSlope: number;
+    cvdSlope: number;
+    spotCvdSlope: number;
+    volumeSlope: number;
+    priceSlope: number;
+    deltaVolume?: number;
+    bidAbsorption?: number;
+    askAbsorption?: number;
+    hhHl?: number;
+    lhLl?: number;
+  };
 }
 
 export interface MarketMetrics {
@@ -182,6 +194,18 @@ export interface MarketMetrics {
   isChop: boolean;
   volCoefVar?: number;
   isAdxRising?: boolean;     // Whether ADX is currently rising
+  slopes?: {
+    oiSlope: number;
+    cvdSlope: number;
+    spotCvdSlope: number;
+    volumeSlope: number;
+    priceSlope: number;
+    deltaVolume?: number;
+    bidAbsorption?: number;
+    askAbsorption?: number;
+    hhHl?: number;
+    lhLl?: number;
+  };
 }
 
 export interface GlobalContext {
@@ -245,7 +269,16 @@ export interface BotSettings {
   useWiseExit?: boolean;            // 🔥 Wise Exit: Institutional & Structural Exit
   useWiseEntry?: boolean;           // 🛡️ Wise Entry: Institutional Breakout & SMC Reversals
   
-  // Smart Control (التحكم الذكي الفائق)
+  // Smart Exit Scoring Logic Dashboard
+  smartScoreExit?: {
+    enabled: boolean;
+    msBreakPoints: number;
+    oiWeakPoints: number;
+    cvdPoints: number;
+    threshold: number;
+    applyToAll: boolean;
+    selectedTawleefas?: string[];
+  };
   useSmartControl?: boolean;        // تفعيل التحكم الذكي
   enableInverseExecution?: boolean; // تفعيل الصفقات المعاكسة في بايننس
   smartTpUsd?: number;              // هدف الربح السريع بالدولار (مثال 1$)

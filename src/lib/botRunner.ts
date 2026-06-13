@@ -36,6 +36,22 @@ export function getSystemLogs() {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+function calculateNormalizedRegressionSlope(data: number[]): number {
+  if (!data || data.length < 2) return 0;
+  const n = data.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+      sumX += i;
+      sumY += data[i];
+      sumXY += i * data[i];
+      sumX2 += i * i;
+  }
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const avgY = sumY / n;
+  if (avgY === 0) return 0;
+  return (slope / Math.abs(avgY)) * 100; // Returns percentage change per candle
+}
+
 export function setBotActive(state: boolean) {
   botActive = state;
   addLog(`Bot ${state ? 'STARTED 🔥' : 'STOPPED 🛑'}`, state ? 'info' : 'warn');
@@ -399,7 +415,8 @@ export async function runTradeLoop() {
                                 const oiSlope = oiHistory.length >= 2 ? (oiHistory[oiHistory.length - 1] - oiHistory[0]) / Math.max(1, oiHistory.length) : 0;
                                 const cvdSlope = cvd_15m / 15;
                                 const volumeProfileArr = compressedHistory.map((h: any) => h.klinesSummary?.[0]?.vol).filter(Boolean);
-                                const volumeSlope = volumeProfileArr.length >= 2 ? (parseFloat(volumeProfileArr[volumeProfileArr.length - 1]) - parseFloat(volumeProfileArr[0])) / Math.max(1, volumeProfileArr.length) : 0;
+                                const vArr = volumeProfileArr.map((v: any) => parseFloat(v)).filter((v: number) => !isNaN(v));
+                                const volumeSlope = calculateNormalizedRegressionSlope(vArr);
                                 
                                 let trueRanges = [];
                                 for (let i = 1; i < len; i++) {
@@ -444,7 +461,8 @@ export async function runTradeLoop() {
                                 const lowVolumeNode = bucketSize === 0 ? currentPx : minLow + (vpoLowBucket + 0.5) * bucketSize;
 
                                 const priceProfileArr = compressedHistory.map((h: any) => h.currentPrice).filter(Boolean);
-                                const priceSlope = priceProfileArr.length >= 2 ? (parseFloat(priceProfileArr[priceProfileArr.length - 1]) - parseFloat(priceProfileArr[0])) / Math.max(1, priceProfileArr.length) : 0;
+                                const pArr = priceProfileArr.map((p: any) => parseFloat(p)).filter((p: number) => !isNaN(p));
+                                const priceSlope = calculateNormalizedRegressionSlope(pArr);
                                 const spotCvdSlope = spotCvd15m / 15;
                                 
                                 const groqPayload = {
@@ -628,13 +646,14 @@ export async function runTradeLoop() {
                      const klinesRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`, { timeout: 4000 });
                      const klines = klinesRes.data;
 
-                     // Calculate Taker Ratio safely from the last completed candle of klines
+                     // Calculate smoothed Taker Ratio from the last 15 completed candles
                      let takerRatio = 1.0;
-                     if (klines && klines.length > 1) {
-                         const completedK = klines[klines.length - 2]; // Last completed candle
-                         takerRatio = calculateTakerRatio(completedK);
-                     } else if (klines && klines.length === 1) {
-                         takerRatio = calculateTakerRatio(klines[0]);
+                     if (klines && klines.length > 2) {
+                         const maxLookback = Math.min(15, klines.length - 1);
+                         const recentKlines = klines.slice(klines.length - 1 - maxLookback, klines.length - 1);
+                         takerRatio = calculateTakerRatio(recentKlines);
+                     } else if (klines && klines.length > 0) {
+                         takerRatio = calculateTakerRatio(klines.slice(0, klines.length - 1));
                      }
 
                      // --- 🦁 BEAST AUDITOR LIVE METRICS CALCULATION ---
@@ -774,9 +793,7 @@ export async function runTradeLoop() {
                                  isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
                                  support: biasType === 'LONG' ? support : 0,
                                  resistance: biasType === 'SHORT' ? resistance : 0,
-                                 takerBuySellRatio: takerRatio,
-                                 atr: 0
-                             };
+                                 takerBuySellRatio: takerRatio, atr: 0, slopes: { oiSlope: 0, cvdSlope: takerRatio - 1.0, spotCvdSlope: takerRatio - 1.0, volumeSlope: calculateNormalizedRegressionSlope(klines.map((k: any) => parseFloat(k[5])).filter((n: number) => !isNaN(n))), priceSlope: calculateNormalizedRegressionSlope(klines.map((k: any) => parseFloat(k[4])).filter((n: number) => !isNaN(n))), deltaVolume: 0, bidAbsorption: takerRatio > 1.2 ? 1 : 0, askAbsorption: takerRatio < 0.8 ? 1 : 0, hhHl: 0, lhLl: 0 } };
 
                              addLog(`⚡ مدقق الوحش TRIGGERED: ${biasType} ${coin.symbol} (مستوفي 5 شروط بنسبة 100%)`, 'success');
                              await sniper.executeQuantumTrade(condition, `BEAST_AUDITOR_${biasType}`, tpPerc, slPerc);
@@ -816,10 +833,11 @@ export async function runTradeLoop() {
                              adx: adxCurrent,
                              rsi: currentRsi,
                              ema50: currentEma50,
-                             isAdxRising: isAdxRising
-                         };
+                             isAdxRising: isAdxRising,
+                              slopes: { oiSlope: 0, cvdSlope: takerRatio - 1.0, spotCvdSlope: takerRatio - 1.0, volumeSlope: calculateNormalizedRegressionSlope(klines.map((k: any) => parseFloat(k[5])).filter((n: number) => !isNaN(n))), priceSlope: calculateNormalizedRegressionSlope(klines.map((k: any) => parseFloat(k[4])).filter((n: number) => !isNaN(n))), deltaVolume: 0, bidAbsorption: takerRatio > 1.2 ? 1 : 0, askAbsorption: takerRatio < 0.8 ? 1 : 0, hhHl: 0, lhLl: 0 }
+                          };
 
-                         try {
+                          try {
                              const oiRes = await axios.get(`${BINANCE_FAPI}/fapi/v1/openInterest?symbol=${coin.symbol}`, { timeout: 3000 });
                              if (oiRes.data && oiRes.data.openInterest) {
                                  const currentOI = parseFloat(oiRes.data.openInterest);
@@ -906,11 +924,7 @@ export async function runTradeLoop() {
                               isRanging: false, isBreakout: true, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: true, isOrderBookClear: true,
                               support: decision.type === 'LONG' ? support : 0,
                               resistance: decision.type === 'SHORT' ? resistance : 0,
-                              takerBuySellRatio: takerRatio,
-
-
-                              atr: 0 
-                          };
+                              takerBuySellRatio: takerRatio, atr: 0, slopes: { oiSlope: 0, cvdSlope: takerRatio - 1.0, spotCvdSlope: takerRatio - 1.0, volumeSlope: calculateNormalizedRegressionSlope(klines.map((k: any) => parseFloat(k[5])).filter((n: number) => !isNaN(n))), priceSlope: calculateNormalizedRegressionSlope(klines.map((k: any) => parseFloat(k[4])).filter((n: number) => !isNaN(n))), deltaVolume: 0, bidAbsorption: takerRatio > 1.2 ? 1 : 0, askAbsorption: takerRatio < 0.8 ? 1 : 0, hhHl: 0, lhLl: 0 } };
                           
                           let proceedWithTrade = true;
 

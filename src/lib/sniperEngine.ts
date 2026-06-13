@@ -649,6 +649,7 @@ export class SniperEngine {
       takerRatio: condition.takerBuySellRatio,
       isChop: condition.isRanging,
       isAdxRising: condition.isAdxRising,
+      slopes: condition.slopes
     };
 
     // 2. Clear Decision from the Core
@@ -1184,6 +1185,73 @@ export class SniperEngine {
       trade.adaptiveHistoryLogs.push(logEntry);
       if (trade.adaptiveHistoryLogs.length > 50) {
         trade.adaptiveHistoryLogs.shift();
+      }
+    }
+
+    // --- 00000. SMART SCORE DASHBOARD EXIT EVALUATION (GLOBAL OVERRIDE) ---
+    if (this.settings.smartScoreExit?.enabled) {
+      const scExit = this.settings.smartScoreExit;
+      const metricsObj = {
+        takerRatio: currentTakerRatio !== undefined ? currentTakerRatio : 1.0,
+      };
+
+      let applies = false;
+      if (scExit.applyToAll) {
+        applies = true;
+      } else if (scExit.selectedTawleefas && scExit.selectedTawleefas.length > 0) {
+        const sourceId = trade.source || ""; 
+        const isTawleefaStrat = sourceId.startsWith("TAWLEEFA:");
+        const namePart = isTawleefaStrat ? sourceId.split("TAWLEEFA:")[1] : "";
+        applies = scExit.selectedTawleefas.includes(namePart) || ((trade as any).tawleefaId && scExit.selectedTawleefas.includes((trade as any).tawleefaId));
+      }
+
+      if (applies) {
+        const enriched = (trade as any).latestEnrichedData || {};
+        const ms = enriched.marketStructure || {};
+        let score = 0;
+        let logs: string[] = [];
+        const oiSlope = enriched.oiSlope || 0;
+        const spotCvdSlope = enriched.spotCvdSlope || ((metricsObj.takerRatio || 1) - 1.0); // Fallback
+
+        // 1. Market Structure Break
+        let msBroken = false;
+        if (trade.type === 'LONG' && ms.lowerHigh && ms.lowerLow) {
+          msBroken = true;
+        } else if (trade.type === 'SHORT' && ms.higherHigh && ms.higherLow) {
+          msBroken = true;
+        }
+        if (msBroken) {
+          score += scExit.msBreakPoints || 0;
+          logs.push(`كسر البنية (+${scExit.msBreakPoints})`);
+        }
+
+        // 2. OI Retreat / Weakening
+        if (oiSlope < 0) {
+          score += scExit.oiWeakPoints || 0;
+          logs.push(`تراجع العقود المفتوحة (+${scExit.oiWeakPoints})`);
+        }
+
+        // 3. Spot CVD Against Trade
+        let cvdAgainst = false;
+        if (trade.type === 'LONG' && spotCvdSlope < 0) {
+          cvdAgainst = true;
+        } else if (trade.type === 'SHORT' && spotCvdSlope > 0) {
+          cvdAgainst = true;
+        }
+        if (cvdAgainst) {
+          score += scExit.cvdPoints || 0;
+          logs.push(`عكس مسار السبوت CVD (+${scExit.cvdPoints})`);
+        }
+
+        if (score >= (scExit.threshold || 75)) {
+          const reasonLog = logs.join(" | ");
+          const exitReasonDetail = `تجاوز نظام نقاط الخروج الذكي الحد [${scExit.threshold}] (إجمالي النقاط: ${score}):\n${reasonLog}`;
+          console.log(`[⭐ SMART SCORE EXIT] Global absolute override triggered for ${symbol} with score ${score}/${scExit.threshold}`);
+          addLog(`🚨 مخرج الطوارئ الذكي (نقاط الخروج): تصفية صفقة ${symbol} فوراً [${exitReasonDetail}]`, 'warn');
+          
+          await this.forceCloseTrade(trade, currentPrice, `SMART_SCORE_EXIT: ${exitReasonDetail}`);
+          return;
+        }
       }
     }
 

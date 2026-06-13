@@ -22,16 +22,24 @@ export function SettingsView({
   STRATEGY_TEMPLATES: any[], 
   intensity: any 
 }) {
-  const [activeTab, setActiveTab] = React.useState<'account' | 'risk' | 'entry' | 'exit' | 'tuning' | 'beast'>('account');
+  const [activeTab, setActiveTab] = React.useState<'account' | 'risk' | 'entry' | 'exit' | 'tuning' | 'beast' | 'smart'>('account');
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{success: boolean, message: string} | null>(null);
   const [serverIp, setServerIp] = React.useState<string | null>(null);
+  const [availableTawleefas, setAvailableTawleefas] = React.useState<any[]>([]);
 
   React.useEffect(() => {
     fetch('/api/utils/server-ip')
       .then(res => res.json())
       .then(data => setServerIp(data.ip))
       .catch(() => setServerIp('فشل في جلب الـ IP'));
+
+    try {
+      const stored = localStorage.getItem('cust_tawleefas_v1');
+      if (stored) {
+        setAvailableTawleefas(JSON.parse(stored));
+      }
+    } catch {}
   }, []);
 
   const handleTestConnection = async () => {
@@ -112,6 +120,7 @@ export function SettingsView({
             <TabButton id="entry" label="محركات الدخول" icon={Zap} />
             <TabButton id="exit" label="دروع الخروج" icon={Shield} />
             <TabButton id="beast" label="الوحش الذكي" icon={Flame} />
+            <TabButton id="smart" label="نقاط الخروج" icon={Activity} />
             <TabButton id="tuning" label="المعايرة الفنية" icon={Gauge} />
           </div>
 
@@ -1213,6 +1222,162 @@ export function SettingsView({
                       onChange={e => setSettings({...settings, quantumBeastMode: e.target.checked})} 
                       className="w-6 h-6 accent-rose-600 cursor-pointer shrink-0" 
                     />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 4.5 Smart Score Exit */}
+            {activeTab === 'smart' && (
+              <div className="space-y-10 animate-in slide-in-from-left-4 duration-300 text-right" dir="rtl">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
+                  <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                    <h3 className="text-xl font-black text-rose-400 flex items-center gap-2">
+                       <Activity className="w-6 h-6" /> لوحة تحكم: الخروج المستند لنظام النقاط
+                    </h3>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-slate-400">تفعيل النظام</span>
+                      <input 
+                        type="checkbox" 
+                        checked={!!settings.smartScoreExit?.enabled} 
+                        onChange={e => setSettings({
+                          ...settings, 
+                          smartScoreExit: { 
+                            ...(settings.smartScoreExit || { msBreakPoints: 50, oiWeakPoints: 25, cvdPoints: 25, threshold: 75, applyToAll: true, selectedTawleefas: [] }),
+                            enabled: e.target.checked 
+                          }
+                        })} 
+                        className="w-8 h-8 accent-rose-500 cursor-pointer" 
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 ${!settings.smartScoreExit?.enabled ? 'opacity-30 pointer-events-none grayscale' : ''}`}>
+                    <div className="space-y-6">
+                      
+                      <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
+                        <label className="text-sm font-bold text-white mb-2 block">نقاط كسر البنية الأساسية (Market Structure Break)</label>
+                        <p className="text-xs text-slate-500 mb-4 leading-relaxed">تُضاف هذه النقاط إذا ظهرت قمة أدنى وقاع أدنى (Lower High & Lower Low) خلال صفقة Long، أو العكس في الـ Short.</p>
+                        <input type="number" 
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-emerald-400 font-mono text-left text-lg focus:border-emerald-500 outline-none"
+                          value={settings.smartScoreExit?.msBreakPoints ?? 50} 
+                          onChange={e => setSettings({
+                            ...settings, 
+                            smartScoreExit: { ...settings.smartScoreExit, msBreakPoints: parseInt(e.target.value) }
+                          })} 
+                        />
+                      </div>
+
+                      <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
+                        <label className="text-sm font-bold text-white mb-2 block">نقاط تراجع عقود المتداولين (OI Weakening)</label>
+                        <p className="text-xs text-slate-500 mb-4 leading-relaxed">تُضاف النقاط إذا بدأ Open Interest (العقود المفتوحة) بالانخفاض متخذاً ميلاً سلبياً حاداً.</p>
+                        <input type="number" 
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-emerald-400 font-mono text-left text-lg focus:border-emerald-500 outline-none"
+                          value={settings.smartScoreExit?.oiWeakPoints ?? 25} 
+                          onChange={e => setSettings({
+                            ...settings, 
+                            smartScoreExit: { ...settings.smartScoreExit, oiWeakPoints: parseInt(e.target.value) }
+                          })} 
+                        />
+                      </div>
+
+                      <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
+                        <label className="text-sm font-bold text-white mb-2 block">نقاط انعكاس سيولة الأفراد (Spot CVD)</label>
+                        <p className="text-xs text-slate-500 mb-4 leading-relaxed">تُضاف إذا كان ميل تراكمات السبوت (Spot CVD) يُعاكس الاتجاه الحالي للصفقة المفتوحة.</p>
+                        <input type="number" 
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-emerald-400 font-mono text-left text-lg focus:border-emerald-500 outline-none"
+                          value={settings.smartScoreExit?.cvdPoints ?? 25} 
+                          onChange={e => setSettings({
+                            ...settings, 
+                            smartScoreExit: { ...settings.smartScoreExit, cvdPoints: parseInt(e.target.value) }
+                          })} 
+                        />
+                      </div>
+
+                    </div>
+
+                    <div className="space-y-6">
+                      <div className="bg-slate-950 p-8 rounded-2xl border-2 border-rose-900/40 relative overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-br from-rose-900/10 to-transparent"></div>
+                        <label className="text-base font-black text-rose-300 mb-2 block relative">عتبة الخروج النهائية (Exit Threshold)</label>
+                        <p className="text-xs text-rose-200/50 mb-6 relative">إذا تجاوز مجموع النقاط الحية هذه العتبة، سيغلق النظام الصفقة بشكل فوري معلناً "خروج ذكي".</p>
+                        <input type="number" 
+                          className="w-full bg-slate-900 border border-rose-800/50 rounded-xl px-6 py-4 text-rose-400 font-mono text-center text-3xl font-black shadow-[0_0_15px_-5px_red] focus:border-rose-400 outline-none relative"
+                          value={settings.smartScoreExit?.threshold ?? 75} 
+                          onChange={e => setSettings({
+                            ...settings, 
+                            smartScoreExit: { ...settings.smartScoreExit, threshold: parseInt(e.target.value) }
+                          })} 
+                        />
+                      </div>
+                      
+                      <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
+                        <label className="text-sm font-bold text-white mb-4 block">نطاق تطبيق الاستراتيجية</label>
+                        <div className="space-y-3">
+                          <label className="flex items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800 cursor-pointer hover:border-emerald-500/50 transition-all">
+                            <input type="radio" 
+                              name="applyToAll"
+                              checked={settings.smartScoreExit?.applyToAll !== false} 
+                              onChange={() => setSettings({
+                                ...settings, 
+                                smartScoreExit: { ...settings.smartScoreExit, applyToAll: true }
+                              })} 
+                              className="w-5 h-5 accent-emerald-500" 
+                            />
+                            <span className="text-sm font-bold text-slate-300 w-full">تطبيق كدرع خروج عام لجميع التوليفات النشطة</span>
+                          </label>
+                          <label className="flex items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800 cursor-pointer hover:border-emerald-500/50 transition-all">
+                            <input type="radio" 
+                              name="applyToAll"
+                              checked={settings.smartScoreExit?.applyToAll === false} 
+                              onChange={() => setSettings({
+                                ...settings, 
+                                smartScoreExit: { ...settings.smartScoreExit, applyToAll: false }
+                              })} 
+                              className="w-5 h-5 accent-emerald-500" 
+                            />
+                            <div className="flex flex-col w-full">
+                              <span className="text-sm font-bold text-slate-300">تطبيق على توليفات محددة</span>
+                            </div>
+                          </label>
+
+                          {settings.smartScoreExit?.applyToAll === false && (
+                            <div className="mt-4 p-4 border-2 border-emerald-900/30 rounded-xl bg-slate-950/50 space-y-3 max-h-48 overflow-y-auto">
+                              {availableTawleefas.length === 0 ? (
+                                <p className="text-xs text-slate-500 text-center py-2">لا توجد توليفات مخصصة متاحة للاختيار.</p>
+                              ) : (
+                                availableTawleefas.map((taw: any) => {
+                                  const isSelected = (settings.smartScoreExit?.selectedTawleefas || []).includes(taw.id) || (settings.smartScoreExit?.selectedTawleefas || []).includes(taw.name);
+                                  return (
+                                    <label key={taw.id} className="flex items-center justify-between gap-3 p-3 bg-slate-900 border border-slate-800 rounded-lg cursor-pointer hover:bg-slate-800 transition-colors">
+                                      <div className="flex items-center gap-3">
+                                        <input 
+                                          type="checkbox" 
+                                          checked={isSelected}
+                                          onChange={(e) => {
+                                            const currentSelections = settings.smartScoreExit?.selectedTawleefas || [];
+                                            const newSelections = e.target.checked 
+                                              ? [...currentSelections, taw.name]
+                                              : currentSelections.filter((t: string) => t !== taw.name && t !== taw.id);
+                                            setSettings({
+                                              ...settings,
+                                              smartScoreExit: { ...settings.smartScoreExit, selectedTawleefas: newSelections }
+                                            });
+                                          }}
+                                          className="w-5 h-5 accent-rose-500 rounded border-slate-700 bg-slate-800"
+                                        />
+                                        <span className="text-sm font-bold text-slate-300">{taw.name}</span>
+                                      </div>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
                   </div>
                 </div>
               </div>
