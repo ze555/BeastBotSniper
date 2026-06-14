@@ -1029,11 +1029,12 @@ export class SniperEngine {
     }
 
     this.activeTrades.set(trade.symbol, trade);
+    const sourcePrefix = source ? source.split(':')[0].split('_')[0] : "QUANTUM";
     addLog(
-      `QUANTUM ENTRY: ${trade.type} ${trade.symbol} @ ${entryPrice.toFixed(2)}`,
+      `${sourcePrefix} ENTRY: ${trade.type} ${trade.symbol} @ ${entryPrice.toFixed(2)}`,
       "info",
     );
-    console.log(`QUANTUM ENTRY EXECUTED FOR ${symbol}`);
+    console.log(`${sourcePrefix} ENTRY EXECUTED FOR ${trade.symbol} - ${source}`);
   }
 
   /**
@@ -2528,6 +2529,9 @@ export class SniperEngine {
   }
 
   public async smartExit(symbol: string, currentPrice: number, reason: string) {
+    if (this.settings.useSovereignEngine) {
+      return; // Handled strictly by Sovereign
+    }
     if (this.settings.useTawleefaEngine) {
       console.log(`[SMART EXIT] Bypassed for ${symbol} because Tawleefa Engine is active.`);
       return;
@@ -2547,6 +2551,9 @@ export class SniperEngine {
   }
 
   public async wiseExit(symbol: string, currentPrice: number, klines: any[]) {
+    if (this.settings.useSovereignEngine) {
+      return; // Handled strictly by Sovereign
+    }
     if (this.settings.useTawleefaEngine) {
       console.log(`[WISE EXIT] Bypassed for ${symbol} because Tawleefa Engine is active.`);
       return;
@@ -3077,6 +3084,9 @@ ${arabicGlossaryGuide}
     }
   }
 
+  // Cooldown map for sovereign engine
+  private sovereignCooldowns: Map<string, number> = new Map();
+
   private async evaluateSovereignEntry(
     condition: MarketCondition,
     klines: any[], 
@@ -3084,27 +3094,47 @@ ${arabicGlossaryGuide}
     global?: GlobalContext
   ) {
     if (!klines || klines.length < 30) return;
+    
+    // Check cooldown (60 minutes per symbol)
+    const lastTradeTime = this.sovereignCooldowns.get(condition.symbol) || 0;
+    if (Date.now() - lastTradeTime < 60 * 60 * 1000) return;
+
+    if (this.activeTrades.has(condition.symbol)) return;
+
     const takerRatio = condition.takerBuySellRatio || 1;
-    const isRetailBuying = takerRatio > 1.2;
-    const isRetailSelling = takerRatio < 0.8;
+    // Extreme retail behavior
+    const isRetailBuying = takerRatio > 1.35;
+    const isRetailSelling = takerRatio < 0.65;
 
     const recentPrices = klines.slice(-30).map((k: any) => parseFloat(k[4]));
     const high = Math.max(...recentPrices);
     const low = Math.min(...recentPrices);
     const range = high - low;
-    const fib0382 = low + (range * 0.382);
-    const fib0618 = low + (range * 0.618);
+    const fib0236 = low + (range * 0.236);
+    const fib0786 = low + (range * 0.786);
     let currentPrice = condition.price;
+
+    // Check for immediate rejection (last completed candle)
+    const lastCompleted = klines[klines.length - 2];
+    if (!lastCompleted) return;
+    
+    const lcOpen = parseFloat(lastCompleted[1]);
+    const lcHigh = parseFloat(lastCompleted[2]);
+    const lcLow = parseFloat(lastCompleted[3]);
+    const lcClose = parseFloat(lastCompleted[4]);
+    
+    const isBearishRejection = lcClose < lcOpen && (lcHigh - Math.max(lcOpen, lcClose)) > (Math.abs(lcClose - lcOpen) * 1.5);
+    const isBullishRejection = lcClose > lcOpen && (Math.min(lcOpen, lcClose) - lcLow) > (Math.abs(lcClose - lcOpen) * 1.5);
 
     let tradeType: 'LONG' | 'SHORT' | null = null;
     let reason = '';
 
-    if (isRetailBuying && currentPrice > fib0618) {
+    if (isRetailBuying && currentPrice > fib0786 && isBearishRejection) {
       tradeType = 'SHORT';
-      reason = 'SOVEREIGN: Retail buying premium -> Spot CVD vs Perp Divergence -> Short';
-    } else if (isRetailSelling && currentPrice < fib0382) {
+      reason = 'SOVEREIGN: Extreme Retail Longs + Deviation Rejection -> Short';
+    } else if (isRetailSelling && currentPrice < fib0236 && isBullishRejection) {
       tradeType = 'LONG';
-      reason = 'SOVEREIGN: Retail selling discount -> Spot CVD vs Perp Divergence -> Long';
+      reason = 'SOVEREIGN: Extreme Retail Shorts + Liquidity Sweep Rejection -> Long';
     }
 
     if (tradeType) {
@@ -3129,9 +3159,14 @@ ${arabicGlossaryGuide}
       const tpPerc = Math.abs(currentPrice - tp) / currentPrice * 100;
 
       if (riskPerc > 0.05 && riskPerc < 5.0) {
-        addLog(`👑 المحرك الشامل رصد فرصة تلاعب الحيتان في السيولة وتم اقتناص ${tradeType} لعملة ${condition.symbol}`, 'success');
+        let arabicReason = tradeType === 'LONG' 
+           ? 'تكدس عقود بيع الأفراد مع رفض سعري (Liquidity Sweep)'
+           : 'تكدس عقود شراء الأفراد مع رفض سعري (Deviation Rejection)';
+        
+        addLog(`👑 المحرك الشامل رصد فرصة ${tradeType} لعملة ${condition.symbol} | السبب: ${arabicReason}`, 'success');
         
         condition.type = tradeType;
+        this.sovereignCooldowns.set(condition.symbol, Date.now());
 
         await this.executeQuantumTrade(
           condition, 
@@ -3167,14 +3202,17 @@ ${arabicGlossaryGuide}
       }
 
       if (currentR >= 3.0) {
+         addLog(`👑 المحرك الشامل خروج: تم تحقيق الهدف الربحي الاستراتيجي (3R) لصفقة ${trade.symbol}`, 'success');
          await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_TP_3R_ACHIEVED');
          continue;
       }
 
       if (trade.type === 'LONG' && currentPrice <= trade.sl) {
+         addLog(`👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (SL Hit)`, 'warn');
          await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_SL_HIT');
          continue;
       } else if (trade.type === 'SHORT' && currentPrice >= trade.sl) {
+         addLog(`👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (SL Hit)`, 'warn');
          await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_SL_HIT');
          continue;
       }

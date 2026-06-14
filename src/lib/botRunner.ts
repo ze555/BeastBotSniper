@@ -227,7 +227,9 @@ export async function runTradeLoop() {
                 }
 
                 // 🤖 3. GROQ AI EVALUATION (Snapshots every 15s, Groq Evaluation every 60s)
-                if (settings.useGroqAI || (t.source && t.source.includes("TAWLEEFA"))) {
+                if (t.source && t.source.includes("SOVEREIGN")) {
+                   // Sovereign manages its own exits entirely
+                } else if (settings.useGroqAI || (t.source && t.source.includes("TAWLEEFA"))) {
                    const lastSnapshot = (t as any).lastSnapshot || 0;
                    if (Date.now() - lastSnapshot > 15000) { // 15 seconds
                       const pnlPerc = t.type === 'LONG' ? ((currentPx - t.entryPrice)/t.entryPrice)*100 : ((t.entryPrice - currentPx)/t.entryPrice)*100;
