@@ -438,22 +438,6 @@ export class SniperEngine {
       ? ((currentPrice - entryPrice) / entryPrice) * 100
       : ((entryPrice - currentPrice) / entryPrice) * 100;
 
-    // Real-time live PnL and ROE updates so that front-end/UI displays latest metrics under Fierce Exit
-    const totalFeeRate = this.settings.tradingFeeRate ?? 0.001;
-    const leverage = trade.leverage || this.settings.leverage || 10;
-    
-    let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
-    if (trade.realizedPnl) {
-        currentPnl += trade.realizedPnl;
-    }
-    
-    const effectiveAmount = trade.originalAmount || trade.amount;
-    const margin = effectiveAmount / leverage;
-    const roePerc = (currentPnl / margin) * 100;
-
-    trade.pnl = currentPnl;
-    trade.pnlPerc = roePerc;
-
     // Track historical highwater marks
     if (!trade.highestPrice || (isLong ? currentPrice > trade.highestPrice : currentPrice < trade.highestPrice)) {
       trade.highestPrice = currentPrice;
@@ -1062,6 +1046,28 @@ export class SniperEngine {
 
     trade.currentPrice = currentPrice;
     let updated = false;
+
+    // --- Core PnL Calculations for ALL Engines (Including Sovereign) ---
+    const isLong = trade.type === 'LONG';
+    const entryPrice = trade.entryPrice;
+    const priceChangePerc = isLong
+      ? ((currentPrice - entryPrice) / entryPrice) * 100
+      : ((entryPrice - currentPrice) / entryPrice) * 100;
+
+    const totalFeeRate = this.settings.tradingFeeRate ?? 0.001;
+    const leverage = trade.leverage || this.settings.leverage || 10;
+    
+    let currentPnl = ((trade.amount * priceChangePerc) / 100) - (trade.amount * totalFeeRate);
+    if (trade.realizedPnl) {
+        currentPnl += trade.realizedPnl;
+    }
+    
+    const effectiveAmount = trade.originalAmount || trade.amount;
+    const margin = effectiveAmount / leverage;
+    const roePerc = (currentPnl / margin) * 100;
+
+    trade.pnl = currentPnl;
+    trade.pnlPerc = roePerc;
 
     // 👑 Sovereign Engine Override
     if (this.settings.useSovereignEngine) {
