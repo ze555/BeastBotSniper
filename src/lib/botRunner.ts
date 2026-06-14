@@ -882,6 +882,20 @@ export async function runTradeLoop() {
                          continue;
                      }
 
+                     if (settings.useSovereignEngine) {
+                         const currentPx = parseFloat(klines[klines.length - 1][4]);
+                         const condition: MarketCondition = {
+                             symbol: coin.symbol, price: currentPx, type: 'LONG', rvol: coin.rvol, oiChange24h: 0, score: coin.score,
+                             isRanging: false, isBreakout: false, isRetestOrHold: false, isLiquidityGood: true, isMomentumHigh: false, isOrderBookClear: true,
+                             support: 0, resistance: 0, takerBuySellRatio: takerRatio, atr: 0, vol24h: coin.volume, spread: coin.spread,
+                             oi: undefined, fundingRate: parseFloat((coin as any).fundingRate || 0), adx: adxCurrent, rsi: currentRsi, ema50: currentEma50, isAdxRising: isAdxRising,
+                              slopes: { oiSlope: 0, cvdSlope: takerRatio - 1.0, spotCvdSlope: takerRatio - 1.0, volumeSlope: 0, priceSlope: 0, deltaVolume: 0, bidAbsorption: 0, askAbsorption: 0, hhHl: 0, lhLl: 0 }
+                          };
+                         await sniper.evaluateSignal(condition, klines, klines, globalContext);
+                         if (sniper.getActiveTrades().has(coin.symbol)) signalFoundInThisLoop = true;
+                         continue;
+                     }
+
                      const decision = settings.useSteelEngine
                         ? steelEngine.analyze(klines, takerRatio, sniper.getSettings(), parseFloat((coin as any).fundingRate || 0))
                         : settings.useCreativeEngine
