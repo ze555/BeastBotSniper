@@ -2677,8 +2677,22 @@ export class SniperEngine {
         : ((trade.entryPrice - exitPrice) / trade.entryPrice) * trade.amount;
     
     trade.pnl = finalPnl;
+    trade.pnlPerc = trade.type === "LONG"
+        ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+        : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
+        
     trade.status = "CLOSED";
-    trade.exitDate = Date.now();
+    trade.exitTime = Date.now();
+    trade.exitPrice = exitPrice;
+    trade.exitReason = reason;
+
+    try {
+        const { RegimeEngine } = await import("./engine/RegimeEngine.js");
+        const { getGlobalMarketContext } = await import("./botRunner.js");
+        trade.exitRegime = RegimeEngine.evaluateRegime(getGlobalMarketContext());
+    } catch (e) {
+        trade.exitRegime = "UNKNOWN";
+    }
 
     console.log(
       `[SNIPER] ${reason}: Trade FORCE Closed on ${trade.symbol}. Final PnL: $${trade.pnl.toFixed(2)}`
