@@ -3947,6 +3947,30 @@ ${arabicGlossaryGuide}
     }
 
     if (tradeType) {
+      // Apply filters for Trend Expansion to prevent counter-trend trading
+      const adx = condition.adx || 25;
+      const oiSlope = condition.slopes?.oiSlope || 0;
+      const oiRising = oiSlope > 0;
+      // Calculate RVOL
+      const last20Vols = klines.slice(-20).map((k: any) => parseFloat(k[5]));
+      const avgVol20 = last20Vols.reduce((a, b) => a + b, 0) / 20;
+      const currentVol = parseFloat(lastCompleted[5]);
+      const rvol = avgVol20 > 0 ? currentVol / avgVol20 : 1;
+
+      if (tradeType === "SHORT") {
+        if (oiRising && rvol > 1.8 && adx > 25) {
+          addLog(`👑 المحرك الشامل تجنب صفقة SHORT لعملة ${condition.symbol} لأن هناك Trend Expansion حقيقي (OI صاعد + RVOL عالي + ADX مرتفع).`, 'warn');
+          tradeType = null;
+        }
+      } else if (tradeType === "LONG") {
+        if (oiRising && rvol > 1.8 && adx > 25 && takerRatio < 0.7) {
+          addLog(`👑 المحرك الشامل تجنب صفقة LONG لعملة ${condition.symbol} لأن هذا انهيار حقيقي (OI صاعد + RVOL عالي + ADX مرتفع + Taker منخفض).`, 'warn');
+          tradeType = null;
+        }
+      }
+    }
+
+    if (tradeType) {
       const lastKlines = klines.slice(-3);
       const recentHigh = Math.max(
         ...lastKlines.map((k: any) => parseFloat(k[2])),
@@ -4008,62 +4032,169 @@ ${arabicGlossaryGuide}
 
       const currentR = currentPnlVal / riskAmount;
 
-      // --- Regime Evaluation (كشف حالة السوق) ---
+      // --- Trend Expansion Evaluation (كشف قوة الانفجار) ---
       const adx = indicators?.adx || 25;
-      const isRegimeShifted = adx >= 35 || currentR >= 1.5;
+      
+      let rvol = 1;
+      if (indicators?.klines && indicators.klines.length >= 20) {
+         const klines = indicators.klines;
+         const last20Vols = klines.slice(-20).map((k: any) => parseFloat(k[5]));
+         const avgVol20 = last20Vols.reduce((a, b) => a + b, 0) / 20;
+         const currentVol = parseFloat(klines[klines.length - 1][5]);
+         rvol = avgVol20 > 0 ? currentVol / avgVol20 : 1;
+      }
+      
+      let oiRising = false;
+      if (trade.oiHistory && trade.oiHistory.length >= 2) {
+         const lastOi = trade.oiHistory[trade.oiHistory.length - 1];
+         const prevOi = trade.oiHistory[trade.oiHistory.length - 2];
+         oiRising = lastOi > prevOi;
+      }
 
-      // 1. تسلق الربح في حالة القفزات العنيفة (Trailing Stop for Parabolic Regime)
-      if (isRegimeShifted && currentR >= 1.0) {
-        const trailAmount = riskAmount * 0.75; // 0.75R مسافة الوقف
-        const dynamicSl =
-          trade.type === "LONG"
-            ? currentPrice - trailAmount
-            : currentPrice + trailAmount;
+      const isTrendExpansion = adx > 25 && rvol > 1.8 && oiRising;
 
-        if (trade.type === "LONG" && dynamicSl > trade.sl) {
-          trade.sl = dynamicSl;
+      if (!trade.partialHistory) trade.partialHistory = [];
+      const partial1R = trade.partialHistory.find(p => p.targetR === 1);
+      const partial2R = trade.partialHistory.find(p => p.targetR === 2);
+      const partial3R = trade.partialHistory.find(p => p.targetR === 3);
+
+      // --- Exits & Partials ---
+      if (currentR >= 1.0 && !trade.isBreakeven) {
+          trade.isBreakeven = true;
+          trade.sl = trade.entryPrice;
           addLog(
-            `👑 المحرك الشامل رصد تغيراً نشطاً (Regime Shift): تفعيل تسلق الربح لصفقة ${trade.symbol} لحماية الأرباح عند ${dynamicSl.toFixed(4)}`,
+            `👑 المحرك الشامل: تم نقل الوقف إلى الصفر (Break-Even) لصفقة ${trade.symbol} لتأمينها (1R Target Reached)`,
             "success",
           );
+          trade.partialHistory.push({ closePercent: 0, amountClosed: 0, realizedPnl: 0, exitPrice: currentPrice, time: Date.now(), targetR: 1 });
           this.updateActiveTrade(trade);
-        } else if (trade.type === "SHORT" && dynamicSl < trade.sl) {
-          trade.sl = dynamicSl;
+      }
+
+      if (currentR >= 2.0 && !partial2R) {
           addLog(
-            `👑 المحرك الشامل رصد تغيراً نشطاً (Regime Shift): تفعيل تسلق الربح لصفقة ${trade.symbol} لحماية الأرباح عند ${dynamicSl.toFixed(4)}`,
+            `👑 المحرك الشامل (2R Target Reached): إغلاق 25% من صفقة ${trade.symbol} لتأمين الأرباح جزئياً.`,
             "success",
           );
+          
+          if (!trade.originalAmount) trade.originalAmount = trade.amount;
+          const prevAmount = trade.amount;
+          const closedAmount = prevAmount * 0.25;
+          const partialPnl = (trade.pnl || 0) * 0.25;
+          
+          trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+          trade.amount = prevAmount - closedAmount;
+          trade.partialHistory.push({
+              closePercent: 25,
+              amountClosed: closedAmount,
+              realizedPnl: partialPnl,
+              exitPrice: currentPrice,
+              time: Date.now(),
+              targetR: 2,
+          });
+
+          if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
+              try {
+                const side = this.getLiveExitSide(trade.type);
+                const roundedQty = this.exchange.amountToPrecision(trade.symbol, closedAmount / currentPrice);
+                await this.exchange.createOrder(trade.symbol, "market", side, roundedQty, undefined, { reduceOnly: true });
+              } catch (e: any) {
+                console.error(`[BINANCE] Sovereign Partial failed: ${e.message}`);
+              }
+          }
           this.updateActiveTrade(trade);
-        }
-      }
-      // 2. الحماية الكلاسيكية (نقطة الدخول)
-      else if (!trade.isBreakeven && currentR >= 1.0) {
-        trade.isBreakeven = true;
-        trade.sl = trade.entryPrice;
-        addLog(
-          `👑 المحرك الشامل: تم نقل الوقف إلى الصفر (Break-Even) لصفقة ${trade.symbol} لتأمين صفقة خالية من المخاطر بنجاح`,
-          "success",
-        );
-        this.updateActiveTrade(trade);
       }
 
-      if (currentR >= 3.0) {
-        addLog(
-          `👑 المحرك الشامل خروج: تم تحقيق الهدف الربحي الاستراتيجي (3R) لصفقة ${trade.symbol}`,
-          "success",
-        );
-        await this.forceCloseTrade(
-          trade,
-          currentPrice,
-          "SOVEREIGN_TP_3R_ACHIEVED",
-        );
-        continue;
+      if (currentR >= 3.0 && !partial3R) {
+          if (!isTrendExpansion) {
+             addLog(
+               `👑 المحرك الشامل خروج: تم تحقيق الهدف الربحي الاستراتيجي (3R) لصفقة ${trade.symbol} وإغلاقها بالكامل لعدم وجود انفجار سعري (Trend Expansion).`,
+               "success",
+             );
+             await this.forceCloseTrade(trade, currentPrice, "SOVEREIGN_TP_3R_NO_EXPANSION");
+             continue;
+          } else {
+             addLog(
+              `👑 المحرك الشامل (3R Target Reached): إغلاق 25% إضافية من صفقة ${trade.symbol} وتفعيل Trailing المستمر لوجود قوة انفجار (Trend Expansion).`,
+              "success",
+             );
+             
+             if (!trade.originalAmount) trade.originalAmount = trade.amount;
+             const prevAmount = trade.amount;
+             const closedAmount = prevAmount * 0.25;
+             const partialPnl = (trade.pnl || 0) * 0.25;
+             
+             trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+             trade.amount = prevAmount - closedAmount;
+             trade.partialHistory.push({
+                 closePercent: 25,
+                 amountClosed: closedAmount,
+                 realizedPnl: partialPnl,
+                 exitPrice: currentPrice,
+                 time: Date.now(),
+                 targetR: 3,
+             });
+
+             if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
+                 try {
+                   const side = this.getLiveExitSide(trade.type);
+                   const roundedQty = this.exchange.amountToPrecision(trade.symbol, closedAmount / currentPrice);
+                   await this.exchange.createOrder(trade.symbol, "market", side, roundedQty, undefined, { reduceOnly: true });
+                 } catch (e: any) {
+                   console.error(`[BINANCE] Sovereign Partial failed: ${e.message}`);
+                 }
+             }
+             this.updateActiveTrade(trade);
+          }
       }
 
+      // --- Continuous Trend Checking ---
+      if (trade.partialHistory && trade.partialHistory.length > 0 && currentR >= 2.0) { 
+          let holdingLostConditions = 0;
+          if (!oiRising) holdingLostConditions++;
+          if (rvol <= 1.3) holdingLostConditions++;
+          
+          if (holdingLostConditions >= 2) {
+             addLog(`👑 المحرك الشامل رصد فقدان قوة الانفجار لصفقة ${trade.symbol}. يتم تصفية الصفقة مبكراً لتأمين المتبقي من الأرباح.`, 'warn');
+             await this.forceCloseTrade(trade, currentPrice, "SOVEREIGN_MOMENTUM_LOST_EXIT");
+             continue;
+          }
+      }
+
+      // --- Dynamic Trailing Logic ---
+      let trailingFactor = 0;
+      if (currentR >= 1.0 && currentR < 2.0) trailingFactor = 1.0;
+      else if (currentR >= 2.0 && currentR < 4.0) trailingFactor = 0.75;
+      else if (currentR >= 4.0) trailingFactor = 0.5;
+
+      if (trailingFactor > 0) {
+         const trailAmount = riskAmount * trailingFactor;
+         const dynamicSl =
+           trade.type === "LONG"
+             ? currentPrice - trailAmount
+             : currentPrice + trailAmount;
+
+         if (trade.type === "LONG" && dynamicSl > trade.sl) {
+           trade.sl = dynamicSl;
+           addLog(
+             `👑 المحرك الشامل يضيق خناق الوقف (Trailing ${trailingFactor}R) لصفقة ${trade.symbol} لحماية الأرباح عند مستوى ${dynamicSl.toFixed(4)}`,
+             "success",
+           );
+           this.updateActiveTrade(trade);
+         } else if (trade.type === "SHORT" && dynamicSl < trade.sl) {
+           trade.sl = dynamicSl;
+           addLog(
+             `👑 المحرك الشامل يضيق خناق الوقف (Trailing ${trailingFactor}R) لصفقة ${trade.symbol} لحماية الأرباح عند مستوى ${dynamicSl.toFixed(4)}`,
+             "success",
+           );
+           this.updateActiveTrade(trade);
+         }
+      }
+
+      // --- Hard SL Check ---
       if (trade.type === "LONG" && currentPrice <= trade.sl) {
         const logLevel = currentPnlVal > 0 ? "success" : "warn";
         addLog(
-          `👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (مغادرة بالوقف الديناميكي/الحماية)`,
+          `👑 المحرك الشامل خروج: تم ضرب الوقف لصفقة ${trade.symbol} (مغادرة بالوقف الديناميكي/الحماية)`,
           logLevel,
         );
         await this.forceCloseTrade(trade, currentPrice, "SOVEREIGN_SL_HIT");
@@ -4071,7 +4202,7 @@ ${arabicGlossaryGuide}
       } else if (trade.type === "SHORT" && currentPrice >= trade.sl) {
         const logLevel = currentPnlVal > 0 ? "success" : "warn";
         addLog(
-          `👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (مغادرة بالوقف الديناميكي/الحماية)`,
+          `👑 المحرك الشامل خروج: تم ضرب الوقف لصفقة ${trade.symbol} (مغادرة بالوقف الديناميكي/الحماية)`,
           logLevel,
         );
         await this.forceCloseTrade(trade, currentPrice, "SOVEREIGN_SL_HIT");
