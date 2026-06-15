@@ -1071,7 +1071,7 @@ export class SniperEngine {
 
     // 👑 Sovereign Engine Override
     if (this.settings.useSovereignEngine) {
-      await this.manageSovereignTrades([trade], currentPrice, undefined, undefined);
+      await this.manageSovereignTrades([trade], currentPrice, undefined, undefined, indicators);
       return; // Stop normal management entirely!
     }
 
@@ -3188,7 +3188,8 @@ ${arabicGlossaryGuide}
     trades: Trade[],
     currentPrice: number,
     currentRegime?: string,
-    metrics?: MarketMetrics
+    metrics?: MarketMetrics,
+    indicators?: any
   ) {
     for (const trade of trades) {
       const riskAmount = Math.abs(trade.entryPrice - trade.initialSl);
@@ -3200,7 +3201,27 @@ ${arabicGlossaryGuide}
       
       const currentR = currentPnlVal / riskAmount;
 
-      if (!trade.isBreakeven && currentR >= 1.0) {
+      // --- Regime Evaluation (كشف حالة السوق) ---
+      const adx = indicators?.adx || 25;
+      const isRegimeShifted = adx >= 35 || currentR >= 1.5;
+
+      // 1. تسلق الربح في حالة القفزات العنيفة (Trailing Stop for Parabolic Regime)
+      if (isRegimeShifted && currentR >= 1.0) {
+        const trailAmount = riskAmount * 0.75; // 0.75R مسافة الوقف
+        const dynamicSl = trade.type === 'LONG' ? currentPrice - trailAmount : currentPrice + trailAmount;
+        
+        if (trade.type === 'LONG' && dynamicSl > trade.sl) {
+            trade.sl = dynamicSl;
+            addLog(`👑 المحرك الشامل رصد تغيراً نشطاً (Regime Shift): تفعيل تسلق الربح لصفقة ${trade.symbol} لحماية الأرباح عند ${dynamicSl.toFixed(4)}`, 'success');
+            this.updateActiveTrade(trade);
+        } else if (trade.type === 'SHORT' && dynamicSl < trade.sl) {
+            trade.sl = dynamicSl;
+            addLog(`👑 المحرك الشامل رصد تغيراً نشطاً (Regime Shift): تفعيل تسلق الربح لصفقة ${trade.symbol} لحماية الأرباح عند ${dynamicSl.toFixed(4)}`, 'success');
+            this.updateActiveTrade(trade);
+        }
+      } 
+      // 2. الحماية الكلاسيكية (نقطة الدخول)
+      else if (!trade.isBreakeven && currentR >= 1.0) {
         trade.isBreakeven = true;
         trade.sl = trade.entryPrice;
         addLog(`👑 المحرك الشامل: تم نقل الوقف إلى الصفر (Break-Even) لصفقة ${trade.symbol} لتأمين صفقة خالية من المخاطر بنجاح`, 'success');
@@ -3214,11 +3235,13 @@ ${arabicGlossaryGuide}
       }
 
       if (trade.type === 'LONG' && currentPrice <= trade.sl) {
-         addLog(`👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (SL Hit)`, 'warn');
+         const logLevel = currentPnlVal > 0 ? 'success' : 'warn';
+         addLog(`👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (مغادرة بالوقف الديناميكي/الحماية)`, logLevel);
          await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_SL_HIT');
          continue;
       } else if (trade.type === 'SHORT' && currentPrice >= trade.sl) {
-         addLog(`👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (SL Hit)`, 'warn');
+         const logLevel = currentPnlVal > 0 ? 'success' : 'warn';
+         addLog(`👑 المحرك الشامل خروج: تم ضرب وقف الخسارة لصفقة ${trade.symbol} (مغادرة بالوقف الديناميكي/الحماية)`, logLevel);
          await this.forceCloseTrade(trade, currentPrice, 'SOVEREIGN_SL_HIT');
          continue;
       }
