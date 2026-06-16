@@ -223,6 +223,28 @@ export interface GlobalContext {
   marketSentiment: 'EXTREME_GREED' | 'GREED' | 'NEUTRAL' | 'FEAR' | 'EXTREME_FEAR';
 }
 
+export interface SovereignRuleStat {
+  passed: number;
+  failed: number;
+}
+
+export interface SovereignStats {
+  totalEvaluations: number;
+  totalLongScanned: number;
+  totalShortScanned: number;
+  acceptedLongs: number;
+  acceptedShorts: number;
+  rules: {
+    ema50_trend: SovereignRuleStat;
+    ema_alignment: SovereignRuleStat;
+    rvol: SovereignRuleStat;
+    oi_rising: SovereignRuleStat;
+    taker_ratio: SovereignRuleStat;
+    adx: SovereignRuleStat;
+    price_breakout: SovereignRuleStat;
+  }
+}
+
 export interface SystemStats {
   apiLag: number;
   uptime: number;

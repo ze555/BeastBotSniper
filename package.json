@@ -11,6 +11,7 @@
     "start": "NODE_ENV=production node dist/server.cjs"
   },
   "dependencies": {
+    "@google/genai": "^2.8.0",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.17",
     "axios": "^1.6.8",

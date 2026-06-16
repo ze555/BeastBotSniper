@@ -3901,6 +3901,23 @@ ${arabicGlossaryGuide}
   // Cooldown map for sovereign engine
   private sovereignCooldowns: Map<string, number> = new Map();
 
+  public sovereignStats = {
+    totalEvaluations: 0,
+    totalLongScanned: 0,
+    totalShortScanned: 0,
+    acceptedLongs: 0,
+    acceptedShorts: 0,
+    rules: {
+      ema50_trend: { passed: 0, failed: 0 },
+      ema_alignment: { passed: 0, failed: 0 },
+      rvol: { passed: 0, failed: 0 },
+      oi_rising: { passed: 0, failed: 0 },
+      taker_ratio: { passed: 0, failed: 0 },
+      adx: { passed: 0, failed: 0 },
+      price_breakout: { passed: 0, failed: 0 },
+    }
+  };
+
   private async evaluateSovereignEntry(
     condition: MarketCondition,
     klines: any[],
@@ -3967,30 +3984,76 @@ ${arabicGlossaryGuide}
     let sl = 0;
 
     // --- Pure Trend Continuation Breakout Strategy ---
+    this.sovereignStats.totalEvaluations++;
+
+    // Track Long Stats
+    const isEma50Long = currentPrice > ema50;
+    const isEmaAlignLong = ema50 > ema200;
+    const isRvolLong = rvol > 2.0;
+    const isOiLong = oiRising;
+    const isTakerLong = takerRatio > 1.15;
+    const isAdxLong = adx > 25;
+    const isBreakoutLong = currentPrice > highestHigh10;
+
+    // Track Short Stats
+    const isEma50Short = currentPrice < ema50;
+    const isEmaAlignShort = ema50 < ema200;
+    const isRvolShort = rvol > 2.0; // Same threshold
+    const isOiShort = oiRising; // Same threshold
+    const isTakerShort = takerRatio < 0.85;
+    const isAdxShort = adx > 25; // Same threshold
+    const isBreakoutShort = currentPrice < lowestLow10;
+
+    // Determine Bias to track rules against the biased direction
+    // Only track if it aligns with at least the basic EMA50 trend to avoid polluting stats with sideways chop
+    if (isEma50Long) {
+      this.sovereignStats.totalLongScanned++;
+      this.sovereignStats.rules.ema50_trend.passed++;
+      isEmaAlignLong ? this.sovereignStats.rules.ema_alignment.passed++ : this.sovereignStats.rules.ema_alignment.failed++;
+      isRvolLong ? this.sovereignStats.rules.rvol.passed++ : this.sovereignStats.rules.rvol.failed++;
+      isOiLong ? this.sovereignStats.rules.oi_rising.passed++ : this.sovereignStats.rules.oi_rising.failed++;
+      isTakerLong ? this.sovereignStats.rules.taker_ratio.passed++ : this.sovereignStats.rules.taker_ratio.failed++;
+      isAdxLong ? this.sovereignStats.rules.adx.passed++ : this.sovereignStats.rules.adx.failed++;
+      isBreakoutLong ? this.sovereignStats.rules.price_breakout.passed++ : this.sovereignStats.rules.price_breakout.failed++;
+    } else if (isEma50Short) {
+      this.sovereignStats.totalShortScanned++;
+      this.sovereignStats.rules.ema50_trend.passed++; // Passed short trend
+      isEmaAlignShort ? this.sovereignStats.rules.ema_alignment.passed++ : this.sovereignStats.rules.ema_alignment.failed++;
+      isRvolShort ? this.sovereignStats.rules.rvol.passed++ : this.sovereignStats.rules.rvol.failed++;
+      isOiShort ? this.sovereignStats.rules.oi_rising.passed++ : this.sovereignStats.rules.oi_rising.failed++;
+      isTakerShort ? this.sovereignStats.rules.taker_ratio.passed++ : this.sovereignStats.rules.taker_ratio.failed++;
+      isAdxShort ? this.sovereignStats.rules.adx.passed++ : this.sovereignStats.rules.adx.failed++;
+      isBreakoutShort ? this.sovereignStats.rules.price_breakout.passed++ : this.sovereignStats.rules.price_breakout.failed++;
+    } else {
+      this.sovereignStats.rules.ema50_trend.failed++;
+    }
+
     const isLongSetup = 
-      currentPrice > ema50 && 
-      ema50 > ema200 && 
-      rvol > 2.0 && 
-      oiRising && 
-      takerRatio > 1.15 && 
-      adx > 25 && 
-      currentPrice > highestHigh10;
+      isEma50Long && 
+      isEmaAlignLong && 
+      isRvolLong && 
+      isOiLong && 
+      isTakerLong && 
+      isAdxLong && 
+      isBreakoutLong;
 
     const isShortSetup = 
-      currentPrice < ema50 && 
-      ema50 < ema200 && 
-      rvol > 2.0 && 
-      oiRising && 
-      takerRatio < 0.85 && 
-      adx > 25 && 
-      currentPrice < lowestLow10;
+      isEma50Short && 
+      isEmaAlignShort && 
+      isRvolShort && 
+      isOiShort && 
+      isTakerShort && 
+      isAdxShort && 
+      isBreakoutShort;
 
     if (isLongSetup) {
+        this.sovereignStats.acceptedLongs++;
         tradeType = "LONG";
         reason = "SOVEREIGN_BREAKOUT: PURE TREND (EMA50>200, RVOL>2, Taker>1.15, HH10 Break)";
         slDistance = atr * 1.5;
         sl = currentPrice - slDistance;
     } else if (isShortSetup) {
+        this.sovereignStats.acceptedShorts++;
         tradeType = "SHORT";
         reason = "SOVEREIGN_BREAKOUT: PURE TREND (EMA50<200, RVOL>2, Taker<0.85, LL10 Break)";
         slDistance = atr * 1.5;

@@ -50,6 +50,34 @@ async function startServer() {
     res.json({ active: isBotActive() });
   });
 
+  app.get("/api/sovereign/stats", (req, res) => {
+    res.json(sniper.sovereignStats);
+  });
+
+  app.post("/api/gemini/analyze", async (req, res) => {
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      // Use API key from env or fallback to whatever the user has set up 
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ success: false, message: "GEMINI_API_KEY environment variable is required." });
+      }
+      
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = req.body.prompt;
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+
+      res.json({ success: true, text: response.text });
+    } catch (e: any) {
+      console.error('Gemini API Error:', e.message);
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
   app.post("/api/bot/toggle", (req, res) => {
     const currentState = isBotActive();
     setBotActive(!currentState);
