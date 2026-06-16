@@ -1113,7 +1113,7 @@ export async function runTradeLoop() {
             try {
               // Try to get klines first
               const klinesRes = await axios.get(
-                `${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=60`,
+                `${BINANCE_FAPI}/fapi/v1/klines?symbol=${coin.symbol}&interval=${tfs.m1}&limit=210`,
                 { timeout: 4000 },
               );
               const klines = klinesRes.data;
