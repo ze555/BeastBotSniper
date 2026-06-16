@@ -3907,7 +3907,7 @@ ${arabicGlossaryGuide}
     htfKlines: any[],
     global?: GlobalContext,
   ) {
-    if (!klines || klines.length < 50) return;
+    if (!klines || klines.length < 200) return;
 
     // Check cooldown (60 minutes per symbol)
     const lastTradeTime = this.sovereignCooldowns.get(condition.symbol) || 0;
@@ -3920,17 +3920,28 @@ ${arabicGlossaryGuide}
     const oiSlope = condition.slopes?.oiSlope || 0;
     const oiRising = oiSlope > 0;
     const adx = condition.adx || 25;
-    const rsi = condition.rsi || 50;
 
     // --- Core Indicators Calculation ---
-    const recentPrices = klines.slice(-50).map((k: any) => parseFloat(k[4]));
-    
-    // EMA 50
-    let ema50 = recentPrices[0];
-    const kEma = 2 / (50 + 1);
-    for (let i = 1; i < recentPrices.length; i++) {
-        ema50 = (recentPrices[i] - ema50) * kEma + ema50;
+    // EMA 200
+    const recentPrices200 = klines.slice(-200).map((k: any) => parseFloat(k[4]));
+    let ema200 = recentPrices200[0];
+    const kEma200 = 2 / (200 + 1);
+    for (let i = 1; i < recentPrices200.length; i++) {
+        ema200 = (recentPrices200[i] - ema200) * kEma200 + ema200;
     }
+
+    // EMA 50
+    const recentPrices50 = klines.slice(-50).map((k: any) => parseFloat(k[4]));
+    let ema50 = recentPrices50[0];
+    const kEma50 = 2 / (50 + 1);
+    for (let i = 1; i < recentPrices50.length; i++) {
+        ema50 = (recentPrices50[i] - ema50) * kEma50 + ema50;
+    }
+
+    // HighestHigh(10) & LowestLow(10) - Based on last 10 completed candles
+    const last10Klines = klines.slice(-11, -1);
+    const highestHigh10 = Math.max(...last10Klines.map((k: any) => parseFloat(k[2])));
+    const lowestLow10 = Math.min(...last10Klines.map((k: any) => parseFloat(k[3])));
 
     // ATR (14)
     const trVals = [];
@@ -3955,35 +3966,35 @@ ${arabicGlossaryGuide}
     let slDistance = 0;
     let sl = 0;
 
-    const isUptrend = currentPrice > ema50;
-    const isDowntrend = currentPrice < ema50;
+    // --- Pure Trend Continuation Breakout Strategy ---
+    const isLongSetup = 
+      currentPrice > ema50 && 
+      ema50 > ema200 && 
+      rvol > 2.0 && 
+      oiRising && 
+      takerRatio > 1.15 && 
+      adx > 25 && 
+      currentPrice > highestHigh10;
 
-    // Strategy 1: Institutional Breakout (Trend Continuation)
-    if (isUptrend && rvol > 1.8 && oiRising && takerRatio > 1.15 && adx > 25) {
+    const isShortSetup = 
+      currentPrice < ema50 && 
+      ema50 < ema200 && 
+      rvol > 2.0 && 
+      oiRising && 
+      takerRatio < 0.85 && 
+      adx > 25 && 
+      currentPrice < lowestLow10;
+
+    if (isLongSetup) {
         tradeType = "LONG";
-        reason = "SOVEREIGN_BREAKOUT: Institutional Long Momentum (RVOL, OI Rising, Taker Buyers)";
-        slDistance = atr * 1.5; // ATR-based stop gives breathing room
+        reason = "SOVEREIGN_BREAKOUT: PURE TREND (EMA50>200, RVOL>2, Taker>1.15, HH10 Break)";
+        slDistance = atr * 1.5;
         sl = currentPrice - slDistance;
-    } else if (isDowntrend && rvol > 1.8 && oiRising && takerRatio < 0.85 && adx > 25) {
+    } else if (isShortSetup) {
         tradeType = "SHORT";
-        reason = "SOVEREIGN_BREAKOUT: Institutional Short Momentum (RVOL, OI Rising, Taker Sellers)";
+        reason = "SOVEREIGN_BREAKOUT: PURE TREND (EMA50<200, RVOL>2, Taker<0.85, LL10 Break)";
         slDistance = atr * 1.5;
         sl = currentPrice + slDistance;
-    }
-
-    // Strategy 2: Capitulation Reversal (Mean Reversion)
-    if (!tradeType) {
-        if (rsi < 25 && rvol > 2.5 && takerRatio > 1.1) {
-            tradeType = "LONG";
-            reason = "SOVEREIGN_REVERSAL: Capitulation Long (Oversold, Liquidation Volume, Buyers Stepping In)";
-            slDistance = atr * 2.0; // Wider stop for liquidations noise
-            sl = currentPrice - slDistance;
-        } else if (rsi > 75 && rvol > 2.5 && takerRatio < 0.9) {
-            tradeType = "SHORT";
-            reason = "SOVEREIGN_REVERSAL: Euphoria Short (Overbought, Climax Volume, Sellers Stepping In)";
-            slDistance = atr * 2.0;
-            sl = currentPrice + slDistance;
-        }
     }
 
     if (tradeType) {
@@ -3997,13 +4008,12 @@ ${arabicGlossaryGuide}
         const riskPerc = (slDistance / currentPrice) * 100;
         const tpPerc = riskPerc * 3; // Initial 3R target assumption 
 
-        let arabicReason = tradeType === "LONG" && reason.includes("BREAKOUT") ? "انفجار مؤسساتي مع الاتجاه الصاعد (سيولة وفوليوم شرائي)" : 
-                           tradeType === "SHORT" && reason.includes("BREAKOUT") ? "انهيار مؤسساتي مع الاتجاه الهابط (سيولة وفوليوم بيعي)" :
-                           tradeType === "LONG" ? "ارتداد كابيتوليشن (تشبع بيعي مع دخول حيتان)" :
-                           "تصحيح قمة (تشبع شرائي مع جني أرباح)";
+        let arabicReason = tradeType === "LONG" 
+            ? "اختراق صاعد صريح (سعر فوق المحاور + سيولة ومشتريات + كسر قمة 10 شموع)" 
+            : "كسر هابط صريح (سعر تحت المحاور + سيولة ومبيعات + كسر قاع 10 شموع)";
 
         addLog(
-          `👑 المحرك الشامل رصد فرصة استثنائية: ${tradeType} لعملة ${condition.symbol} | السبب: ${arabicReason}`,
+          `👑 المحرك الشامل رصد فرصة اختراق نقية: ${tradeType} لعملة ${condition.symbol} | السبب: ${arabicReason}`,
           "success",
         );
 
