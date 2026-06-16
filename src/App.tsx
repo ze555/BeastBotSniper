@@ -636,6 +636,35 @@ export default function App() {
                               <div>وقف الخسارة: <span className="font-mono text-slate-200 block">{parseFloat(t.sl).toFixed(4)}</span></div>
                               <div>الهدف القادم (+1R): <span className="font-mono text-slate-200 block">{parseFloat(t.tp1).toFixed(4)}</span></div>
                            </div>
+                           
+                           {t.metricsSnapshot && (
+                             <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-4 gap-2 text-[10px] text-slate-400 text-center">
+                                <div className="bg-slate-950/50 p-1.5 rounded border border-slate-800">
+                                  <span className="block text-slate-500 mb-0.5 truncate" title="Relative Volume">RVOL</span>
+                                  <span className={`font-mono block ${t.metricsSnapshot.rvol && t.metricsSnapshot.rvol > 1.5 ? 'text-amber-400 font-bold' : 'text-slate-300'}`}>
+                                      {t.metricsSnapshot.rvol ? t.metricsSnapshot.rvol.toFixed(2) + 'x' : '-'}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-950/50 p-1.5 rounded border border-slate-800">
+                                  <span className="block text-slate-500 mb-0.5 truncate" title="Average Directional Index">ADX</span>
+                                  <span className={`font-mono block ${t.metricsSnapshot.adx && t.metricsSnapshot.adx > 25 ? 'text-indigo-400 font-bold' : 'text-slate-300'}`}>
+                                      {t.metricsSnapshot.adx ? t.metricsSnapshot.adx.toFixed(1) : '-'}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-950/50 p-1.5 rounded border border-slate-800">
+                                  <span className="block text-slate-500 mb-0.5 truncate" title="Taker Buy/Sell Ratio">Taker</span>
+                                  <span className={`font-mono block ${t.metricsSnapshot.takerBuySellRatio && t.metricsSnapshot.takerBuySellRatio > 1.1 ? 'text-emerald-400 font-bold' : t.metricsSnapshot.takerBuySellRatio && t.metricsSnapshot.takerBuySellRatio < 0.9 ? 'text-rose-400 font-bold' : 'text-slate-300'}`}>
+                                      {t.metricsSnapshot.takerBuySellRatio ? t.metricsSnapshot.takerBuySellRatio.toFixed(2) : '-'}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-950/50 p-1.5 rounded border border-slate-800">
+                                  <span className="block text-slate-500 mb-0.5 truncate" title="Open Interest">OI</span>
+                                  <span className={`font-mono block ${t.metricsSnapshot.oiRising ? 'text-blue-400 font-bold flex items-center justify-center gap-1' : 'text-orange-400 font-bold flex items-center justify-center gap-1'}`}>
+                                      {t.metricsSnapshot.oiRising ? <><TrendingUp className="w-3 h-3"/>صاعد</> : <><TrendingDown className="w-3 h-3"/>هابط</>}
+                                  </span>
+                                </div>
+                             </div>
+                           )}
 
                            {/* Steel or Adaptive exit real-time status */}
                            {t.latestSteelResult ? (
@@ -952,6 +981,7 @@ export default function App() {
                         <SortableHeader label="العملة" field="symbol" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الآلية" field="source" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="النوع" field="type" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
+                        <th className="px-5 py-3 font-semibold text-slate-300 text-right">المعطيات المؤسساتية</th>
                         <SortableHeader label="دخول ريجيم" field="entryRegime" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="خروج ريجيم" field="exitRegime" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
                         <SortableHeader label="الحجم الأصلي" field="amount" sortField={histSortField} sortDir={histSortDir} onSort={handleHistSort} />
@@ -994,6 +1024,16 @@ export default function App() {
                                  ) : (
                                     t.type === 'LONG' ? <span className="text-emerald-500 font-bold">LONG</span> : <span className="text-rose-500 font-bold">SHORT</span>
                                  )}
+                              </td>
+                              <td className="px-5 py-4">
+                                 {t.metricsSnapshot ? (
+                                    <div className="flex flex-col gap-1 text-[10px] text-right items-end w-max">
+                                       <div className="flex justify-between w-full gap-2 border-b border-slate-700/50 pb-0.5"><span className="text-slate-500">RVOL:</span> <span className={`${t.metricsSnapshot.rvol && t.metricsSnapshot.rvol > 1.5 ? 'text-amber-400' : 'text-slate-300'} font-bold`}>{t.metricsSnapshot.rvol?.toFixed(2) || '-'}</span></div>
+                                       <div className="flex justify-between w-full gap-2 border-b border-slate-700/50 pb-0.5"><span className="text-slate-500">ADX:</span> <span className={`${t.metricsSnapshot.adx && t.metricsSnapshot.adx > 25 ? 'text-indigo-400' : 'text-slate-300'} font-bold`}>{t.metricsSnapshot.adx?.toFixed(1) || '-'}</span></div>
+                                       <div className="flex justify-between w-full gap-2 border-b border-slate-700/50 pb-0.5"><span className="text-slate-500">Taker:</span> <span className={`${t.metricsSnapshot.takerBuySellRatio && t.metricsSnapshot.takerBuySellRatio > 1.2 ? 'text-emerald-400' : t.metricsSnapshot.takerBuySellRatio && t.metricsSnapshot.takerBuySellRatio < 0.8 ? 'text-rose-400' : 'text-slate-300'} font-bold`}>{t.metricsSnapshot.takerBuySellRatio?.toFixed(2) || '-'}</span></div>
+                                       <div className="flex justify-between w-full gap-2 pt-0.5"><span className="text-slate-500">OI:</span> <span className={`${t.metricsSnapshot.oiRising ? 'text-blue-400' : 'text-orange-400'} font-bold`}>{t.metricsSnapshot.oiRising ? 'صاعد ↗' : 'هابط ↘'}</span></div>
+                                    </div>
+                                 ) : <span className="text-slate-600 text-[10px]">-</span>}
                               </td>
                               <td className="px-5 py-4 text-[11px] font-mono whitespace-nowrap text-amber-400/80">{t.entryRegime || 'UNKNOWN'}</td>
                               <td className="px-5 py-4 text-[11px] font-mono whitespace-nowrap text-purple-400/80">{t.exitRegime || 'UNKNOWN'}</td>

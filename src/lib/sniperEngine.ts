@@ -989,6 +989,13 @@ export class SniperEngine {
       stopMoved: false,
       partial1Taken: false,
       partial2Taken: false,
+      metricsSnapshot: {
+        adx: cond.adx,
+        rvol: cond.rvol,
+        oiChange24h: cond.oiChange24h,
+        takerBuySellRatio: cond.takerBuySellRatio,
+        oiRising: cond.slopes?.oiSlope ? cond.slopes.oiSlope > 0 : undefined
+      }
     };
 
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
@@ -1113,6 +1120,13 @@ export class SniperEngine {
       stopMoved: false,
       partial1Taken: false,
       partial2Taken: false,
+      metricsSnapshot: {
+        adx: cond.adx,
+        rvol: cond.rvol,
+        oiChange24h: cond.oiChange24h,
+        takerBuySellRatio: cond.takerBuySellRatio,
+        oiRising: cond.slopes?.oiSlope ? cond.slopes.oiSlope > 0 : undefined
+      }
     };
 
     if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
@@ -3893,7 +3907,7 @@ ${arabicGlossaryGuide}
     htfKlines: any[],
     global?: GlobalContext,
   ) {
-    if (!klines || klines.length < 30) return;
+    if (!klines || klines.length < 50) return;
 
     // Check cooldown (60 minutes per symbol)
     const lastTradeTime = this.sovereignCooldowns.get(condition.symbol) || 0;
@@ -3901,108 +3915,95 @@ ${arabicGlossaryGuide}
 
     if (this.activeTrades.has(condition.symbol)) return;
 
+    const currentPrice = condition.price;
     const takerRatio = condition.takerBuySellRatio || 1;
-    // Extreme retail behavior
-    const isRetailBuying = takerRatio > 1.35;
-    const isRetailSelling = takerRatio < 0.65;
+    const oiSlope = condition.slopes?.oiSlope || 0;
+    const oiRising = oiSlope > 0;
+    const adx = condition.adx || 25;
+    const rsi = condition.rsi || 50;
 
-    const recentPrices = klines.slice(-30).map((k: any) => parseFloat(k[4]));
-    const high = Math.max(...recentPrices);
-    const low = Math.min(...recentPrices);
-    const range = high - low;
-    const fib0236 = low + range * 0.236;
-    const fib0786 = low + range * 0.786;
-    let currentPrice = condition.price;
+    // --- Core Indicators Calculation ---
+    const recentPrices = klines.slice(-50).map((k: any) => parseFloat(k[4]));
+    
+    // EMA 50
+    let ema50 = recentPrices[0];
+    const kEma = 2 / (50 + 1);
+    for (let i = 1; i < recentPrices.length; i++) {
+        ema50 = (recentPrices[i] - ema50) * kEma + ema50;
+    }
 
-    // Check for immediate rejection (last completed candle)
+    // ATR (14)
+    const trVals = [];
+    for (let i = klines.length - 14; i < klines.length; i++) {
+        const h = parseFloat(klines[i][2]);
+        const l = parseFloat(klines[i][3]);
+        const prevC = i > 0 ? parseFloat(klines[i - 1][4]) : l;
+        trVals.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(prevC - l)));
+    }
+    const atr = trVals.reduce((a, b) => a + b, 0) / 14;
+
+    // RVOL (20)
     const lastCompleted = klines[klines.length - 2];
     if (!lastCompleted) return;
-
-    const lcOpen = parseFloat(lastCompleted[1]);
-    const lcHigh = parseFloat(lastCompleted[2]);
-    const lcLow = parseFloat(lastCompleted[3]);
-    const lcClose = parseFloat(lastCompleted[4]);
-
-    const isBearishRejection =
-      lcClose < lcOpen &&
-      lcHigh - Math.max(lcOpen, lcClose) > Math.abs(lcClose - lcOpen) * 1.5;
-    const isBullishRejection =
-      lcClose > lcOpen &&
-      Math.min(lcOpen, lcClose) - lcLow > Math.abs(lcClose - lcOpen) * 1.5;
+    const currentVol = parseFloat(lastCompleted[5]);
+    const last20Vols = klines.slice(-21, -1).map((k: any) => parseFloat(k[5]));
+    const avgVol20 = last20Vols.reduce((a, b) => a + b, 0) / 20;
+    const rvol = avgVol20 > 0 ? currentVol / avgVol20 : 1;
 
     let tradeType: "LONG" | "SHORT" | null = null;
     let reason = "";
+    let slDistance = 0;
+    let sl = 0;
 
-    if (isRetailBuying && currentPrice > fib0786 && isBearishRejection) {
-      tradeType = "SHORT";
-      reason = "SOVEREIGN: Extreme Retail Longs + Deviation Rejection -> Short";
-    } else if (
-      isRetailSelling &&
-      currentPrice < fib0236 &&
-      isBullishRejection
-    ) {
-      tradeType = "LONG";
-      reason =
-        "SOVEREIGN: Extreme Retail Shorts + Liquidity Sweep Rejection -> Long";
+    const isUptrend = currentPrice > ema50;
+    const isDowntrend = currentPrice < ema50;
+
+    // Strategy 1: Institutional Breakout (Trend Continuation)
+    if (isUptrend && rvol > 1.8 && oiRising && takerRatio > 1.15 && adx > 25) {
+        tradeType = "LONG";
+        reason = "SOVEREIGN_BREAKOUT: Institutional Long Momentum (RVOL, OI Rising, Taker Buyers)";
+        slDistance = atr * 1.5; // ATR-based stop gives breathing room
+        sl = currentPrice - slDistance;
+    } else if (isDowntrend && rvol > 1.8 && oiRising && takerRatio < 0.85 && adx > 25) {
+        tradeType = "SHORT";
+        reason = "SOVEREIGN_BREAKOUT: Institutional Short Momentum (RVOL, OI Rising, Taker Sellers)";
+        slDistance = atr * 1.5;
+        sl = currentPrice + slDistance;
+    }
+
+    // Strategy 2: Capitulation Reversal (Mean Reversion)
+    if (!tradeType) {
+        if (rsi < 25 && rvol > 2.5 && takerRatio > 1.1) {
+            tradeType = "LONG";
+            reason = "SOVEREIGN_REVERSAL: Capitulation Long (Oversold, Liquidation Volume, Buyers Stepping In)";
+            slDistance = atr * 2.0; // Wider stop for liquidations noise
+            sl = currentPrice - slDistance;
+        } else if (rsi > 75 && rvol > 2.5 && takerRatio < 0.9) {
+            tradeType = "SHORT";
+            reason = "SOVEREIGN_REVERSAL: Euphoria Short (Overbought, Climax Volume, Sellers Stepping In)";
+            slDistance = atr * 2.0;
+            sl = currentPrice + slDistance;
+        }
     }
 
     if (tradeType) {
-      // Apply filters for Trend Expansion to prevent counter-trend trading
-      const adx = condition.adx || 25;
-      const oiSlope = condition.slopes?.oiSlope || 0;
-      const oiRising = oiSlope > 0;
-      // Calculate RVOL
-      const last20Vols = klines.slice(-20).map((k: any) => parseFloat(k[5]));
-      const avgVol20 = last20Vols.reduce((a, b) => a + b, 0) / 20;
-      const currentVol = parseFloat(lastCompleted[5]);
-      const rvol = avgVol20 > 0 ? currentVol / avgVol20 : 1;
-
-      if (tradeType === "SHORT") {
-        if (oiRising && rvol > 1.8 && adx > 25) {
-          addLog(`👑 المحرك الشامل تجنب صفقة SHORT لعملة ${condition.symbol} لأن هناك Trend Expansion حقيقي (OI صاعد + RVOL عالي + ADX مرتفع).`, 'warn');
-          tradeType = null;
+        // Enforce minimum stop loss distance to avoid getting stopped out by noise (e.g., at least 0.4%)
+        const minSlDistance = currentPrice * 0.004; 
+        if (slDistance < minSlDistance) {
+            slDistance = minSlDistance;
+            sl = tradeType === "LONG" ? currentPrice - slDistance : currentPrice + slDistance;
         }
-      } else if (tradeType === "LONG") {
-        if (oiRising && rvol > 1.8 && adx > 25 && takerRatio < 0.7) {
-          addLog(`👑 المحرك الشامل تجنب صفقة LONG لعملة ${condition.symbol} لأن هذا انهيار حقيقي (OI صاعد + RVOL عالي + ADX مرتفع + Taker منخفض).`, 'warn');
-          tradeType = null;
-        }
-      }
-    }
 
-    if (tradeType) {
-      const lastKlines = klines.slice(-3);
-      const recentHigh = Math.max(
-        ...lastKlines.map((k: any) => parseFloat(k[2])),
-      );
-      const recentLow = Math.min(
-        ...lastKlines.map((k: any) => parseFloat(k[3])),
-      );
+        const riskPerc = (slDistance / currentPrice) * 100;
+        const tpPerc = riskPerc * 3; // Initial 3R target assumption 
 
-      let sl = 0;
-      let tp = 0;
-
-      if (tradeType === "LONG") {
-        sl = recentLow * 0.998;
-        const risk = currentPrice - sl;
-        tp = currentPrice + risk * 3;
-      } else {
-        sl = recentHigh * 1.002;
-        const risk = sl - currentPrice;
-        tp = currentPrice - risk * 3;
-      }
-
-      const riskPerc = (Math.abs(currentPrice - sl) / currentPrice) * 100;
-      const tpPerc = (Math.abs(currentPrice - tp) / currentPrice) * 100;
-
-      if (riskPerc > 0.05 && riskPerc < 5.0) {
-        let arabicReason =
-          tradeType === "LONG"
-            ? "تكدس عقود بيع الأفراد مع رفض سعري (Liquidity Sweep)"
-            : "تكدس عقود شراء الأفراد مع رفض سعري (Deviation Rejection)";
+        let arabicReason = tradeType === "LONG" && reason.includes("BREAKOUT") ? "انفجار مؤسساتي مع الاتجاه الصاعد (سيولة وفوليوم شرائي)" : 
+                           tradeType === "SHORT" && reason.includes("BREAKOUT") ? "انهيار مؤسساتي مع الاتجاه الهابط (سيولة وفوليوم بيعي)" :
+                           tradeType === "LONG" ? "ارتداد كابيتوليشن (تشبع بيعي مع دخول حيتان)" :
+                           "تصحيح قمة (تشبع شرائي مع جني أرباح)";
 
         addLog(
-          `👑 المحرك الشامل رصد فرصة ${tradeType} لعملة ${condition.symbol} | السبب: ${arabicReason}`,
+          `👑 المحرك الشامل رصد فرصة استثنائية: ${tradeType} لعملة ${condition.symbol} | السبب: ${arabicReason}`,
           "success",
         );
 
@@ -4010,7 +4011,6 @@ ${arabicGlossaryGuide}
         this.sovereignCooldowns.set(condition.symbol, Date.now());
 
         await this.executeQuantumTrade(condition, reason, tpPerc, riskPerc);
-      }
     }
   }
 
@@ -4160,11 +4160,26 @@ ${arabicGlossaryGuide}
           }
       }
 
+      // --- Time-Based Invalidation (Cut Slow Breakouts / Fake Reversals) ---
+      const minutesOpen = (Date.now() - trade.entryTime) / (1000 * 60);
+      
+      if (minutesOpen > 45 && currentR < 0.8 && !trade.isBreakeven) {
+          // If a sovereign trade (which relies on momentum and volatility) hasn't hit at least 0.8R in 45 minutes,
+          // the momentum is likely dead or it was a fakeout. Close it aggressively at market or at minimal loss/profit.
+          const isProfit = currentPnlVal > 0;
+          addLog(
+              `👑 المحرك الشامل رصد خمول زمني لصفقة ${trade.symbol} (${minutesOpen.toFixed(0)} دقيقة دون تحقيق زخم). يتم الخروج لحماية رأس المال (${isProfit ? 'بربح بسيط' : 'بأقل خسارة'}).`,
+              isProfit ? 'success' : 'warn'
+          );
+          await this.forceCloseTrade(trade, currentPrice, "SOVEREIGN_TIME_DECAY_EXIT");
+          continue;
+      }
+
       // --- Dynamic Trailing Logic ---
       let trailingFactor = 0;
-      if (currentR >= 1.0 && currentR < 2.0) trailingFactor = 1.0;
-      else if (currentR >= 2.0 && currentR < 4.0) trailingFactor = 0.75;
-      else if (currentR >= 4.0) trailingFactor = 0.5;
+      if (currentR >= 1.0 && currentR < 2.0) trailingFactor = 0.9; // Tightened from 1.0 to secure more open profit
+      else if (currentR >= 2.0 && currentR < 4.0) trailingFactor = 0.6; // Tightened from 0.75
+      else if (currentR >= 4.0) trailingFactor = 0.4; // Tightened from 0.5
 
       if (trailingFactor > 0) {
          const trailAmount = riskAmount * trailingFactor;

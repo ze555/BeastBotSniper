@@ -128,6 +128,13 @@ export interface Trade {
   partial1Taken?: boolean;
   partial2Taken?: boolean;
   takenPartials?: number[];
+  metricsSnapshot?: {
+    adx?: number;
+    rvol?: number;
+    oiChange24h?: number;
+    takerBuySellRatio?: number;
+    oiRising?: boolean;
+  };
 }
 
 export interface MarketCondition {
