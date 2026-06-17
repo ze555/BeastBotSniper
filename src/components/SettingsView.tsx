@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   Settings, Zap, ShieldCheck, Wallet, RefreshCw, BrainCircuit, ArrowUpRight, Cpu, Key, Trash2,
   ChevronDown, ChevronUp, Gauge, History, BarChart3, Activity, Flame, Shield, Skull,
-  Waves, ShieldAlert, AlertTriangle, Crown, Eye, Swords, Lock
+  Waves, ShieldAlert, AlertTriangle, Crown, Eye, Swords, Lock, Crosshair, Target
 } from 'lucide-react';
 
 export function SettingsView({ 
