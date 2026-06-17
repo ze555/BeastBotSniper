@@ -4468,12 +4468,13 @@ ${arabicGlossaryGuide}
     const vol1 = vols[vols.length - 2];
     const avg_vol_20 = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
     
-    const rvol_avg5 = vols.slice(-5).reduce((a, b) => a + b, 0) / 5 / avg_vol_20;
-    const rvol_now = vol0 / avg_vol_20;
+    // Check for quietness BEFORE the current breakout candle
+    const rvol_avg5_past = vols.slice(-6, -1).reduce((a, b) => a + b, 0) / 5 / avg_vol_20;
+    const rvol_now = (avg_vol_20 > 0) ? (vol0 / avg_vol_20) : 1;
 
-    const is_quiet = rvol_avg5 < 0.75;
-    const is_igniting = rvol_now > 1.6;
-    const vol_accelerating = vol0 > vol1 * 1.3;
+    const is_quiet = rvol_avg5_past < 0.85; // Relaxed to allow slight pre-surge
+    const is_igniting = rvol_now > 1.25; // Relaxed from 1.6 to capture earlier stages
+    const vol_accelerating = vol0 > vol1 * 1.15; // Relaxed from 1.3
 
     const taker_ratio = condition.takerBuySellRatio || 1;
     const oi_slope = condition.slopes?.oiSlope || 0;
@@ -4541,7 +4542,7 @@ ${arabicGlossaryGuide}
     const isBtcLong = btc.bias === "BULL";
     const isHtfLong = ["STRONG_BULL", "WEAK_BULL"].includes(htf_trend);
     const isMicroLong = bull_stack === true && near_resistance === false;
-    const isVolLong = is_quiet === true && is_igniting === true && vol_accelerating === true && taker_ratio > 1.10 && oi_rising === true && funding < 0.01;
+    const isVolLong = is_quiet === true && is_igniting === true && vol_accelerating === true && taker_ratio > 1.02 && oi_rising === true && funding < 0.03;
     const isCandleLong = is_strong_bull_candle === true && is_bull_trap === false;
     const isFbLong = false_bull_breaks < 2;
     const isMomLong = adx_val > adxMin && adx_val < adxMax && rsi_bull_zone === true;
@@ -4549,7 +4550,7 @@ ${arabicGlossaryGuide}
     const isBtcShort = btc.bias === "BEAR";
     const isHtfShort = ["STRONG_BEAR", "WEAK_BEAR"].includes(htf_trend);
     const isMicroShort = bear_stack === true && near_support === false;
-    const isVolShort = is_quiet === true && is_igniting === true && vol_accelerating === true && taker_ratio < 0.90 && oi_rising === true && funding > -0.01;
+    const isVolShort = is_quiet === true && is_igniting === true && vol_accelerating === true && taker_ratio < 0.98 && oi_rising === true && funding > -0.03;
     const isCandleShort = is_strong_bear_candle === true && is_bear_trap === false;
     const isFbShort = false_bear_breaks < 2;
     const isMomShort = adx_val > adxMin && adx_val < adxMax && rsi_bear_zone === true;
