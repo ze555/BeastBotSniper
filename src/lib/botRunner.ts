@@ -1334,7 +1334,7 @@ export async function runTradeLoop() {
                     takerBuySellRatio: takerRatio,
                     atr: 0,
                     slopes: {
-                      oiSlope: 0,
+                      oiSlope: oiChangeVal,
                       cvdSlope: takerRatio - 1.0,
                       spotCvdSlope: takerRatio - 1.0,
                       volumeSlope: calculateNormalizedRegressionSlope(
@@ -1403,7 +1403,7 @@ export async function runTradeLoop() {
                   ema50: currentEma50,
                   isAdxRising: isAdxRising,
                   slopes: {
-                    oiSlope: 0,
+                    oiSlope: oiChangeVal,
                     cvdSlope: takerRatio - 1.0,
                     spotCvdSlope: takerRatio - 1.0,
                     volumeSlope: calculateNormalizedRegressionSlope(
@@ -1523,7 +1523,7 @@ export async function runTradeLoop() {
                   ema50: currentEma50,
                   isAdxRising: isAdxRising,
                   slopes: {
-                    oiSlope: 0,
+                    oiSlope: oiChangeVal,
                     cvdSlope: takerRatio - 1.0,
                     spotCvdSlope: takerRatio - 1.0,
                     volumeSlope: 0,
@@ -1612,7 +1612,7 @@ export async function runTradeLoop() {
                   takerBuySellRatio: takerRatio,
                   atr: 0,
                   slopes: {
-                    oiSlope: 0,
+                    oiSlope: oiChangeVal,
                     cvdSlope: takerRatio - 1.0,
                     spotCvdSlope: takerRatio - 1.0,
                     volumeSlope: calculateNormalizedRegressionSlope(
