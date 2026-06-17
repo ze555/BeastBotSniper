@@ -4393,6 +4393,8 @@ ${arabicGlossaryGuide}
     htfKlines: any[],
     global?: GlobalContext,
   ) {
+    this.sonnetStats.totalEvaluations++;
+
     if (!klines || klines.length < 200) return;
     if (!htfKlines || htfKlines.length < 200) return;
 
@@ -4535,8 +4537,6 @@ ${arabicGlossaryGuide}
     
     const adxMin = 22;
     const adxMax = 55;
-
-    this.sonnetStats.totalEvaluations++;
 
     const isBtcLong = btc.bias === "BULL";
     const isHtfLong = ["STRONG_BULL", "WEAK_BULL"].includes(htf_trend);
