@@ -4,6 +4,7 @@ import { SettingsView } from './components/SettingsView';
 import { ReplaySimulatorView } from './components/ReplaySimulatorView';
 import { TawleefaBuilder } from './components/TawleefaBuilder';
 import { ReportsDashboard } from './components/ReportsDashboard';
+import { SonnetDashboard } from './components/SonnetDashboard';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -426,7 +427,8 @@ export default function App() {
           </div>
           <nav className="flex flex-col gap-2 px-2 md:px-4">
             <NavItem icon={<Activity />} label="لوحة التحكم ومراقبة السوق" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-            <NavItem icon={<BarChart2 className="text-indigo-400" />} label="تقارير وإحصاءات المحرك الشامل" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+            <NavItem icon={<BarChart2 className="text-indigo-400" />} label="تقارير المحرك الشامل" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+            <NavItem icon={<BarChart2 className="text-red-400" />} label="تقارير المحرك سونييت (Sonnet v3)" active={activeTab === 'sonnet_reports'} onClick={() => setActiveTab('sonnet_reports')} />
             <NavItem icon={<Cpu className="text-emerald-400" />} label="شاشة التوليفات الذكية (Flow Builder)" active={activeTab === 'flows'} onClick={() => setActiveTab('flows')} />
             <NavItem icon={<Sliders className="text-amber-400" />} label="محاكي السيولة والباكتست" active={activeTab === 'replay'} onClick={() => setActiveTab('replay')} />
             <NavItem icon={<Zap className="text-amber-400" />} label="فحص الخروج التكيفي (Cascade Log)" active={activeTab === 'adaptiveLogs'} onClick={() => setActiveTab('adaptiveLogs')} />
@@ -1224,6 +1226,10 @@ export default function App() {
 
           {activeTab === 'reports' && (
              <ReportsDashboard />
+          )}
+
+          {activeTab === 'sonnet_reports' && (
+             <SonnetDashboard />
           )}
 
           {activeTab === 'settings' && (

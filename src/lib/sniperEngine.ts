@@ -3917,6 +3917,23 @@ ${arabicGlossaryGuide}
   // Cooldown map for sovereign engine
   private sovereignCooldowns: Map<string, number> = new Map();
 
+  public sonnetStats = {
+    totalEvaluations: 0,
+    totalLongScanned: 0,
+    totalShortScanned: 0,
+    acceptedLongs: 0,
+    acceptedShorts: 0,
+    rules: {
+      btc_guard: { passed: 0, failed: 0 },
+      htf_trend: { passed: 0, failed: 0 },
+      microstructure: { passed: 0, failed: 0 },
+      volume_dna: { passed: 0, failed: 0 },
+      candle_quality: { passed: 0, failed: 0 },
+      false_breakout: { passed: 0, failed: 0 },
+      momentum: { passed: 0, failed: 0 },
+    }
+  };
+
   public sovereignStats = {
     totalEvaluations: 0,
     totalLongScanned: 0,
@@ -4519,42 +4536,55 @@ ${arabicGlossaryGuide}
     const adxMin = 22;
     const adxMax = 55;
 
-    if (
-        btc.bias === "BULL" &&
-        ["STRONG_BULL", "WEAK_BULL"].includes(htf_trend) &&
-        bull_stack === true &&
-        near_resistance === false &&
-        is_quiet === true &&
-        is_igniting === true &&
-        vol_accelerating === true &&
-        taker_ratio > 1.10 &&
-        oi_rising === true &&
-        funding < 0.01 &&
-        is_strong_bull_candle === true &&
-        is_bull_trap === false &&
-        false_bull_breaks < 2 &&
-        adx_val > adxMin && adx_val < adxMax &&
-        rsi_bull_zone === true
-    ) {
+    this.sonnetStats.totalEvaluations++;
+
+    const isBtcLong = btc.bias === "BULL";
+    const isHtfLong = ["STRONG_BULL", "WEAK_BULL"].includes(htf_trend);
+    const isMicroLong = bull_stack === true && near_resistance === false;
+    const isVolLong = is_quiet === true && is_igniting === true && vol_accelerating === true && taker_ratio > 1.10 && oi_rising === true && funding < 0.01;
+    const isCandleLong = is_strong_bull_candle === true && is_bull_trap === false;
+    const isFbLong = false_bull_breaks < 2;
+    const isMomLong = adx_val > adxMin && adx_val < adxMax && rsi_bull_zone === true;
+
+    const isBtcShort = btc.bias === "BEAR";
+    const isHtfShort = ["STRONG_BEAR", "WEAK_BEAR"].includes(htf_trend);
+    const isMicroShort = bear_stack === true && near_support === false;
+    const isVolShort = is_quiet === true && is_igniting === true && vol_accelerating === true && taker_ratio < 0.90 && oi_rising === true && funding > -0.01;
+    const isCandleShort = is_strong_bear_candle === true && is_bear_trap === false;
+    const isFbShort = false_bear_breaks < 2;
+    const isMomShort = adx_val > adxMin && adx_val < adxMax && rsi_bear_zone === true;
+
+    // Since these checks depend on HTF trend, we classify scanned based on HTF alignment
+    if (isHtfLong) {
+      this.sonnetStats.totalLongScanned++;
+      isBtcLong ? this.sonnetStats.rules.btc_guard.passed++ : this.sonnetStats.rules.btc_guard.failed++;
+      this.sonnetStats.rules.htf_trend.passed++; // As we're in this block
+      isMicroLong ? this.sonnetStats.rules.microstructure.passed++ : this.sonnetStats.rules.microstructure.failed++;
+      isVolLong ? this.sonnetStats.rules.volume_dna.passed++ : this.sonnetStats.rules.volume_dna.failed++;
+      isCandleLong ? this.sonnetStats.rules.candle_quality.passed++ : this.sonnetStats.rules.candle_quality.failed++;
+      isFbLong ? this.sonnetStats.rules.false_breakout.passed++ : this.sonnetStats.rules.false_breakout.failed++;
+      isMomLong ? this.sonnetStats.rules.momentum.passed++ : this.sonnetStats.rules.momentum.failed++;
+
+      if (isBtcLong && isMicroLong && isVolLong && isCandleLong && isFbLong && isMomLong) {
         signal = "LONG";
-    } else if (
-        btc.bias === "BEAR" &&
-        ["STRONG_BEAR", "WEAK_BEAR"].includes(htf_trend) &&
-        bear_stack === true &&
-        near_support === false &&
-        is_quiet === true &&
-        is_igniting === true &&
-        vol_accelerating === true &&
-        taker_ratio < 0.90 &&
-        oi_rising === true &&
-        funding > -0.01 &&
-        is_strong_bear_candle === true &&
-        is_bear_trap === false &&
-        false_bear_breaks < 2 &&
-        adx_val > adxMin && adx_val < adxMax &&
-        rsi_bear_zone === true
-    ) {
+        this.sonnetStats.acceptedLongs++;
+      }
+    } else if (isHtfShort) {
+      this.sonnetStats.totalShortScanned++;
+      isBtcShort ? this.sonnetStats.rules.btc_guard.passed++ : this.sonnetStats.rules.btc_guard.failed++;
+      this.sonnetStats.rules.htf_trend.passed++;
+      isMicroShort ? this.sonnetStats.rules.microstructure.passed++ : this.sonnetStats.rules.microstructure.failed++;
+      isVolShort ? this.sonnetStats.rules.volume_dna.passed++ : this.sonnetStats.rules.volume_dna.failed++;
+      isCandleShort ? this.sonnetStats.rules.candle_quality.passed++ : this.sonnetStats.rules.candle_quality.failed++;
+      isFbShort ? this.sonnetStats.rules.false_breakout.passed++ : this.sonnetStats.rules.false_breakout.failed++;
+      isMomShort ? this.sonnetStats.rules.momentum.passed++ : this.sonnetStats.rules.momentum.failed++;
+
+      if (isBtcShort && isMicroShort && isVolShort && isCandleShort && isFbShort && isMomShort) {
         signal = "SHORT";
+        this.sonnetStats.acceptedShorts++;
+      }
+    } else {
+      this.sonnetStats.rules.htf_trend.failed++;
     }
 
     if (!signal) return;

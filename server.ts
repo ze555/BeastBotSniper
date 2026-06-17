@@ -54,6 +54,10 @@ async function startServer() {
     res.json(sniper.sovereignStats);
   });
 
+  app.get("/api/sonnet/stats", (req, res) => {
+    res.json(sniper.sonnetStats);
+  });
+
   app.post("/api/gemini/analyze", async (req, res) => {
     try {
       const { GoogleGenAI } = await import("@google/genai");

@@ -238,6 +238,23 @@ export interface SovereignRuleStat {
   failed: number;
 }
 
+export interface SonnetStats {
+  totalEvaluations: number;
+  totalLongScanned: number;
+  totalShortScanned: number;
+  acceptedLongs: number;
+  acceptedShorts: number;
+  rules: {
+    btc_guard: SovereignRuleStat;
+    htf_trend: SovereignRuleStat;
+    microstructure: SovereignRuleStat;
+    volume_dna: SovereignRuleStat;
+    candle_quality: SovereignRuleStat;
+    false_breakout: SovereignRuleStat;
+    momentum: SovereignRuleStat;
+  }
+}
+
 export interface SovereignStats {
   totalEvaluations: number;
   totalLongScanned: number;
