@@ -61,6 +61,7 @@ export class SniperEngine {
     creativeUseAdaptiveExit: false,
     disableConsecutiveLoss: true,
     useSovereignEngine: false,
+    useSonnetEngine: false,
     useKineticEngine: true,
     beastMode: false,
     beastConfirmWithSMC: false,
@@ -319,6 +320,7 @@ export class SniperEngine {
             fusionMinScore: dbSettings.fusionMinScore ?? 70,
             exitUseRsiCheck: dbSettings.exitUseRsiCheck !== 0,
             useSovereignEngine: dbSettings.useSovereignEngine === 1,
+            useSonnetEngine: dbSettings.useSonnetEngine === 1,
           };
         }
         console.log("[SNIPER] Loaded settings from database", this.settings);
@@ -687,6 +689,12 @@ export class SniperEngine {
     htfKlines: any[],
     global?: GlobalContext,
   ): Promise<void> {
+    // 📚 Sonnet Engine Override
+    if (this.settings.useSonnetEngine) {
+      await this.evaluateSonnetEntry(condition, klines, htfKlines, global);
+      return; 
+    }
+
     // 👑 Sovereign Engine Override
     if (this.settings.useSovereignEngine) {
       await this.evaluateSovereignEntry(condition, klines, htfKlines, global);
@@ -1222,6 +1230,12 @@ export class SniperEngine {
 
     trade.pnl = currentPnl;
     trade.pnlPerc = roePerc;
+
+    // 📚 Sonnet Engine Override
+    if (this.settings.useSonnetEngine) {
+      await this.manageSonnetTrades([trade], currentPrice);
+      return;
+    }
 
     // 👑 Sovereign Engine Override
     if (this.settings.useSovereignEngine) {
@@ -3250,6 +3264,7 @@ export class SniperEngine {
   }
 
   public async smartExit(symbol: string, currentPrice: number, reason: string) {
+    if (this.settings.useSonnetEngine) return;
     if (this.settings.useSovereignEngine) {
       return; // Handled strictly by Sovereign
     }
@@ -3276,6 +3291,7 @@ export class SniperEngine {
   }
 
   public async wiseExit(symbol: string, currentPrice: number, klines: any[]) {
+    if (this.settings.useSonnetEngine) return;
     if (this.settings.useSovereignEngine) {
       return; // Handled strictly by Sovereign
     }
@@ -4297,6 +4313,373 @@ ${arabicGlossaryGuide}
         continue;
       }
     }
+  }
+  // ════════════════════════════════════════════════════════════
+  // 📚 THE SONNET ENGINE (APEX SNIPER v3)
+  // ════════════════════════════════════════════════════════════
+  private btcGuardCache: { timestamp: number, bias: string, blocked: boolean } | null = null;
+  private sonnetCooldowns: Map<string, number> = new Map();
+
+  private async fetchBtcGuard(): Promise<{bias: string, blocked: boolean}> {
+      const now = Date.now();
+      if (this.btcGuardCache && now - this.btcGuardCache.timestamp < 60000) {
+          return this.btcGuardCache;
+      }
+
+      try {
+          const { default: axios } = await import("axios");
+          const BINANCE_FAPI = "https://fapi.binance.com";
+          
+          const res15 = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=BTCUSDT&interval=15m&limit=21`);
+          const klines15 = res15.data;
+          
+          if (!klines15 || klines15.length < 21) throw new Error("Not enough data");
+          const lastK = klines15[klines15.length - 1];
+          const btcOpen = parseFloat(lastK[1]);
+          const btcClose = parseFloat(lastK[4]);
+          const btcVol = parseFloat(lastK[5]);
+          
+          const sumVol = klines15.slice(0, 20).reduce((acc: number, k: any) => acc + parseFloat(k[5]), 0);
+          const avgVol20 = sumVol / 20;
+          
+          const btcChangePct = (btcClose - btcOpen) / btcOpen;
+          const btcRvolNow = avgVol20 > 0 ? btcVol / avgVol20 : 1;
+
+          let blocked = false;
+          // LAYER 0: BTC CORRELATION GUARD
+          if (Math.abs(btcChangePct) > 0.008 && btcRvolNow > 2.5) {
+              blocked = true;
+          }
+
+          const res4 = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines?symbol=BTCUSDT&interval=4h&limit=200`);
+          const klines4 = res4.data;
+          
+          let ema50 = parseFloat(klines4[0][4]);
+          const k50 = 2 / 51;
+          for (let i = 1; i < klines4.length; i++) ema50 = (parseFloat(klines4[i][4]) - ema50) * k50 + ema50;
+
+          let ema200 = parseFloat(klines4[0][4]);
+          const k200 = 2 / 201;
+          for (let i = 1; i < klines4.length; i++) ema200 = (parseFloat(klines4[i][4]) - ema200) * k200 + ema200;
+
+          const bias = ema50 > ema200 ? "BULL" : "BEAR";
+          this.btcGuardCache = { timestamp: now, bias, blocked };
+          return { bias, blocked };
+      } catch (e) {
+          return { bias: "NEUTRAL", blocked: false };
+      }
+  }
+
+  private async evaluateSonnetEntry(
+    condition: MarketCondition,
+    klines: any[],
+    htfKlines: any[],
+    global?: GlobalContext,
+  ) {
+    if (!klines || klines.length < 200) return;
+    if (!htfKlines || htfKlines.length < 200) return;
+
+    // Cooldown 15m
+    const lastTradeTime = this.sonnetCooldowns.get(condition.symbol) || 0;
+    if (Date.now() - lastTradeTime < 15 * 60 * 1000) return;
+
+    // Max trades limit
+    const openTrades = Array.from(this.activeTrades.values());
+    if (openTrades.length >= 2) return; // MAX_OPEN_TRADES = 2
+    if (this.activeTrades.has(condition.symbol)) return;
+
+    // LAYER 0: BTC GUARD
+    const btc = await this.fetchBtcGuard();
+    if (btc.blocked) return;
+
+    // Helper functions
+    const calcEma = (period: number, data: number[]) => {
+      let ema = data[0];
+      const k = 2 / (period + 1);
+      for (let i=1; i<data.length; i++) ema = (data[i] - ema) * k + ema;
+      return ema;
+    };
+
+    const closes = klines.map((k: any) => parseFloat(k[4]));
+    const htfCloses = htfKlines.map((k: any) => parseFloat(k[4]));
+
+    // LAYER 1: HTF TREND ANALYSIS (4H)
+    const ema50_4h = calcEma(50, htfCloses.slice(-50));
+    const ema200_4h = calcEma(200, htfCloses.slice(-200));
+    const adx_4h = condition.htfAdx || 0; // Using context HTF ADX if passed, else fallback
+    
+    // Simplistic HH/LL check on HTF
+    const htfLast5Highs = htfKlines.slice(-5).map(k => parseFloat(k[2]));
+    const htfLast5Lows = htfKlines.slice(-5).map(k => parseFloat(k[3]));
+    const HH = htfLast5Highs[4] > htfLast5Highs[3] && htfLast5Highs[3] > htfLast5Highs[2];
+    const HL = htfLast5Lows[4] > htfLast5Lows[3] && htfLast5Lows[3] > htfLast5Lows[2];
+    const LH = htfLast5Highs[4] < htfLast5Highs[3] && htfLast5Highs[3] < htfLast5Highs[2];
+    const LL = htfLast5Lows[4] < htfLast5Lows[3] && htfLast5Lows[3] < htfLast5Lows[2];
+
+    let htf_trend = "NEUTRAL";
+    if (ema50_4h > ema200_4h && HH && HL && adx_4h > 20) htf_trend = "STRONG_BULL";
+    else if (ema50_4h > ema200_4h) htf_trend = "WEAK_BULL";
+    else if (ema50_4h < ema200_4h && LH && LL && adx_4h > 20) htf_trend = "STRONG_BEAR";
+    else if (ema50_4h < ema200_4h) htf_trend = "WEAK_BEAR";
+
+    if (htf_trend === "NEUTRAL") return;
+
+    // LAYER 2: MARKET MICROSTRUCTURE (15m)
+    const ema21 = calcEma(21, closes.slice(-21));
+    const ema50 = calcEma(50, closes.slice(-50));
+    const ema200 = calcEma(200, closes.slice(-200));
+
+    const close0 = closes[closes.length - 1];
+    const bull_stack = close0 > ema21 && ema21 > ema50 && ema50 > ema200;
+    const bear_stack = close0 < ema21 && ema21 < ema50 && ema50 < ema200;
+
+    const highs10 = klines.slice(-10).map((k: any) => parseFloat(k[2]));
+    const lows10 = klines.slice(-10).map((k: any) => parseFloat(k[3]));
+    const resistance = Math.max(...highs10);
+    const support = Math.min(...lows10);
+    
+    const range_size = resistance - support;
+    const range_pos = range_size > 0 ? (close0 - support) / range_size : 0.5;
+    const near_resistance = range_pos > 0.75;
+    const near_support = range_pos < 0.25;
+
+    // LAYER 3: VOLUME & ORDER FLOW DNA
+    const vols = klines.map((k: any) => parseFloat(k[5]));
+    const vol0 = vols[vols.length - 1];
+    const vol1 = vols[vols.length - 2];
+    const avg_vol_20 = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    
+    const rvol_avg5 = vols.slice(-5).reduce((a, b) => a + b, 0) / 5 / avg_vol_20;
+    const rvol_now = vol0 / avg_vol_20;
+
+    const is_quiet = rvol_avg5 < 0.75;
+    const is_igniting = rvol_now > 1.6;
+    const vol_accelerating = vol0 > vol1 * 1.3;
+
+    const taker_ratio = condition.takerBuySellRatio || 1;
+    const oi_slope = condition.slopes?.oiSlope || 0;
+    const oi_rising = oi_slope > 0.002;
+    const funding = condition.fundingRate || 0;
+
+    // LAYER 4: CANDLE QUALITY FILTER
+    const lastK = klines[klines.length - 1];
+    const open0 = parseFloat(lastK[1]);
+    const high0 = parseFloat(lastK[2]);
+    const low0 = parseFloat(lastK[3]);
+    
+    const body = Math.abs(close0 - open0);
+    const full_range = high0 - low0;
+    if (full_range === 0) return;
+    
+    const body_pct = body / full_range;
+    const upper_wick = high0 - Math.max(open0, close0);
+    const lower_wick = Math.min(open0, close0) - low0;
+
+    const is_strong_bull_candle = close0 > open0 && body_pct > 0.65 && upper_wick < body * 0.3 && close0 >= high0 * 0.998;
+    const is_strong_bear_candle = close0 < open0 && body_pct > 0.65 && lower_wick < body * 0.3 && close0 <= low0 * 1.002;
+
+    const is_bull_trap = high0 > resistance && close0 < resistance && upper_wick > body * 1.5;
+    const is_bear_trap = low0 < support && close0 > support && lower_wick > body * 1.5;
+
+    // LAYER 5: FALSE BREAKOUT MEMORY
+    let false_bull_breaks = 0;
+    let false_bear_breaks = 0;
+    for (let i = Math.max(0, klines.length - 15); i < klines.length; i++) {
+        const k = klines[i];
+        const h = parseFloat(k[2]);
+        const l = parseFloat(k[3]);
+        const c = parseFloat(k[4]);
+        if (h > resistance && c < resistance) false_bull_breaks++;
+        if (l < support && c > support) false_bear_breaks++;
+    }
+
+    // LAYER 6: MOMENTUM CONVERGENCE
+    const adx_val = condition.adx || 25;
+    let rsi_bull_zone = false;
+    let rsi_bear_zone = false;
+    if (condition.rsi) {
+      rsi_bull_zone = condition.rsi > 50 && condition.rsi < 75;
+      rsi_bear_zone = condition.rsi < 50 && condition.rsi > 25;
+    }
+
+    // ATR 14
+    let atr = 0;
+    const trVals = [];
+    for (let i = klines.length - 14; i < klines.length; i++) {
+        const h = parseFloat(klines[i][2]);
+        const l = parseFloat(klines[i][3]);
+        const prevC = i > 0 ? parseFloat(klines[i - 1][4]) : l;
+        trVals.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(prevC - l)));
+    }
+    atr = trVals.reduce((a, b) => a + b, 0) / 14;
+
+    // MASTER DECISION ENGINE
+    let signal: 'LONG' | 'SHORT' | null = null;
+    
+    const adxMin = 22;
+    const adxMax = 55;
+
+    if (
+        btc.bias === "BULL" &&
+        ["STRONG_BULL", "WEAK_BULL"].includes(htf_trend) &&
+        bull_stack === true &&
+        near_resistance === false &&
+        is_quiet === true &&
+        is_igniting === true &&
+        vol_accelerating === true &&
+        taker_ratio > 1.10 &&
+        oi_rising === true &&
+        funding < 0.01 &&
+        is_strong_bull_candle === true &&
+        is_bull_trap === false &&
+        false_bull_breaks < 2 &&
+        adx_val > adxMin && adx_val < adxMax &&
+        rsi_bull_zone === true
+    ) {
+        signal = "LONG";
+    } else if (
+        btc.bias === "BEAR" &&
+        ["STRONG_BEAR", "WEAK_BEAR"].includes(htf_trend) &&
+        bear_stack === true &&
+        near_support === false &&
+        is_quiet === true &&
+        is_igniting === true &&
+        vol_accelerating === true &&
+        taker_ratio < 0.90 &&
+        oi_rising === true &&
+        funding > -0.01 &&
+        is_strong_bear_candle === true &&
+        is_bear_trap === false &&
+        false_bear_breaks < 2 &&
+        adx_val > adxMin && adx_val < adxMax &&
+        rsi_bear_zone === true
+    ) {
+        signal = "SHORT";
+    }
+
+    if (!signal) return;
+
+    // EXECUTION ENGINE
+    const entry = close0;
+    const atr_sl_mult = 1.3;
+    const atr_tp1_mult = 1.8;
+    const atr_tp2_mult = 3.5;
+
+    let sl = signal === "LONG" ? entry - (atr * atr_sl_mult) : entry + (atr * atr_sl_mult);
+    let tp1 = signal === "LONG" ? entry + (atr * atr_tp1_mult) : entry - (atr * atr_tp1_mult);
+    let tp2 = signal === "LONG" ? entry + (atr * atr_tp2_mult) : entry - (atr * atr_tp2_mult);
+
+    const sl_distance = Math.abs(entry - sl);
+    if (sl_distance === 0) return;
+
+    const rr_tp1 = Math.abs(tp1 - entry) / sl_distance;
+    const rr_tp2 = Math.abs(tp2 - entry) / sl_distance;
+
+    if (rr_tp1 < 1.3 || rr_tp2 < 2.5) return;
+
+    // We can piggy back on the existing system
+    const riskPerc = (sl_distance / entry) * 100;
+    const tpPerc = (Math.abs(tp2 - entry) / entry) * 100;
+
+    addLog(
+      `📚 محرك SONNET (APEX SNIPER v3) رصد فرصة ${signal} بدقة 7 طبقات لعملة ${condition.symbol}. الهدف الأول ${tp1.toFixed(4)}, الهدف الثاني ${tp2.toFixed(4)}`,
+      "success"
+    );
+
+    condition.type = signal;
+    this.sonnetCooldowns.set(condition.symbol, Date.now());
+
+    await this.executeQuantumTrade(condition, "SONNET_APEX_SNIPER_V3", tpPerc, riskPerc);
+
+    // Overwrite the trade details for TP1 and TP2 logic handled in manageSonnetTrades
+    const tradeObj = openTrades.find(t => t.symbol === condition.symbol);
+    if (tradeObj) {
+      tradeObj.sonnetData = {
+        tp1, tp2, tp1_hit: false, be_moved: false,
+        size_tp1_mult: 0.55, size_tp2_mult: 0.45
+      };
+      this.updateActiveTrade(tradeObj);
+    }
+  }
+
+  private async manageSonnetTrades(trades: Trade[], currentPrice: number) {
+     for (const trade of trades) {
+        if (!trade.sonnetData) continue; // Not a sonnet trade
+
+        const btc = await this.fetchBtcGuard();
+        if (btc.blocked) {
+           addLog(`📚 محرك SONNET: خروج طارئ لـ ${trade.symbol} (خطر تلاعب السيولة بالبيتكوين)`, "warn");
+           await this.forceCloseTrade(trade, currentPrice, "SONNET_BTC_EMERGENCY");
+           continue;
+        }
+
+        const data = trade.sonnetData;
+        const currentPnlVal = trade.amount * (trade.type === "LONG" ? (currentPrice - trade.entryPrice) : (trade.entryPrice - currentPrice));
+
+        // ① Break Even after TP1
+        if (data.tp1_hit && !data.be_moved) {
+           trade.sl = trade.entryPrice;
+           data.be_moved = true;
+           addLog(`📚 محرك SONNET: تفعيل Break Even وتأمين الدخول لـ ${trade.symbol}`, "success");
+           this.updateActiveTrade(trade);
+        }
+
+        // ② Hit TP1 Logic
+        let hitTp1 = trade.type === "LONG" ? currentPrice >= data.tp1 : currentPrice <= data.tp1;
+        if (hitTp1 && !data.tp1_hit) {
+           data.tp1_hit = true;
+           addLog(`📚 محرك SONNET: تحقيق الهدف الأول لـ ${trade.symbol}. إغلاق 55% من الصفقة.`, "success");
+           
+           if (!trade.originalAmount) trade.originalAmount = trade.amount;
+           const closedAmount = trade.originalAmount * 0.55;
+           const partialPnl = currentPnlVal * (closedAmount / trade.amount);
+           
+           trade.realizedPnl = (trade.realizedPnl || 0) + partialPnl;
+           trade.amount = trade.amount - closedAmount;
+           trade.partialHistory.push({ closePercent: 55, amountClosed: closedAmount, realizedPnl: partialPnl, exitPrice: currentPrice, time: Date.now(), targetR: 1.8 });
+
+           if (this.mode === "LIVE" && this.exchange && this.binanceInitialized) {
+               try {
+                 const side = this.getLiveExitSide(trade.type);
+                 const roundedQty = this.exchange.amountToPrecision(trade.symbol, closedAmount / currentPrice);
+                 await this.exchange.createOrder(trade.symbol, "market", side, roundedQty, undefined, { reduceOnly: true });
+               } catch (e: any) {
+                 console.error(`[BINANCE] Sonnet TP1 Partial failed: ${e.message}`);
+               }
+           }
+           this.updateActiveTrade(trade);
+        }
+
+        // Hit TP2
+        let hitTp2 = trade.type === "LONG" ? currentPrice >= data.tp2 : currentPrice <= data.tp2;
+        if (hitTp2) {
+           addLog(`📚 محرك SONNET: تحقيق الهدف المالي النهائي لـ ${trade.symbol}. يتم تصفية الصفقة.`, "success");
+           await this.forceCloseTrade(trade, currentPrice, "SONNET_TP2_HIT");
+           continue;
+        }
+
+        // Trail Stops softly after TP1 using an approximated dynamic trailing or indicator rules
+        if (data.tp1_hit) {
+             const slDist = Math.abs(trade.entryPrice - data.tp1) / 1.8; // Reverse engineer ATR from TP1 distance
+             const atr = slDist; // Approximation of ATR
+             if (trade.type === "LONG") {
+                 const new_trail = currentPrice - (atr * 0.9);
+                 if (new_trail > trade.sl) { trade.sl = new_trail; this.updateActiveTrade(trade); }
+             } else {
+                 const new_trail = currentPrice + (atr * 0.9);
+                 if (new_trail < trade.sl) { trade.sl = new_trail; this.updateActiveTrade(trade); }
+             }
+        }
+
+        // Hard SL check
+        if (trade.type === "LONG" && currentPrice <= trade.sl) {
+           await this.forceCloseTrade(trade, currentPrice, "SONNET_SL_HIT");
+           continue;
+        } else if (trade.type === "SHORT" && currentPrice >= trade.sl) {
+           await this.forceCloseTrade(trade, currentPrice, "SONNET_SL_HIT");
+           continue;
+        }
+     }
   }
 }
 

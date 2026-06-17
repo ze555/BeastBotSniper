@@ -88,6 +88,16 @@ export interface Trade {
   inverseBestPrice?: number; // Added for the new inverse trailing logic
   tickHistory?: number[]; // Live Data: Tracks every incoming price tick
   oiHistory?: number[]; // Open Interest history
+  
+  // Custom Data for APEX SNIPER v3
+  sonnetData?: {
+    tp1: number;
+    tp2: number;
+    tp1_hit: boolean;
+    be_moved: boolean;
+    size_tp1_mult: number;
+    size_tp2_mult: number;
+  };
   volHistory?: number[]; // Volume history
   reportHistory?: any[]; // Full report history for Groq AI
   latestAdaptiveResult?: {
@@ -462,4 +472,7 @@ export interface BotSettings {
   
   // 👑 The Sovereign Engine (المحرك الشامل)
   useSovereignEngine?: boolean;
+  
+  // 📚 The Sonnet Engine (محرك APEX SNIPER v3)
+  useSonnetEngine?: boolean;
 }

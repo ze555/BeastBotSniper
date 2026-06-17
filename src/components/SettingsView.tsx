@@ -269,6 +269,72 @@ export function SettingsView({
                   </div>
                 </div>
 
+                {/* محرك APEX SNIPER v3 (Sonnet Engine) */}
+                <div className="bg-gradient-to-l from-slate-900 via-rose-950/40 to-red-900/40 border-2 border-red-500/50 rounded-3xl p-8 space-y-8 overflow-hidden relative shadow-[0_0_30px_rgba(239,68,68,0.15)] mb-8">
+                  <div className="absolute top-0 right-0 p-2 opacity-5"><Crosshair className="w-40 h-40 text-red-500 rotate-12" /></div>
+                  
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-red-500/20 pb-6 relative z-10 gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-red-500/10 rounded-2xl border border-red-500/30 text-red-400">
+                        <Crosshair className="w-8 h-8 animate-pulse text-red-500" />
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">محرك مستقل بدقة القناص</span>
+                          <h4 className="font-black text-red-500 text-xl">APEX SNIPER v3 (Sonnet Engine)</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2 font-sans max-w-xl">
+                          "ندخل متأخرين قليلاً أفضل من أن ندخل مبكرين كثيراً". محرك مستقل يعمل من خلال 7 طبقات حماية (HTF, Microstructure, Volume DNA, Candle Quality, False Breakout, Momentum). يُجمد كل المحركات الأخرى.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 self-end md:self-center ml-0 mr-auto">
+                      {settings.useSonnetEngine && (
+                        <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-3 py-1.5 rounded-xl font-bold animate-pulse">SONNET ACTIVE</span>
+                      )}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={!!settings.useSonnetEngine} 
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setSettings(prev => ({
+                              ...prev,
+                              useSonnetEngine: isChecked,
+                            }));
+                          }}
+                        />
+                        <div className="w-14 h-7 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-red-500"></div>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className={`space-y-8 transition-all relative z-10 ${!settings.useSonnetEngine ? 'opacity-25 grayscale pointer-events-none' : ''}`}>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div className="bg-slate-900/80 p-5 rounded-2xl border border-red-500/10">
+                          <h5 className="text-red-400 font-bold mb-2 flex items-center gap-2"><Shield className="w-4 h-4"/> حارس خوارزميات البيتكوين</h5>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            تمتلك هذه الطبقة القدرة على إلغاء كافة الإشارات في حال وجود خطر سيولة وتلاعب بالبيتكوين أو تحركه بعنف مفاجئ.
+                          </p>
+                        </div>
+                        <div className="bg-slate-900/80 p-5 rounded-2xl border border-red-500/10">
+                          <h5 className="text-red-400 font-bold mb-2 flex items-center gap-2"><Target className="w-4 h-4"/> جودة الشمعة والحجم</h5>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            لا يعتمد فقط على المتوسطات، بل على شمعة الاختراق وجودتها وصناع السوق (Taker Ratio, OI, Funding).
+                          </p>
+                        </div>
+                        <div className="bg-slate-900/80 p-5 rounded-2xl border border-red-500/10">
+                          <h5 className="text-red-400 font-bold mb-2 flex items-center gap-2"><Target className="w-4 h-4"/> تنفيذ منضبط RR</h5>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            مخاطرة بحد أقصى 1.5%، وأهداف ثابتة بملتبلاير ATR لا يقل الـ Risk:Reward عن 1.3 للأول و 2.5 للثاني.
+                          </p>
+                        </div>
+                      </div>
+                  </div>
+                </div>
+
                 {/* المحرك الشامل (Sovereign Engine) */}
                 <div className="bg-gradient-to-l from-slate-900 via-amber-950/40 to-yellow-900/40 border-2 border-yellow-500/50 rounded-3xl p-8 space-y-8 overflow-hidden relative shadow-[0_0_30px_rgba(234,179,8,0.15)] mb-8">
                   <div className="absolute top-0 right-0 p-2 opacity-5"><Crown className="w-40 h-40 text-yellow-400 rotate-12" /></div>
