@@ -98,6 +98,21 @@ export interface Trade {
     size_tp1_mult: number;
     size_tp2_mult: number;
   };
+  
+  // Custom Data for APEX PREDATOR
+  predatorData?: {
+    tp1: number;
+    tp2: number;
+    tp3: number;
+    part_a: number;
+    part_b: number;
+    part_c: number;
+    a_closed: boolean;
+    b_closed: boolean;
+    c_closed: boolean;
+    be_done: boolean;
+    entry_score: number;
+  };
   volHistory?: number[]; // Volume history
   reportHistory?: any[]; // Full report history for Groq AI
   latestAdaptiveResult?: {
@@ -492,4 +507,7 @@ export interface BotSettings {
   
   // 📚 The Sonnet Engine (محرك APEX SNIPER v3)
   useSonnetEngine?: boolean;
+  
+  // 🦅 The Apex Predator Engine
+  useApexPredatorEngine?: boolean;
 }
