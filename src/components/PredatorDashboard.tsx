@@ -113,12 +113,21 @@ export const PredatorDashboard: React.FC = () => {
   
   if (stats) {
      realizedPnLAmount = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
-     const initialBal = stats.initialBalance || 10000;
-     const currentBal = stats.balance || 10000;
-     // The virtual balance includes realized PnL. 
-     // For active trades, we can calculate floating PnL if we had live price, but here we can just sum up the entry vs current.
-     // Active trades update their `realizedPnl` from partial closes, but that's added to virtualBalance.
+     floatingPnLAmount = sovTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
   }
+  const totalPnL = realizedPnLAmount + floatingPnLAmount;
+
+  const formatDuration = (entryTime: string, exitTime?: string) => {
+     if (!entryTime) return '-';
+     const start = new Date(entryTime).getTime();
+     const end = exitTime ? new Date(exitTime).getTime() : Date.now();
+     const diffMs = end - start;
+     const diffMins = Math.floor(diffMs / 60000);
+     if (diffMins < 60) return `${diffMins} دق`;
+     const hours = Math.floor(diffMins / 60);
+     const mins = diffMins % 60;
+     return `${hours} س ${mins} دق`;
+  };
 
   const renderTradesList = (tradesList: any[], isClosed: boolean = false) => (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -135,19 +144,26 @@ export const PredatorDashboard: React.FC = () => {
                          </span>
                          <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded shadow-sm">{t.grade}</span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-2">
-                          <span>الدخول: <strong className="text-slate-200">{Number(t.entry).toFixed(4)}</strong></span>
-                          {!isClosed && (
-                            <>
-                              <span className="opacity-50">|</span>
-                              <span>وقف الخسارة: <strong className="text-slate-200">{Number(t.sl).toFixed(4)}</strong></span>
-                            </>
+                      <div className="text-xs text-slate-400 mt-2 flex flex-col gap-1.5">
+                          <div className="flex gap-4">
+                            <span>الدخول: <strong className="text-slate-200">{Number(t.entry).toFixed(4)}</strong></span>
+                            {!isClosed && (
+                              <span>الوقف: <strong className="text-slate-200">{Number(t.sl).toFixed(4)}</strong></span>
+                            )}
+                          </div>
+                          <div className="flex gap-4">
+                            <span>الحجم: <strong className="text-slate-200">${(t.initialPos * t.entry).toFixed(2)}</strong></span>
+                            <span>المدة: <strong className="text-slate-200">{formatDuration(t.entryTime, t.exitTime)}</strong></span>
+                          </div>
+                          {!isClosed && t.entryTime && (
+                           <div className="text-[10px] text-slate-500">
+                             فتح: {new Date(t.entryTime).toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'})} 
+                           </div>
                           )}
                           {isClosed && t.exitReason && (
-                            <>
-                              <span className="opacity-50">|</span>
-                              <span>إغلاق: <strong className="text-slate-200">{t.exitReason}</strong></span>
-                            </>
+                            <div className="text-[10px] text-slate-500 mt-1">
+                              إغلاق ({t.exitReason}) {t.exitTime && `- ${new Date(t.exitTime).toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'})}`}
+                            </div>
                           )}
                       </div>
                    </div>
@@ -155,15 +171,20 @@ export const PredatorDashboard: React.FC = () => {
                       <div className={`text-xl font-mono font-bold ${(t.profitR || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                          {(t.profitR || 0) >= 0 ? '+' : ''}{(t.profitR || 0).toFixed(2)} R
                       </div>
-                      <div className="text-[10px] text-slate-500 mb-1">عائد النقطة الأقصى: {t.peak_r?.toFixed(2)} R</div>
+                      <div className="text-[10px] text-slate-500 mb-1">عائد النقطة: {t.peak_r?.toFixed(2)} R</div>
                       {isClosed && (
                          <div className={`text-sm font-bold ${(t.finalPnl || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                             {(t.finalPnl || 0) >= 0 ? '+$' : '-$'}{Math.abs(t.finalPnl || 0).toFixed(2)}
                          </div>
                       )}
+                      {!isClosed && t.pnl !== undefined && (
+                         <div className={`text-sm font-bold ${(t.pnl || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {(t.pnl || 0) >= 0 ? '+$' : '-$'}{Math.abs(t.pnl || 0).toFixed(2)}
+                         </div>
+                      )}
                       {!isClosed && t.realizedPnl !== undefined && t.realizedPnl !== 0 && (
-                         <div className={`text-xs ${(t.realizedPnl || 0) > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                            محقق جزئي: {(t.realizedPnl || 0) > 0 ? '+$' : '-$'}{Math.abs(t.realizedPnl || 0).toFixed(2)}
+                         <div className={`text-[10px] mt-1 ${(t.realizedPnl || 0) > 0 ? 'text-emerald-500/70' : 'text-rose-500/70'}`}>
+                            محقق: {(t.realizedPnl || 0) > 0 ? '+$' : '-$'}{Math.abs(t.realizedPnl || 0).toFixed(2)}
                          </div>
                       )}
                    </div>
@@ -350,24 +371,32 @@ export const PredatorDashboard: React.FC = () => {
        {activeTab === 'DASHBOARD' && (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
              {/* Financial Summary */}
-             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                 <div className="col-span-2 md:col-span-1 bg-slate-900 border-l-2 border-blue-500 border-y border-r border-y-slate-800 border-r-slate-800 p-4 rounded-xl shadow">
+             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                 <div className="col-span-2 lg:col-span-1 bg-slate-900 border-l-2 border-blue-500 border-y border-r border-y-slate-800 border-r-slate-800 p-4 rounded-xl shadow">
                     <p className="text-xs text-slate-400 mb-1">الرصيد المتاح</p>
                     <p className="text-xl sm:text-2xl font-black text-white">${stats?.balance?.toFixed(2) || 0}</p>
                  </div>
                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow">
-                    <p className="text-xs text-slate-400 mb-1">الرصيد الافتتاحي</p>
-                    <p className="text-xl sm:text-2xl font-bold text-slate-300">${stats?.initialBalance?.toFixed(2) || 0}</p>
-                 </div>
-                 <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl shadow">
-                    <p className="text-[10px] sm:text-xs text-slate-400 mb-1">الربح المحقق (Closed)</p>
-                    <p className={`text-lg sm:text-xl font-bold ${realizedPnLAmount >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                       {realizedPnLAmount >= 0 ? '+' : ''}${realizedPnLAmount.toFixed(2)}
+                    <p className="text-[10px] sm:text-xs text-slate-400 mb-1">صافي الربح/الخسارة</p>
+                    <p className={`text-lg sm:text-xl font-bold ${totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                       {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
                     </p>
                  </div>
                  <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl shadow">
-                    <p className="text-[10px] sm:text-xs text-slate-400 mb-1">صفقات نشطة</p>
-                    <p className="text-lg sm:text-xl font-bold text-blue-400">{sovTrades.length} / {stats?.maxOpenTrades || 3}</p>
+                    <p className="text-[10px] sm:text-xs text-slate-400 mb-1">الربح العائم (Floating)</p>
+                    <p className={`text-lg sm:text-xl font-bold ${floatingPnLAmount >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
+                       {floatingPnLAmount >= 0 ? '+' : ''}${floatingPnLAmount.toFixed(2)}
+                    </p>
+                 </div>
+                 <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl shadow">
+                    <p className="text-[10px] sm:text-xs text-slate-400 mb-1">الربح المحقق (Closed)</p>
+                    <p className={`text-lg sm:text-xl font-bold ${realizedPnLAmount >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                       {realizedPnLAmount >= 0 ? '+' : ''}${realizedPnLAmount.toFixed(2)}
+                    </p>
+                 </div>
+                 <div className="col-span-2 lg:col-span-1 bg-slate-900/50 border border-slate-800 p-4 rounded-xl shadow">
+                    <p className="text-[10px] sm:text-xs text-slate-400 mb-1">الصفقات النشطة</p>
+                    <p className="text-lg sm:text-xl font-bold text-slate-300">{sovTrades.length} / {stats?.maxOpenTrades || 3}</p>
                  </div>
              </div>
 

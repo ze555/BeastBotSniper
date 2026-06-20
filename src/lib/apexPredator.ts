@@ -120,7 +120,7 @@ async function getContext() {
    const btc4h = await fetchKl("BTCUSDT", "4h", 210);
    const btc15m = await fetchKl("BTCUSDT", "15m", 30);
    
-   const closes4h = btc4h.map(c => c.close);
+   const closes4h = btc4h.map((c: any) => c.close);
    const ema50 = calcEMA(closes4h, 50).pop() || 0;
    const ema200 = calcEMA(closes4h, 200).pop() || 0;
    
@@ -134,8 +134,8 @@ async function getContext() {
    const c15_3 = btc15m[btc15m.length - 4];
    const btc_15m_chg = (c15_0.close - c15_3.close) / c15_3.close;
    
-   const vols15m = btc15m.slice(-20).map(k => k.volume);
-   const avgVol15m = vols15m.reduce((a, b) => a + b, 0) / 20;
+   const vols15m = btc15m.slice(-20).map((k: any) => k.volume);
+   const avgVol15m = vols15m.reduce((a: number, b: number) => a + b, 0) / 20;
    const rvol = c15_0.volume / avgVol15m;
    
    const btc_violent = Math.abs(btc_15m_chg) > 0.008 && rvol > 2.5;
@@ -203,7 +203,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       const k = c15[c15.length-1 - i];
       pressure += (k.takerBuy - k.takerSell) * w;
    }
-   const avgVol = c15.slice(-20).map(x=>x.volume).reduce((a,b)=>a+b,0)/20;
+   const avgVol = c15.slice(-20).map((x: any) => x.volume).reduce((a: number, b: number) => a + b, 0)/20;
    
    const corr = Math.abs(btc_chg) > 0.001 ? p_chg / btc_chg : 0;
    const asset_strong = btc_chg < -0.003 && corr > -0.3;
@@ -225,10 +225,10 @@ async function readWhale(symbol: string, btc_chg: number) {
 // --- SEC 3: PRICE READER ---
 async function readPrice(symbol: string, c15: any[]) {
    const kl = await fetchKl(symbol, "15m", 210);
-   const hi = kl.map(k=>k.high);
-   const lo = kl.map(k=>k.low);
-   const cl = kl.map(k=>k.close);
-   const vo = kl.map(k=>k.volume);
+   const hi = kl.map((k: any) => k.high);
+   const lo = kl.map((k: any) => k.low);
+   const cl = kl.map((k: any) => k.close);
+   const vo = kl.map((k: any) => k.volume);
 
    const price = cl[cl.length-1];
    const ema21 = calcEMA(cl, 21).pop() || 0;
@@ -245,7 +245,7 @@ async function readPrice(symbol: string, c15: any[]) {
    const res10 = Math.max(...hi.slice(-11, -1));
    const sup10 = Math.min(...lo.slice(-11, -1));
    
-   const rvol5 = (vo.slice(-6, -1).reduce((a,b)=>a+b,0)/5) / (vo.slice(-21, -1).reduce((a,b)=>a+b,0)/20);
+   const rvol5 = (vo.slice(-6, -1).reduce((a: number, b: number) => a+b, 0)/5) / (vo.slice(-21, -1).reduce((a: number, b: number) => a+b, 0)/20);
    const compressed = (atr5/atr20) < 0.55 && rvol5 < 0.70;
 
    const c0 = kl[kl.length-1];
@@ -259,7 +259,7 @@ async function readPrice(symbol: string, c15: any[]) {
    const strong_bull_c = c0.close > c0.open && bpct > 0.60 && u_wick < body*0.30 && cpos > 0.75;
    const strong_bear_c = c0.close < c0.open && bpct > 0.60 && l_wick < body*0.30 && cpos < 0.25;
 
-   const avg_vol = vo.slice(-21,-1).reduce((a,b)=>a+b,0)/20;
+   const avg_vol = vo.slice(-21,-1).reduce((a: number, b: number) => a+b, 0)/20;
    const rvol = vo[vo.length-1] / (avg_vol || 1);
 
    const stop_hunt_bull = lo[lo.length-1] < sup10 && cl[cl.length-1] > sup10 && l_wick > body*2 && rvol > 1.8;
@@ -290,7 +290,8 @@ async function readPrice(symbol: string, c15: any[]) {
       rsi, rsi_bull: rsi > 52 && rsi < 73, rsi_bear: rsi > 27 && rsi < 48,
       st_bull: st_dir === 1, st_bear: st_dir === -1,
       taker: rng > 0 ? c0.takerBuy / (c0.takerBuy + c0.takerSell) : 0.5,
-      klines: kl, res10, sup10, volFade: false
+      klines: kl, res10, sup10, volFade: false,
+      u_wick, l_wick, body, rng
    };
 }
 
@@ -419,7 +420,7 @@ function executeTrade(symbol: string, decision: any) {
       let pos = riskAmt / slDist;
       activeTrades.push({
          symbol, direction: "LONG", entry, sl, tp1, tp2, tp3,
-         pos, initialPos: pos,
+         pos, initialPos: pos, entryTime: new Date().toISOString(),
          part_a: 0.35, part_b: 0.40, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
@@ -454,7 +455,7 @@ function executeTrade(symbol: string, decision: any) {
       let pos = riskAmt / slDist;
       activeTrades.push({
          symbol, direction: "SHORT", entry, sl, tp1, tp2, tp3,
-         pos, initialPos: pos,
+         pos, initialPos: pos, entryTime: new Date().toISOString(),
          part_a: 0.35, part_b: 0.40, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
@@ -502,7 +503,7 @@ async function exitBrain(trade: any) {
    if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
    
    if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
-   const threeBelow = p.klines.slice(-3).every(c => c.close < p.ema21);
+   const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
    if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
 
    if (emergency) {
@@ -516,9 +517,10 @@ async function exitBrain(trade: any) {
    
    if (t.direction === "LONG") {
       const c = p.klines;
-      if (price > Math.max(...c.slice(-10,-3).map(k=>k.high)) && p.hist[p.hist.length-1] < p.hist[p.hist.length-4]) exhaust += 3;
+      if (price > Math.max(...c.slice(-10,-3).map((k: any) => k.high)) && p.hist[p.hist.length-1] < p.hist[p.hist.length-4]) exhaust += 3;
       if (w.fund > 0.06/100) exhaust += 1;
       
+      const bodySize = (klines: any[]) => { const last = klines[klines.length-1]; return Math.abs(last.open - last.close); };
       const ss_cand = p.u_wick > bodySize(c)*2.5 && p.price > p.res10 * 0.998;
       if (ss_cand) peak += 3;
    } else {
