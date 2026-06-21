@@ -25,7 +25,13 @@ async function startServer() {
 
   app.get("/api/predator/stats", (req, res) => res.json(getStats()));
   app.post("/api/predator/config", (req, res) => {
-     updateConfig(req.body.balance, req.body.maxTrades);
+     updateConfig(req.body.balance, req.body.maxTrades, {
+        haltProfitEnabled: req.body.haltProfitEnabled,
+        haltProfitTarget: req.body.haltProfitTarget,
+        haltLossEnabled: req.body.haltLossEnabled,
+        haltLossTarget: req.body.haltLossTarget,
+        smartBtcHoldEnabled: req.body.smartBtcHoldEnabled,
+     });
      res.json({ success: true });
   });
   app.get("/api/trades/active", (req, res) => res.json(getTrades()));

@@ -23,6 +23,14 @@ const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 let virtualBalance = 10000;
 let initialVirtualBalance = 10000;
 let maxOpenTradesConfig = 3;
+
+// New Config
+let haltProfitEnabled = false;
+let haltProfitTarget = 500;
+let haltLossEnabled = false;
+let haltLossTarget = 200;
+let smartBtcHoldEnabled = true;
+
 const logs: any[] = [];
 let closedTrades: any[] = [];
 
@@ -40,12 +48,19 @@ let apexPredatorStats: any = {
   }
 };
 
-export function updateConfig(balance: number, maxTrades: number) {
+export function updateConfig(balance: number, maxTrades: number, opts?: any) {
   initialVirtualBalance = balance;
   if (virtualBalance === 10000 && balance !== 10000 && closedTrades.length === 0) {
      virtualBalance = balance;
   }
   maxOpenTradesConfig = maxTrades;
+  if (opts) {
+      if (opts.haltProfitEnabled !== undefined) haltProfitEnabled = opts.haltProfitEnabled;
+      if (opts.haltProfitTarget !== undefined) haltProfitTarget = opts.haltProfitTarget;
+      if (opts.haltLossEnabled !== undefined) haltLossEnabled = opts.haltLossEnabled;
+      if (opts.haltLossTarget !== undefined) haltLossTarget = opts.haltLossTarget;
+      if (opts.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = opts.smartBtcHoldEnabled;
+  }
 }
 
 export function addLog(msg: string, type: 'info'|'warn'|'success'|'error' = 'info') {
@@ -63,16 +78,26 @@ export function getStats() {
     balance: virtualBalance,
     initialBalance: initialVirtualBalance,
     maxOpenTrades: maxOpenTradesConfig,
+    haltProfitEnabled,
+    haltProfitTarget,
+    haltLossEnabled,
+    haltLossTarget,
+    smartBtcHoldEnabled,
     today: todaysStats 
   }; 
 }
 export function getConfig() {
-  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig };
+  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled };
 }
 export function setConfig(config: any) {
   if (config.virtualBalance) virtualBalance = config.virtualBalance;
   if (config.initialVirtualBalance) initialVirtualBalance = config.initialVirtualBalance;
   if (config.maxOpenTradesConfig) maxOpenTradesConfig = config.maxOpenTradesConfig;
+  if (config.haltProfitEnabled !== undefined) haltProfitEnabled = config.haltProfitEnabled;
+  if (config.haltProfitTarget !== undefined) haltProfitTarget = config.haltProfitTarget;
+  if (config.haltLossEnabled !== undefined) haltLossEnabled = config.haltLossEnabled;
+  if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
+  if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
@@ -497,7 +522,15 @@ async function exitBrain(trade: any) {
    let emergency = false;
    let emReason = "";
 
-   if (ctx.regime === "RANGING" || !ctx.tradeable) { emergency = true; emReason = "BTC Chaos"; }
+   if (ctx.regime === "RANGING" || !ctx.tradeable) {
+      if (smartBtcHoldEnabled && t.direction === "LONG" && ctx.btc_chg > 0.0) {
+         addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من توقف صعود بيتكوين لأن الاتجاه منسجم مع وضعية الصعود (${ctx.btc_chg.toFixed(4)})`, "info");
+      } else if (smartBtcHoldEnabled && t.direction === "SHORT" && ctx.btc_chg < -0.0) {
+         addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من هبوط بيتكوين لأن الاتجاه منسجم مع وضعية الشورت (${ctx.btc_chg.toFixed(4)})`, "info");
+      } else {
+         emergency = true; emReason = "BTC Chaos";
+      }
+   }
 
    if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
    if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
@@ -603,15 +636,28 @@ export async function runApexLoop() {
    const hour = new Date().getUTCHours();
    if (AVOID_HOURS.includes(hour)) return;
 
-   const dailyLoss = todaysStats.pnl < 0 ? Math.abs(todaysStats.pnl) : 0;
-   if (dailyLoss / virtualBalance >= MAX_DAILY_LOSS) {
-      botActive = false;
-      addLog("🛑 حد يومي 4% خسارة، تم إيقاف الروبوت.", "error");
-      return;
-   }
-
    try {
       const ctx = await getContext();
+      
+      // Calculate overall Net PnL
+      let totalFloatingPnl = 0;
+      let totalRealizedPnl = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
+      for (const t of activeTrades) {
+         if (t.pnl) totalFloatingPnl += t.pnl; 
+      }
+      let currentNetPnl = totalRealizedPnl + totalFloatingPnl;
+      
+      if (haltProfitEnabled && currentNetPnl >= haltProfitTarget) {
+         botActive = false;
+         addLog(`🛑 تحقيق هدف الربح ($${haltProfitTarget})، تم إيقاف الروبوت.`, "success");
+         return;
+      }
+      
+      if (haltLossEnabled && currentNetPnl <= -haltLossTarget) {
+         botActive = false;
+         addLog(`🛑 الوصول لحد الخسارة المحدد ($${haltLossTarget})، تم إيقاف الروبوت.`, "error");
+         return;
+      }
       
       // Manage open trades
       for (const t of activeTrades) {

@@ -14,6 +14,11 @@ export const PredatorDashboard: React.FC = () => {
   // Settings state
   const [balanceInput, setBalanceInput] = useState('10000');
   const [maxTradesInput, setMaxTradesInput] = useState('3');
+  const [haltProfitEnabled, setHaltProfitEnabled] = useState(false);
+  const [haltProfitTarget, setHaltProfitTarget] = useState('500');
+  const [haltLossEnabled, setHaltLossEnabled] = useState(false);
+  const [haltLossTarget, setHaltLossTarget] = useState('200');
+  const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
@@ -32,6 +37,11 @@ export const PredatorDashboard: React.FC = () => {
         if (document.activeElement?.tagName !== 'INPUT') {
             setBalanceInput(data.initialBalance?.toString() || '10000');
             setMaxTradesInput(data.maxOpenTrades?.toString() || '3');
+            if (data.haltProfitTarget !== undefined) setHaltProfitTarget(data.haltProfitTarget.toString());
+            if (data.haltProfitEnabled !== undefined) setHaltProfitEnabled(data.haltProfitEnabled);
+            if (data.haltLossTarget !== undefined) setHaltLossTarget(data.haltLossTarget.toString());
+            if (data.haltLossEnabled !== undefined) setHaltLossEnabled(data.haltLossEnabled);
+            if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
         }
       }
       const tradesRes = await fetch('/api/trades/active');
@@ -75,7 +85,12 @@ export const PredatorDashboard: React.FC = () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                   balance: Number(balanceInput),
-                  maxTrades: Number(maxTradesInput)
+                  maxTrades: Number(maxTradesInput),
+                  haltProfitEnabled,
+                  haltProfitTarget: Number(haltProfitTarget),
+                  haltLossEnabled,
+                  haltLossTarget: Number(haltLossTarget),
+                  smartBtcHoldEnabled,
               })
           });
           await fetchData();
@@ -151,9 +166,22 @@ export const PredatorDashboard: React.FC = () => {
                               <span>الوقف: <strong className="text-slate-200">{Number(t.sl).toFixed(4)}</strong></span>
                             )}
                           </div>
-                          <div className="flex gap-4">
-                            <span>الحجم: <strong className="text-slate-200">${(t.initialPos * t.entry).toFixed(2)}</strong></span>
-                            <span>المدة: <strong className="text-slate-200">{formatDuration(t.entryTime, t.exitTime)}</strong></span>
+                          <div className="flex flex-wrap gap-x-4 gap-y-2 text-[10px] sm:text-xs bg-slate-900/50 p-2 rounded border border-slate-800">
+                            <span className="cursor-help" title="حجم العقد الإجمالي في السوق (Position Size)">
+                               إجمالي العقد: <strong className="text-slate-200">${(t.initialPos * t.entry).toFixed(2)}</strong>
+                            </span>
+                            <span className="cursor-help" title="الرافعة المالية المستخدمة (Leverage)">
+                               الرافعة: <strong className="text-blue-400">10x</strong>
+                            </span>
+                            <span className="cursor-help" title="الهامش الأصلي المحجوز من الرصيد (Margin)">
+                               الهامش: <strong className="text-slate-200">${((t.initialPos * t.entry) / 10).toFixed(2)}</strong>
+                            </span>
+                            <span className="cursor-help text-rose-400/90" title="كم سيخسر الحساب فعلياً إذا تم ضرب وقف الخسارة">
+                               المخاطرة: <strong>${(t.initialPos * Math.abs(t.entry - t.sl)).toFixed(2)}</strong>
+                            </span>
+                            <span className="text-slate-400">
+                               المدة: <strong className="text-slate-200">{formatDuration(t.entryTime, t.exitTime)}</strong>
+                            </span>
                           </div>
                           {!isClosed && t.entryTime && (
                            <div className="text-[10px] text-slate-500">
@@ -302,6 +330,74 @@ export const PredatorDashboard: React.FC = () => {
                        />
                    </div>
                 </div>
+
+                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-[0_0_15px_rgba(59,130,246,0.05)] mb-6">
+                 <h2 className="text-lg text-white font-bold mb-6 flex gap-2 items-center">
+                    <Target className="w-5 h-5 text-emerald-400"/> إعدادات إيقاف الروبوت الذاتي والذكاء الاصطناعي
+                 </h2>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6 pt-4 border-t border-slate-800/50">
+                    <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                            <input 
+                               type="checkbox" 
+                               checked={haltProfitEnabled}
+                               onChange={(e) => setHaltProfitEnabled(e.target.checked)}
+                               className="w-5 h-5 accent-emerald-500 bg-slate-800 border-slate-700 rounded focus:ring-emerald-500 focus:ring-offset-slate-900" 
+                            />
+                            <span className="text-sm text-slate-200 font-bold">إيقاف الروبوت عند تحقيق ربح محدد</span>
+                        </label>
+                        <div className={`transition-opacity duration-300 ${haltProfitEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                            <p className="text-[11px] text-slate-500 mb-2">سيتم إيقاف تشغيل الروبوت تلقائياً إذا وصل صافي الربح التراكمي إلى هذا الرقم ($)</p>
+                            <input 
+                              type="number" 
+                              value={haltProfitTarget}
+                              onChange={(e) => setHaltProfitTarget(e.target.value)}
+                              disabled={!haltProfitEnabled}
+                              className="w-full bg-slate-900 border border-emerald-900/50 focus:border-emerald-500 rounded-lg p-2 text-emerald-100 font-mono focus:outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                            <input 
+                               type="checkbox" 
+                               checked={haltLossEnabled}
+                               onChange={(e) => setHaltLossEnabled(e.target.checked)}
+                               className="w-5 h-5 accent-rose-500 bg-slate-800 border-slate-700 rounded focus:ring-rose-500 focus:ring-offset-slate-900" 
+                            />
+                            <span className="text-sm text-slate-200 font-bold">إيقاف الروبوت عند الوصول لخسارة محددة</span>
+                        </label>
+                        <div className={`transition-opacity duration-300 ${haltLossEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                            <p className="text-[11px] text-slate-500 mb-2">سيتم إيقاف التشغيل كإجراء وقائي إذا وصل صافي الخسارة التراكمي لهذا الرقم ($)</p>
+                            <input 
+                              type="number" 
+                              value={haltLossTarget}
+                              onChange={(e) => setHaltLossTarget(e.target.value)}
+                              disabled={!haltLossEnabled}
+                              className="w-full bg-slate-900 border border-rose-900/50 focus:border-rose-500 rounded-lg p-2 text-rose-100 font-mono focus:outline-none"
+                            />
+                        </div>
+                    </div>
+                 </div>
+
+                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
+                    <label className="flex items-start sm:items-center gap-3 cursor-pointer">
+                        <input 
+                           type="checkbox" 
+                           checked={smartBtcHoldEnabled}
+                           onChange={(e) => setSmartBtcHoldEnabled(e.target.checked)}
+                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500 focus:ring-offset-slate-900" 
+                        />
+                        <div>
+                           <span className="text-sm text-slate-200 font-bold block mb-1">الاحتفاظ الذكي مع اتجاه البيتكوين (Smart Hold)</span>
+                           <span className="text-[11px] text-slate-400 block leading-relaxed">
+                              عند تفعيل هذا الخيار، سيقوم الروبوت بتجاهل إشارات الخروج الطارئة (Emergency Exits) الناجمة عن تخبط السوق إذا كانت اتجاهات الصفقات المفتوحة موازية لحركة البيتكوين، لتجنب الخروج المبكر من الصفقات الرابحة فقط بسبب تذبذب البيتكوين المؤقت.
+                           </span>
+                        </div>
+                    </label>
+                 </div>
+                 </div>
 
                 <div className="flex justify-end pt-4 border-t border-slate-800">
                    <button 
