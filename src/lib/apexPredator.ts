@@ -83,6 +83,7 @@ export function getStats() {
     haltLossEnabled,
     haltLossTarget,
     smartBtcHoldEnabled,
+    isSleeping: [22, 23, 0, 1, 2, 3, 4, 5, 6, 7].includes(new Date().getUTCHours()),
     today: todaysStats 
   }; 
 }

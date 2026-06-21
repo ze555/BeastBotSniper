@@ -262,6 +262,11 @@ export const PredatorDashboard: React.FC = () => {
            لوحة تحكم (APEX PREDATOR SYSTEM)
          </h1>
          <div className="flex w-full sm:w-auto gap-2 items-center">
+           {stats?.isSleeping && botActive && (
+             <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-3 py-1.5 rounded font-bold animate-pulse">
+                مرحلة السكون (تجنب التذبذب)
+             </span>
+           )}
            <button
               onClick={toggleBot}
               className={`flex-1 sm:flex-none justify-center items-center gap-2 px-4 py-2 rounded font-bold text-sm transition-all flex ${botActive ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}
