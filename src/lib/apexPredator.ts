@@ -6,6 +6,7 @@ let watcherInterval: NodeJS.Timeout | null = null;
 let activeTrades: any[] = [];
 let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let botActive = false;
+let isLoopRunning = false;
 
 // ═══ CONFIGURATION ═══
 let WATCHLIST: string[] = [
@@ -233,7 +234,7 @@ async function getContext() {
 
 // --- SEC 2: WHALE READER ---
 async function readWhale(symbol: string, btc_chg: number) {
-   const c15 = await fetchKl(symbol, "15m", 50);
+   const c15 = await fetchKl(symbol, "15m", 210);
    const c5 = await fetchKl(symbol, "5m", 30);
    const c4h = await fetchKl(symbol, "4h", 20);
 
@@ -297,8 +298,7 @@ async function readWhale(symbol: string, btc_chg: number) {
 }
 
 // --- SEC 3: PRICE READER ---
-async function readPrice(symbol: string, c15: any[]) {
-   const kl = await fetchKl(symbol, "15m", 210);
+async function readPrice(symbol: string, kl: any[]) {
    const hi = kl.map((k: any) => k.high);
    const lo = kl.map((k: any) => k.low);
    const cl = kl.map((k: any) => k.close);
@@ -552,11 +552,10 @@ function executeTrade(symbol: string, decision: any) {
 }
 
 // --- SEC 6: EXIT BRAIN ---
-async function exitBrain(trade: any) {
+async function exitBrain(trade: any, ctx: any) {
    const t = trade;
    const w = await readWhale(t.symbol, 0); // Fast check
    const p = await readPrice(t.symbol, w.c15);
-   const ctx = await getContext();
    
    const price = p.price;
    t.currentPrice = price;
@@ -680,11 +679,12 @@ function closeTradeFull(t: any, reason: string = "") {
 
 // --- SEC 9: MAIN LOOP ---
 export async function runApexLoop() {
-   if (!botActive) return;
+   if (!botActive || isLoopRunning) return;
 
    const hour = new Date().getUTCHours();
    if (AVOID_HOURS.includes(hour)) return;
 
+   isLoopRunning = true;
    try {
       await updateDynamicWatchlist();
       const ctx = await getContext();
@@ -699,22 +699,27 @@ export async function runApexLoop() {
       
       if (haltProfitEnabled && currentNetPnl >= haltProfitTarget) {
          botActive = false;
+         isLoopRunning = false;
          addLog(`🛑 تحقيق هدف الربح ($${haltProfitTarget})، تم إيقاف الروبوت.`, "success");
          return;
       }
       
       if (haltLossEnabled && currentNetPnl <= -haltLossTarget) {
          botActive = false;
+         isLoopRunning = false;
          addLog(`🛑 الوصول لحد الخسارة المحدد ($${haltLossTarget})، تم إيقاف الروبوت.`, "error");
          return;
       }
       
       // Manage open trades
       for (const t of activeTrades) {
-         await exitBrain(t);
+         await exitBrain(t, ctx);
       }
 
-      if (activeTrades.length >= maxOpenTradesConfig) return;
+      if (activeTrades.length >= maxOpenTradesConfig) {
+         isLoopRunning = false;
+         return;
+      }
 
       // Ensure index is valid
       if (currentBatchIndex >= WATCHLIST.length) {
@@ -744,6 +749,8 @@ export async function runApexLoop() {
       }
    } catch (e: any) {
       addLog(`Loop Error: ${e.message}`, "error");
+   } finally {
+      isLoopRunning = false;
    }
 }
 
