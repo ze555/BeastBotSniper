@@ -209,15 +209,23 @@ async function getContext() {
    let regime = "RANGING";
    if (price > ema50 && ema50 > ema200 && hh_hl) regime = "BULL_STRONG";
    else if (price > ema50 && ema50 > ema200) regime = "BULL_WEAK";
+   else if (price > ema200 && price < ema50) regime = "BULL_WEAK"; // Bouncing off 200 or in chop above 200
    else if (price < ema50 && ema50 < ema200 && lh_ll) regime = "BEAR_STRONG";
    else if (price < ema50 && ema50 < ema200) regime = "BEAR_WEAK";
+   else if (price < ema200 && price > ema50) regime = "BEAR_WEAK"; // Chop below 200
+   
+   // If it's still ranging but high timeframe is definitely bullish
+   if (regime === "RANGING") {
+      if (price > ema200) regime = "BULL_WEAK";
+      else if (price < ema200) regime = "BEAR_WEAK";
+   }
 
    const fundBtc = await fetchFunding("BTCUSDT");
    const avg_fund = fundBtc;
 
    return {
       regime,
-      tradeable: regime !== "RANGING" && !btc_violent,
+      tradeable: !btc_violent, // allow finding trades even if ranging, handled by layer scoring
       btc_chg: btc_15m_chg,
       avg_fund
    };
