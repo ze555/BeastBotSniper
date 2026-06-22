@@ -121,12 +121,16 @@ async function updateDynamicWatchlist() {
 
       addLog(`🔄 جلب قائمة العملات من بينانس وتصفية الأقوى سيولة...`, "info");
       const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
+      
+      const excludedBases = ['USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT'];
+      
       let symbols = res.data
          .filter((s: any) => s.symbol.endsWith('USDT'))
+         .filter((s: any) => !excludedBases.some(base => s.symbol.replace('USDT', '') === base))
          .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)); // Sort by USDT volume
 
-      // Take top 80 symbols to avoid low liquidity garbage
-      symbols = symbols.slice(0, 80).map((s: any) => s.symbol);
+      // Take top 150 symbols to avoid low liquidity garbage
+      symbols = symbols.slice(0, 150).map((s: any) => s.symbol);
 
       if (symbols.length > 0) {
          // Keep BTC out of the rotation if we want, or just let it rotate. Let's make sure BTC is there? Actually it's fine.
