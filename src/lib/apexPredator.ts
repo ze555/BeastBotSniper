@@ -30,6 +30,7 @@ let haltProfitTarget = 500;
 let haltLossEnabled = false;
 let haltLossTarget = 200;
 let smartBtcHoldEnabled = true;
+let btcVolThresholdStr = "0.80";
 
 const logs: any[] = [];
 let closedTrades: any[] = [];
@@ -60,6 +61,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.haltLossEnabled !== undefined) haltLossEnabled = opts.haltLossEnabled;
       if (opts.haltLossTarget !== undefined) haltLossTarget = opts.haltLossTarget;
       if (opts.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = opts.smartBtcHoldEnabled;
+      if (opts.btcVolThresholdStr !== undefined) btcVolThresholdStr = opts.btcVolThresholdStr;
   }
 }
 
@@ -83,6 +85,7 @@ export function getStats() {
     haltLossEnabled,
     haltLossTarget,
     smartBtcHoldEnabled,
+    btcVolThresholdStr,
     isSleeping: [22, 23, 0, 1, 2, 3, 4, 5, 6, 7].includes(new Date().getUTCHours()),
     today: todaysStats 
   }; 
@@ -99,6 +102,7 @@ export function setConfig(config: any) {
   if (config.haltLossEnabled !== undefined) haltLossEnabled = config.haltLossEnabled;
   if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
   if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
+  if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
@@ -164,7 +168,7 @@ async function getContext() {
    const avgVol15m = vols15m.reduce((a: number, b: number) => a + b, 0) / 20;
    const rvol = c15_0.volume / avgVol15m;
    
-   const btc_violent = Math.abs(btc_15m_chg) > 0.008 && rvol > 2.5;
+   const btc_violent = Math.abs(btc_15m_chg) > (Number(btcVolThresholdStr) / 100) && rvol > 2.5;
 
    let regime = "RANGING";
    if (price > ema50 && ema50 > ema200 && hh_hl) regime = "BULL_STRONG";

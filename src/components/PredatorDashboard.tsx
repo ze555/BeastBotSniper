@@ -19,6 +19,7 @@ export const PredatorDashboard: React.FC = () => {
   const [haltLossEnabled, setHaltLossEnabled] = useState(false);
   const [haltLossTarget, setHaltLossTarget] = useState('200');
   const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
+  const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export const PredatorDashboard: React.FC = () => {
             if (data.haltLossTarget !== undefined) setHaltLossTarget(data.haltLossTarget.toString());
             if (data.haltLossEnabled !== undefined) setHaltLossEnabled(data.haltLossEnabled);
             if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
+            if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
         }
       }
       const tradesRes = await fetch('/api/trades/active');
@@ -91,6 +93,7 @@ export const PredatorDashboard: React.FC = () => {
                   haltLossEnabled,
                   haltLossTarget: Number(haltLossTarget),
                   smartBtcHoldEnabled,
+                  btcVolThresholdStr,
               })
           });
           await fetchData();
@@ -401,6 +404,23 @@ export const PredatorDashboard: React.FC = () => {
                            </span>
                         </div>
                     </label>
+                 </div>
+
+                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
+                    <div>
+                        <span className="text-sm text-slate-200 font-bold block mb-1">نسبة التذبذب العنيف للبيتكوين (%)</span>
+                        <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
+                            إذا تحرك البيتكوين بنسبة فجائية (خلال ربع ساعة) تفوق هذه النسبة المئوية المحددة، سيعتبره الروبوت تذبذب طارئ (BTC Chaos) وقد يقوم بإيقاف الصفقات وإلغاء عمليات الفحص لضمان الأمان.
+                        </span>
+                        <input 
+                            type="number" 
+                            step="0.05"
+                            min="0.10"
+                            value={btcVolThresholdStr}
+                            onChange={(e) => setBtcVolThresholdStr(e.target.value)}
+                            className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
+                        />
+                    </div>
                  </div>
                  </div>
 

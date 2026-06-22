@@ -31,6 +31,7 @@ async function startServer() {
         haltLossEnabled: req.body.haltLossEnabled,
         haltLossTarget: req.body.haltLossTarget,
         smartBtcHoldEnabled: req.body.smartBtcHoldEnabled,
+        btcVolThresholdStr: req.body.btcVolThresholdStr,
      });
      res.json({ success: true });
   });
