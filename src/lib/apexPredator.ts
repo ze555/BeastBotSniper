@@ -8,11 +8,14 @@ let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let botActive = false;
 
 // ═══ CONFIGURATION ═══
-const WATCHLIST = [
+let WATCHLIST: string[] = [
    "BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT",
    "LINKUSDT", "INJUSDT", "ARBUSDT", "CRVUSDT",
    "AAVEUSDT", "OPUSDT"
 ];
+let currentBatchIndex = 0;
+let lastWatchlistUpdate = 0;
+
 const MIN_ENTRY_SCORE = 6.0;
 const MIN_RR_REQUIRED = 2.5;
 const MAX_OPEN_TRADES = 3;
@@ -108,6 +111,35 @@ export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: $
 export function isActive() { return botActive; }
 
 // --- DATA FETCHING ---
+async function updateDynamicWatchlist() {
+   try {
+      const now = Date.now();
+      // Update watchlist every 6 hours
+      if (now - lastWatchlistUpdate < 6 * 60 * 60 * 1000 && WATCHLIST.length > 20) {
+         return;
+      }
+
+      addLog(`🔄 جلب قائمة العملات من بينانس وتصفية الأقوى سيولة...`, "info");
+      const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
+      let symbols = res.data
+         .filter((s: any) => s.symbol.endsWith('USDT'))
+         .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)); // Sort by USDT volume
+
+      // Take top 80 symbols to avoid low liquidity garbage
+      symbols = symbols.slice(0, 80).map((s: any) => s.symbol);
+
+      if (symbols.length > 0) {
+         // Keep BTC out of the rotation if we want, or just let it rotate. Let's make sure BTC is there? Actually it's fine.
+         WATCHLIST = symbols;
+         lastWatchlistUpdate = now;
+         currentBatchIndex = 0;
+         addLog(`✅ تم تحديث قائمة العملات بنجاح. العدد الكلي: ${WATCHLIST.length} عملة ذهبية سيتم فحصها على دفعات.`, "success");
+      }
+   } catch (e: any) {
+      addLog(`⚠️ فشل تحديث قائمة العملات: ${e.message}`, "error");
+   }
+}
+
 async function fetchKl(symbol: string, interval: string, limit: number) {
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines`, {
       params: { symbol, interval, limit },
@@ -642,6 +674,7 @@ export async function runApexLoop() {
    if (AVOID_HOURS.includes(hour)) return;
 
    try {
+      await updateDynamicWatchlist();
       const ctx = await getContext();
       
       // Calculate overall Net PnL
@@ -671,9 +704,24 @@ export async function runApexLoop() {
 
       if (activeTrades.length >= maxOpenTradesConfig) return;
 
-      // Scan Watchlist
-      addLog(`🦅 APEX PREDATOR scanning ${WATCHLIST.length} assets...`, "info");
-      for (const sym of WATCHLIST) {
+      // Ensure index is valid
+      if (currentBatchIndex >= WATCHLIST.length) {
+         currentBatchIndex = 0;
+      }
+
+      const batchSize = 10;
+      const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
+      const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex);
+      
+      addLog(`🦅 SCANNING BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة...`, "info");
+      
+      // Advance index for next run
+      currentBatchIndex = endBatchIndex;
+      if (currentBatchIndex >= WATCHLIST.length) {
+         currentBatchIndex = 0; // Reset
+      }
+
+      for (const sym of batchSymbols) {
          if (activeTrades.length >= maxOpenTradesConfig) break;
          if (activeTrades.find(t => t.symbol === sym)) continue;
          
