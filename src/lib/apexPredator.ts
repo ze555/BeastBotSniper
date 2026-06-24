@@ -187,6 +187,10 @@ async function getContext() {
    const btc4h = await fetchKl("BTCUSDT", "4h", 210);
    const btc15m = await fetchKl("BTCUSDT", "15m", 30);
    
+   if (btc4h.length < 200 || btc15m.length < 20) {
+      throw new Error("Insufficient BTC context");
+   }
+
    const closes4h = btc4h.map((c: any) => c.close);
    const ema50 = calcEMA(closes4h, 50).pop() || 0;
    const ema200 = calcEMA(closes4h, 200).pop() || 0;
@@ -228,7 +232,9 @@ async function getContext() {
       regime,
       tradeable: !btc_violent, // allow finding trades even if ranging, handled by layer scoring
       btc_chg: btc_15m_chg,
-      avg_fund
+      avg_fund,
+      price,
+      ema200
    };
 }
 
@@ -237,6 +243,10 @@ async function readWhale(symbol: string, btc_chg: number) {
    const c15 = await fetchKl(symbol, "15m", 210);
    const c5 = await fetchKl(symbol, "5m", 30);
    const c4h = await fetchKl(symbol, "4h", 20);
+
+   if (c15.length < 20 || c5.length < 15 || c4h.length < 10) {
+      throw new Error("Insufficient klines for whale reader");
+   }
 
    const cvd15 = []; let c15s = 0; for(let i=c15.length-20; i<c15.length; i++) { c15s += (c15[i].takerBuy - c15[i].takerSell); cvd15.push(c15s); }
    const cvd5 = []; let c5s = 0; for(let i=c5.length-15; i<c5.length; i++) { c5s += (c5[i].takerBuy - c5[i].takerSell); cvd5.push(c5s); }
@@ -299,6 +309,9 @@ async function readWhale(symbol: string, btc_chg: number) {
 
 // --- SEC 3: PRICE READER ---
 async function readPrice(symbol: string, kl: any[]) {
+   if (!kl || kl.length < 50) {
+      throw new Error("Insufficient klines for price reader");
+   }
    const hi = kl.map((k: any) => k.high);
    const lo = kl.map((k: any) => k.low);
    const cl = kl.map((k: any) => k.close);
@@ -394,7 +407,11 @@ async function scoreEntry(symbol: string, ctx: any) {
    else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 0.5; layer1_ss += 2.0; }
    else if (ctx.regime === "BEAR_STRONG") { layer1_ss += 3.0; }
    sl += layer1_sl; ss += layer1_ss;
-   if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; else apexPredatorStats.rules.market_context.failed++;
+   if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; 
+   else {
+       apexPredatorStats.rules.market_context.failed++;
+       console.log(`[Market Context Failed] ctx.regime=${ctx.regime}, price=${ctx.price}, ema200=${ctx.ema200}`);
+   }
 
    // Layer 2
    let layer2_sl = 0, layer2_ss = 0;

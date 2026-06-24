@@ -28,12 +28,20 @@ export const PredatorDashboard: React.FC = () => {
     return () => clearInterval(inv);
   }, []);
 
+  const safeJson = async (res: Response) => {
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await res.json();
+    }
+    throw new Error('Response is not JSON');
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     try {
       const statsRes = await fetch('/api/predator/stats');
       if (statsRes.ok) {
-        const data = await statsRes.json();
+        const data = await safeJson(statsRes);
         setStats(data);
         if (document.activeElement?.tagName !== 'INPUT') {
             setBalanceInput(data.initialBalance?.toString() || '10000');
@@ -48,19 +56,19 @@ export const PredatorDashboard: React.FC = () => {
       }
       const tradesRes = await fetch('/api/trades/active');
       if ( tradesRes.ok) {
-        setTrades(await tradesRes.json());
+        setTrades(await safeJson(tradesRes));
       }
       const closedTradesRes = await fetch('/api/trades/closed');
       if (closedTradesRes.ok) {
-        setClosedTrades(await closedTradesRes.json());
+        setClosedTrades(await safeJson(closedTradesRes));
       }
       const botRes = await fetch('/api/bot/status');
       if (botRes.ok) {
-        setBotActive((await botRes.json()).active);
+        setBotActive((await safeJson(botRes)).active);
       }
       const logsRes = await fetch('/api/system/logs');
       if (logsRes.ok) {
-        setLogs(await logsRes.json());
+        setLogs(await safeJson(logsRes));
       }
     } catch (e) {
       console.error(e);
@@ -72,7 +80,7 @@ export const PredatorDashboard: React.FC = () => {
      try {
        const res = await fetch('/api/bot/toggle', { method: 'POST' });
        if (res.ok) {
-         setBotActive((await res.json()).active);
+         setBotActive((await safeJson(res)).active);
        }
      } catch (e) {
        console.error(e);
