@@ -689,7 +689,7 @@ function closeTradeFull(t: any, reason: string = "") {
    t.pos = 0;
    todaysStats.count++;
    if (t.profitR > 0) todaysStats.wins++; else todaysStats.losses++;
-   todaysStats.pnl += (t.direction === "LONG" ? (t.currentPrice - t.entry) : (t.entry - t.currentPrice)) * t.initialPos;
+   todaysStats.pnl += t.finalPnl;
    activeTrades = activeTrades.filter(tr => tr !== t);
    if (reason) addLog(`🛑 Full Exit ${t.symbol}: ${reason} | Final PnL: ${t.profitR.toFixed(2)}R`, 'warn');
 }

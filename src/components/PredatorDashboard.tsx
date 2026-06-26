@@ -138,7 +138,9 @@ export const PredatorDashboard: React.FC = () => {
   let realizedPnLAmount = 0;
   
   if (stats) {
-     realizedPnLAmount = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
+     // Realized PnL is the difference between current virtual balance and initial balance
+     realizedPnLAmount = stats.balance - stats.initialBalance;
+     // Floating PnL is the sum of PnL from the remaining active positions
      floatingPnLAmount = sovTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
   }
   const totalPnL = realizedPnLAmount + floatingPnLAmount;
