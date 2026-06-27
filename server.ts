@@ -32,6 +32,11 @@ async function startServer() {
         haltLossTarget: req.body.haltLossTarget,
         smartBtcHoldEnabled: req.body.smartBtcHoldEnabled,
         btcVolThresholdStr: req.body.btcVolThresholdStr,
+        scheduleEnabled: req.body.scheduleEnabled,
+        libyaOpen1: req.body.libyaOpen1,
+        libyaClose1: req.body.libyaClose1,
+        libyaOpen2: req.body.libyaOpen2,
+        libyaClose2: req.body.libyaClose2,
      });
      res.json({ success: true });
   });

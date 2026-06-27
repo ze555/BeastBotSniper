@@ -36,6 +36,13 @@ let haltLossTarget = 200;
 let smartBtcHoldEnabled = true;
 let btcVolThresholdStr = "0.80";
 
+// Libya Trading Schedule Config (GMT+2)
+let scheduleEnabled = true;
+let libyaOpen1 = 10;
+let libyaClose1 = 14;
+let libyaOpen2 = 15.5;
+let libyaClose2 = 18;
+
 const logs: any[] = [];
 let closedTrades: any[] = [];
 
@@ -66,7 +73,25 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.haltLossTarget !== undefined) haltLossTarget = opts.haltLossTarget;
       if (opts.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = opts.smartBtcHoldEnabled;
       if (opts.btcVolThresholdStr !== undefined) btcVolThresholdStr = opts.btcVolThresholdStr;
+      if (opts.scheduleEnabled !== undefined) scheduleEnabled = opts.scheduleEnabled;
+      if (opts.libyaOpen1 !== undefined) libyaOpen1 = opts.libyaOpen1;
+      if (opts.libyaClose1 !== undefined) libyaClose1 = opts.libyaClose1;
+      if (opts.libyaOpen2 !== undefined) libyaOpen2 = opts.libyaOpen2;
+      if (opts.libyaClose2 !== undefined) libyaClose2 = opts.libyaClose2;
   }
+}
+
+export function isLibyaTradingAllowed(): boolean {
+   if (!scheduleEnabled) return true;
+   const now = new Date();
+   const utcHour = now.getUTCHours();
+   const utcMin = now.getUTCMinutes();
+   const libyaHour = (utcHour + 2) % 24 + (utcMin / 60);
+
+   const inPeriod1 = (libyaHour >= libyaOpen1 && libyaHour < libyaClose1);
+   const inPeriod2 = (libyaHour >= libyaOpen2 && libyaHour < libyaClose2);
+
+   return inPeriod1 || inPeriod2;
 }
 
 export function addLog(msg: string, type: 'info'|'warn'|'success'|'error' = 'info') {
@@ -90,12 +115,17 @@ export function getStats() {
     haltLossTarget,
     smartBtcHoldEnabled,
     btcVolThresholdStr,
-    isSleeping: [22, 23, 0, 1, 2, 3, 4, 5, 6, 7].includes(new Date().getUTCHours()),
+    scheduleEnabled,
+    libyaOpen1,
+    libyaClose1,
+    libyaOpen2,
+    libyaClose2,
+    isSleeping: !isLibyaTradingAllowed(),
     today: todaysStats 
   }; 
 }
 export function getConfig() {
-  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled };
+  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled, scheduleEnabled, libyaOpen1, libyaClose1, libyaOpen2, libyaClose2 };
 }
 export function setConfig(config: any) {
   if (config.virtualBalance) virtualBalance = config.virtualBalance;
@@ -107,6 +137,11 @@ export function setConfig(config: any) {
   if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
   if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
   if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
+  if (config.scheduleEnabled !== undefined) scheduleEnabled = config.scheduleEnabled;
+  if (config.libyaOpen1 !== undefined) libyaOpen1 = config.libyaOpen1;
+  if (config.libyaClose1 !== undefined) libyaClose1 = config.libyaClose1;
+  if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
+  if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
@@ -391,6 +426,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
+   else if (!isLibyaTradingAllowed()) earlyReason = "OUTSIDE_LIBYA_HOURS";
    else if (w.cvd_mixed) earlyReason = "CVD Mixed";
    else if (w.f_danger) earlyReason = "Funding Danger";
    else if (p.rvol > 5.0) earlyReason = "RVOL Crazy";
@@ -698,9 +734,6 @@ function closeTradeFull(t: any, reason: string = "") {
 export async function runApexLoop() {
    if (!botActive || isLoopRunning) return;
 
-   const hour = new Date().getUTCHours();
-   if (AVOID_HOURS.includes(hour)) return;
-
    isLoopRunning = true;
    try {
       await updateDynamicWatchlist();
@@ -728,12 +761,18 @@ export async function runApexLoop() {
          return;
       }
       
-      // Manage open trades
+      // Manage open trades (Always runs, even outside new trade hours)
       for (const t of activeTrades) {
          await exitBrain(t, ctx);
       }
 
       if (activeTrades.length >= maxOpenTradesConfig) {
+         isLoopRunning = false;
+         return;
+      }
+
+      // Check Libya Schedule before opening new trades
+      if (!isLibyaTradingAllowed()) {
          isLoopRunning = false;
          return;
       }

@@ -20,6 +20,11 @@ export const PredatorDashboard: React.FC = () => {
   const [haltLossTarget, setHaltLossTarget] = useState('200');
   const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
   const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
+  const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [libyaOpen1, setLibyaOpen1] = useState('10');
+  const [libyaClose1, setLibyaClose1] = useState('14');
+  const [libyaOpen2, setLibyaOpen2] = useState('15.5');
+  const [libyaClose2, setLibyaClose2] = useState('18');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
@@ -52,6 +57,11 @@ export const PredatorDashboard: React.FC = () => {
             if (data.haltLossEnabled !== undefined) setHaltLossEnabled(data.haltLossEnabled);
             if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
             if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
+            if (data.scheduleEnabled !== undefined) setScheduleEnabled(data.scheduleEnabled);
+            if (data.libyaOpen1 !== undefined) setLibyaOpen1(data.libyaOpen1.toString());
+            if (data.libyaClose1 !== undefined) setLibyaClose1(data.libyaClose1.toString());
+            if (data.libyaOpen2 !== undefined) setLibyaOpen2(data.libyaOpen2.toString());
+            if (data.libyaClose2 !== undefined) setLibyaClose2(data.libyaClose2.toString());
         }
       }
       const tradesRes = await fetch('/api/trades/active');
@@ -102,6 +112,11 @@ export const PredatorDashboard: React.FC = () => {
                   haltLossTarget: Number(haltLossTarget),
                   smartBtcHoldEnabled,
                   btcVolThresholdStr,
+                  scheduleEnabled,
+                  libyaOpen1: Number(libyaOpen1),
+                  libyaClose1: Number(libyaClose1),
+                  libyaOpen2: Number(libyaOpen2),
+                  libyaClose2: Number(libyaClose2),
               })
           });
           await fetchData();
@@ -430,6 +445,58 @@ export const PredatorDashboard: React.FC = () => {
                             onChange={(e) => setBtcVolThresholdStr(e.target.value)}
                             className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
                         />
+                    </div>
+                 </div>
+
+                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
+                    <label className="flex items-start sm:items-center gap-3 cursor-pointer mb-4">
+                        <input 
+                           type="checkbox" 
+                           checked={scheduleEnabled}
+                           onChange={(e) => setScheduleEnabled(e.target.checked)}
+                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500 focus:ring-offset-slate-900" 
+                        />
+                        <div>
+                           <span className="text-sm text-slate-200 font-bold block mb-1">تفعيل نظام جدولة التداول (توقيت ليبيا)</span>
+                           <span className="text-[11px] text-slate-400 block leading-relaxed">
+                               عند التفعيل، سيقوم الروبوت بفتح صفقات جديدة فقط خلال الفترات المحددة بالأسفل (الرجاء ادخال التوقيت بنظام 24 ساعة، مثلاً 15.5 يعني 3:30 عصراً). الصفقات المفتوحة مسبقاً ستستمر وتدار بشكل طبيعي حتى خارج أوقات العمل.
+                           </span>
+                        </div>
+                    </label>
+
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity duration-300 ${scheduleEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                        <div className="space-y-2">
+                            <label className="text-xs text-emerald-400 font-bold block">الفترة الأولى - الفتح</label>
+                            <input 
+                                type="number" step="0.5" min="0" max="24"
+                                value={libyaOpen1} onChange={(e) => setLibyaOpen1(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-emerald-500 focus:outline-none"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs text-rose-400 font-bold block">الفترة الأولى - الإغلاق</label>
+                            <input 
+                                type="number" step="0.5" min="0" max="24"
+                                value={libyaClose1} onChange={(e) => setLibyaClose1(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-rose-500 focus:outline-none"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs text-emerald-400 font-bold block">الفترة الثانية - الفتح</label>
+                            <input 
+                                type="number" step="0.5" min="0" max="24"
+                                value={libyaOpen2} onChange={(e) => setLibyaOpen2(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-emerald-500 focus:outline-none"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs text-rose-400 font-bold block">الفترة الثانية - الإغلاق</label>
+                            <input 
+                                type="number" step="0.5" min="0" max="24"
+                                value={libyaClose2} onChange={(e) => setLibyaClose2(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-rose-500 focus:outline-none"
+                            />
+                        </div>
                     </div>
                  </div>
                  </div>
