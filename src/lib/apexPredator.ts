@@ -35,6 +35,7 @@ let haltLossEnabled = false;
 let haltLossTarget = 200;
 let smartBtcHoldEnabled = true;
 let btcVolThresholdStr = "0.80";
+let slAtrMultiplier = 1.5;
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -73,6 +74,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.haltLossTarget !== undefined) haltLossTarget = opts.haltLossTarget;
       if (opts.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = opts.smartBtcHoldEnabled;
       if (opts.btcVolThresholdStr !== undefined) btcVolThresholdStr = opts.btcVolThresholdStr;
+      if (opts.slAtrMultiplier !== undefined) slAtrMultiplier = opts.slAtrMultiplier;
       if (opts.scheduleEnabled !== undefined) scheduleEnabled = opts.scheduleEnabled;
       if (opts.libyaOpen1 !== undefined) libyaOpen1 = opts.libyaOpen1;
       if (opts.libyaClose1 !== undefined) libyaClose1 = opts.libyaClose1;
@@ -115,6 +117,7 @@ export function getStats() {
     haltLossTarget,
     smartBtcHoldEnabled,
     btcVolThresholdStr,
+    slAtrMultiplier,
     scheduleEnabled,
     libyaOpen1,
     libyaClose1,
@@ -125,7 +128,7 @@ export function getStats() {
   }; 
 }
 export function getConfig() {
-  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled, scheduleEnabled, libyaOpen1, libyaClose1, libyaOpen2, libyaClose2 };
+  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled, slAtrMultiplier, scheduleEnabled, libyaOpen1, libyaClose1, libyaOpen2, libyaClose2 };
 }
 export function setConfig(config: any) {
   if (config.virtualBalance) virtualBalance = config.virtualBalance;
@@ -137,6 +140,7 @@ export function setConfig(config: any) {
   if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
   if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
   if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
+  if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
   if (config.scheduleEnabled !== undefined) scheduleEnabled = config.scheduleEnabled;
   if (config.libyaOpen1 !== undefined) libyaOpen1 = config.libyaOpen1;
   if (config.libyaClose1 !== undefined) libyaClose1 = config.libyaClose1;
@@ -532,7 +536,7 @@ function executeTrade(symbol: string, decision: any) {
       const entry = p.price;
       const c = p.klines;
       const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
-      const sl = realLow - (p.atr14 * 0.25);
+      const sl = realLow - (p.atr14 * slAtrMultiplier);
       const slDist = entry - sl;
 
       const tp1 = entry + (slDist * 1.0);
@@ -570,7 +574,7 @@ function executeTrade(symbol: string, decision: any) {
       const entry = p.price;
       const c = p.klines;
       const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
-      const sl = realHigh + (p.atr14 * 0.25);
+      const sl = realHigh + (p.atr14 * slAtrMultiplier);
       const slDist = sl - entry;
 
       const tp1 = entry - (slDist * 1.0);

@@ -20,6 +20,7 @@ export const PredatorDashboard: React.FC = () => {
   const [haltLossTarget, setHaltLossTarget] = useState('200');
   const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
   const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
+  const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.5');
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [libyaOpen1, setLibyaOpen1] = useState('10');
   const [libyaClose1, setLibyaClose1] = useState('14');
@@ -57,6 +58,7 @@ export const PredatorDashboard: React.FC = () => {
             if (data.haltLossEnabled !== undefined) setHaltLossEnabled(data.haltLossEnabled);
             if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
             if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
+            if (data.slAtrMultiplier !== undefined) setSlAtrMultiplier(data.slAtrMultiplier.toString());
             if (data.scheduleEnabled !== undefined) setScheduleEnabled(data.scheduleEnabled);
             if (data.libyaOpen1 !== undefined) setLibyaOpen1(data.libyaOpen1.toString());
             if (data.libyaClose1 !== undefined) setLibyaClose1(data.libyaClose1.toString());
@@ -112,6 +114,7 @@ export const PredatorDashboard: React.FC = () => {
                   haltLossTarget: Number(haltLossTarget),
                   smartBtcHoldEnabled,
                   btcVolThresholdStr,
+                  slAtrMultiplier: Number(slAtrMultiplier),
                   scheduleEnabled,
                   libyaOpen1: Number(libyaOpen1),
                   libyaClose1: Number(libyaClose1),
@@ -446,6 +449,21 @@ export const PredatorDashboard: React.FC = () => {
                             className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
                         />
                     </div>
+                 </div>
+
+                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
+                    <label className="text-sm text-slate-200 font-bold block mb-1">مضاعف الـ ATR لوقف الخسارة (SL ATR Multiplier)</label>
+                    <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
+                        يحدد مسافة وقف الخسارة بناءً على مؤشر الـ ATR. القيمة الافتراضية 1.5. كلما زادت القيمة كلما زادت مسافة وقف الخسارة (أكثر أماناً من التذبذبات ولكن يزيد حجم المخاطرة).
+                    </span>
+                    <input 
+                        type="number" 
+                        step="0.1"
+                        min="0.1"
+                        value={slAtrMultiplier}
+                        onChange={(e) => setSlAtrMultiplier(e.target.value)}
+                        className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
+                    />
                  </div>
 
                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
