@@ -33,6 +33,7 @@ async function startServer() {
         smartBtcHoldEnabled: req.body.smartBtcHoldEnabled,
         btcVolThresholdStr: req.body.btcVolThresholdStr,
         slAtrMultiplier: req.body.slAtrMultiplier,
+        geniusMode: req.body.geniusMode,
         scheduleEnabled: req.body.scheduleEnabled,
         libyaOpen1: req.body.libyaOpen1,
         libyaClose1: req.body.libyaClose1,

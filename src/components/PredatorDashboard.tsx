@@ -21,6 +21,7 @@ export const PredatorDashboard: React.FC = () => {
   const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
   const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
   const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.5');
+  const [geniusMode, setGeniusMode] = useState(true);
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [libyaOpen1, setLibyaOpen1] = useState('10');
   const [libyaClose1, setLibyaClose1] = useState('14');
@@ -59,6 +60,7 @@ export const PredatorDashboard: React.FC = () => {
             if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
             if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
             if (data.slAtrMultiplier !== undefined) setSlAtrMultiplier(data.slAtrMultiplier.toString());
+            if (data.geniusMode !== undefined) setGeniusMode(data.geniusMode);
             if (data.scheduleEnabled !== undefined) setScheduleEnabled(data.scheduleEnabled);
             if (data.libyaOpen1 !== undefined) setLibyaOpen1(data.libyaOpen1.toString());
             if (data.libyaClose1 !== undefined) setLibyaClose1(data.libyaClose1.toString());
@@ -115,6 +117,7 @@ export const PredatorDashboard: React.FC = () => {
                   smartBtcHoldEnabled,
                   btcVolThresholdStr,
                   slAtrMultiplier: Number(slAtrMultiplier),
+                  geniusMode,
                   scheduleEnabled,
                   libyaOpen1: Number(libyaOpen1),
                   libyaClose1: Number(libyaClose1),
@@ -451,7 +454,24 @@ export const PredatorDashboard: React.FC = () => {
                     </div>
                  </div>
 
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
+                 
+                 <div className="bg-slate-950 p-4 rounded-xl border border-blue-500/50 mt-2 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
+                    <label className="flex items-start sm:items-center gap-3 cursor-pointer">
+                        <input 
+                           type="checkbox" 
+                           checked={geniusMode}
+                           onChange={(e) => setGeniusMode(e.target.checked)}
+                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500" 
+                        />
+                        <div>
+                           <span className="text-sm text-blue-400 font-bold block mb-1">🤖 وضع العبقرية (Genius Mode)</span>
+                           <span className="text-[11px] text-slate-400 block leading-relaxed">
+                               يحد من الصفقات الخاسرة برفع معايير الدخول (فقط 🥈 أو 💎)، يسرّع تأمين الصفقة (Breakeven) عند 0.6R بدلاً من 1R، ويفلتر الأسواق المتقلبة.
+                           </span>
+                        </div>
+                    </label>
+                 </div>
+<div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
                     <label className="text-sm text-slate-200 font-bold block mb-1">مضاعف الـ ATR لوقف الخسارة (SL ATR Multiplier)</label>
                     <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
                         يحدد مسافة وقف الخسارة بناءً على مؤشر الـ ATR. القيمة الافتراضية 1.5. كلما زادت القيمة كلما زادت مسافة وقف الخسارة (أكثر أماناً من التذبذبات ولكن يزيد حجم المخاطرة).

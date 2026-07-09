@@ -17,7 +17,7 @@ let WATCHLIST: string[] = [
 let currentBatchIndex = 0;
 let lastWatchlistUpdate = 0;
 
-const MIN_ENTRY_SCORE = 6.0;
+
 const MIN_RR_REQUIRED = 2.5;
 const MAX_OPEN_TRADES = 3;
 const MAX_DAILY_LOSS = 0.040;
@@ -36,6 +36,7 @@ let haltLossTarget = 200;
 let smartBtcHoldEnabled = true;
 let btcVolThresholdStr = "0.80";
 let slAtrMultiplier = 1.5;
+let geniusMode = true;
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -75,6 +76,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = opts.smartBtcHoldEnabled;
       if (opts.btcVolThresholdStr !== undefined) btcVolThresholdStr = opts.btcVolThresholdStr;
       if (opts.slAtrMultiplier !== undefined) slAtrMultiplier = opts.slAtrMultiplier;
+      if (opts.geniusMode !== undefined) geniusMode = opts.geniusMode;
       if (opts.scheduleEnabled !== undefined) scheduleEnabled = opts.scheduleEnabled;
       if (opts.libyaOpen1 !== undefined) libyaOpen1 = opts.libyaOpen1;
       if (opts.libyaClose1 !== undefined) libyaClose1 = opts.libyaClose1;
@@ -118,6 +120,7 @@ export function getStats() {
     smartBtcHoldEnabled,
     btcVolThresholdStr,
     slAtrMultiplier,
+    geniusMode,
     scheduleEnabled,
     libyaOpen1,
     libyaClose1,
@@ -128,7 +131,7 @@ export function getStats() {
   }; 
 }
 export function getConfig() {
-  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled, slAtrMultiplier, scheduleEnabled, libyaOpen1, libyaClose1, libyaOpen2, libyaClose2 };
+  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled, slAtrMultiplier, geniusMode, scheduleEnabled, libyaOpen1, libyaClose1, libyaOpen2, libyaClose2 };
 }
 export function setConfig(config: any) {
   if (config.virtualBalance) virtualBalance = config.virtualBalance;
@@ -141,6 +144,7 @@ export function setConfig(config: any) {
   if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
   if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
   if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
+  if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
   if (config.scheduleEnabled !== undefined) scheduleEnabled = config.scheduleEnabled;
   if (config.libyaOpen1 !== undefined) libyaOpen1 = config.libyaOpen1;
   if (config.libyaClose1 !== undefined) libyaClose1 = config.libyaClose1;
@@ -437,6 +441,8 @@ async function scoreEntry(symbol: string, ctx: any) {
    else if (p.rsi > 78 || p.rsi < 22) earlyReason = "RSI Exhst";
    else if (p.adx > 60) earlyReason = "ADX Exhst";
    else if (w.scenario === "SHORT_COVER" || w.scenario === "LONG_LIQ") earlyReason = `TEMP: ${w.scenario}`;
+   if (geniusMode && Math.abs(ctx.btc_chg) > 2.0 && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
+   if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
 
    let sl = 0.0, ss = 0.0;
 
@@ -522,8 +528,9 @@ async function scoreEntry(symbol: string, ctx: any) {
       return { label: "⏳ WAIT", risk: 0, mult: 0 };
    }
 
-   if (sl >= MIN_ENTRY_SCORE && sl > ss) { apexPredatorStats.acceptedLongs++; return { signal: "LONG", score: sl, grade: getGrade(sl), p, w, ctx }; }
-   if (ss >= MIN_ENTRY_SCORE && ss > sl) { apexPredatorStats.acceptedShorts++; return { signal: "SHORT", score: ss, grade: getGrade(ss), p, w, ctx }; }
+   const minScore = geniusMode ? 7.2 : 6.0;
+   if (sl >= minScore && sl > ss) { apexPredatorStats.acceptedLongs++; return { signal: "LONG", score: sl, grade: getGrade(sl), p, w, ctx }; }
+   if (ss >= minScore && ss > sl) { apexPredatorStats.acceptedShorts++; return { signal: "SHORT", score: ss, grade: getGrade(ss), p, w, ctx }; }
    return { signal: "WAIT", sl, ss };
 }
 
@@ -668,11 +675,11 @@ async function exitBrain(trade: any, ctx: any) {
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
    if (!t.a_closed) {
-      if (profitR >= 1.0) {
+      if (profitR >= (geniusMode ? 0.6 : 1.0)) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry; // BE
          t.a_closed = true; t.be_done = true;
-         addLog(`🎯 EXIT A (35%) ${t.symbol} | RR 1.0`, 'success');
+         addLog(`🎯 EXIT A (35%) ${t.symbol} | RR ${geniusMode ? "0.6" : "1.0"}`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.3) {
          closePart(t, "A", t.part_a);
          t.sl = t.direction === "LONG" ? price - p.atr14*0.5 : price + p.atr14*0.5;
