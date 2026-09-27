@@ -24,18 +24,18 @@ const MAX_DAILY_LOSS = 0.040;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
 const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
-let virtualBalance = 10000;
-let initialVirtualBalance = 10000;
+let virtualBalance = 1000;
+let initialVirtualBalance = 1000;
 let maxOpenTradesConfig = 3;
 
 // New Config
 let haltProfitEnabled = false;
-let haltProfitTarget = 500;
+let haltProfitTarget = 150;
 let haltLossEnabled = false;
-let haltLossTarget = 200;
+let haltLossTarget = 50;
 let smartBtcHoldEnabled = true;
 let btcVolThresholdStr = "0.80";
-let slAtrMultiplier = 1.5;
+let slAtrMultiplier = 1.3;
 let geniusMode = true;
 
 // Libya Trading Schedule Config (GMT+2)
@@ -64,7 +64,7 @@ let apexPredatorStats: any = {
 
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
   initialVirtualBalance = balance;
-  if (virtualBalance === 10000 && balance !== 10000 && closedTrades.length === 0) {
+  if (closedTrades.length === 0 && activeTrades.length === 0) {
      virtualBalance = balance;
   }
   maxOpenTradesConfig = maxTrades;
@@ -521,14 +521,39 @@ async function scoreEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: earlyReason };
    }
 
+   // High win-rate filters for 3:1 Genius Mode
+   if (geniusMode) {
+      // 1. Strict Market Regime filter:
+      if (ctx.regime.includes("BEAR") && !w.asset_strong) {
+         sl = 0; // Don't buy in bear regime unless asset is extremely strong against BTC
+      }
+      if (ctx.regime.includes("BULL") && !w.asset_strong) {
+         ss = 0; // Don't short in bull regime unless asset is clearly collapsing
+      }
+
+      // 2. High-probability RSI Momentum Corridor:
+      if (p.rsi > 68) sl -= 2.5; // Avoid buying overbought tops
+      if (p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms
+      if (p.rsi >= 50 && p.rsi <= 66) sl += 1.0;
+      if (p.rsi <= 50 && p.rsi >= 34) ss += 1.0;
+
+      // 3. Supertrend & Trend Confluence:
+      if (p.st_bull && p.price > p.ema50) sl += 1.2;
+      if (p.st_bear && p.price < p.ema50) ss += 1.2;
+
+      // 4. Whale Orderflow Bias:
+      if (w.scenario === "INST_LONG" && w.triple_bull) sl += 1.5;
+      if (w.scenario === "INST_SHORT" && w.triple_bear) ss += 1.5;
+   }
+
    function getGrade(score: number) {
-      if (score >= 8.5) return { label: "💎 GOLD", risk: 0.018, mult: 1.0 };
-      if (score >= 7.0) return { label: "🥈 SILVER", risk: 0.012, mult: 0.85 };
-      if (score >= 6.0) return { label: "🥉 BRONZE", risk: 0.012, mult: 0.70 };
+      if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.015, mult: 1.0 };
+      if (score >= 7.6) return { label: "🥈 APEX 3:1 SILVER", risk: 0.010, mult: 0.85 };
+      if (score >= 6.8) return { label: "🥉 BRONZE", risk: 0.008, mult: 0.70 };
       return { label: "⏳ WAIT", risk: 0, mult: 0 };
    }
 
-   const minScore = geniusMode ? 7.2 : 6.0;
+   const minScore = geniusMode ? 7.6 : 6.8;
    if (sl >= minScore && sl > ss) { apexPredatorStats.acceptedLongs++; return { signal: "LONG", score: sl, grade: getGrade(sl), p, w, ctx }; }
    if (ss >= minScore && ss > sl) { apexPredatorStats.acceptedShorts++; return { signal: "SHORT", score: ss, grade: getGrade(ss), p, w, ctx }; }
    return { signal: "WAIT", sl, ss };
@@ -546,9 +571,9 @@ function executeTrade(symbol: string, decision: any) {
       const sl = realLow - (p.atr14 * slAtrMultiplier);
       const slDist = entry - sl;
 
-      const tp1 = entry + (slDist * 1.0);
-      const tp2 = entry + (slDist * 2.0);
-      const tp3 = entry + (slDist * 3.5);
+      const tp1 = entry + (slDist * 0.75); // Quick Win TP1 (Banks 40% of trade)
+      const tp2 = entry + (slDist * 1.80); // Major Target TP2 (Banks 35% of trade)
+      const tp3 = entry + (slDist * 3.50); // Runner TP3 (Banks 25% of trade)
 
       if ((tp3 - entry) / slDist < MIN_RR_REQUIRED) {
          addLog(`❌ رُفض ${symbol}: RR دون الحد`, "error");
@@ -559,7 +584,7 @@ function executeTrade(symbol: string, decision: any) {
       activeTrades.push({
          symbol, direction: "LONG", entry, sl, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
-         part_a: 0.35, part_b: 0.40, part_c: 0.25,
+         part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
          atr: p.atr14, peak_r: 0,
@@ -584,9 +609,9 @@ function executeTrade(symbol: string, decision: any) {
       const sl = realHigh + (p.atr14 * slAtrMultiplier);
       const slDist = sl - entry;
 
-      const tp1 = entry - (slDist * 1.0);
-      const tp2 = entry - (slDist * 2.0);
-      const tp3 = entry - (slDist * 3.5);
+      const tp1 = entry - (slDist * 0.75);
+      const tp2 = entry - (slDist * 1.80);
+      const tp3 = entry - (slDist * 3.50);
 
       if ((entry - tp3) / slDist < MIN_RR_REQUIRED) return;
 
@@ -594,7 +619,7 @@ function executeTrade(symbol: string, decision: any) {
       activeTrades.push({
          symbol, direction: "SHORT", entry, sl, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
-         part_a: 0.35, part_b: 0.40, part_c: 0.25,
+         part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
          atr: p.atr14, peak_r: 0,
@@ -674,45 +699,71 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
+   // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.70R)
    if (!t.a_closed) {
-      if (profitR >= (geniusMode ? 0.6 : 1.0)) {
+      if (profitR >= 0.70) {
          closePart(t, "A", t.part_a);
-         t.sl = t.entry; // BE
-         t.a_closed = true; t.be_done = true;
-         addLog(`🎯 EXIT A (35%) ${t.symbol} | RR ${geniusMode ? "0.6" : "1.0"}`, 'success');
-      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.3) {
+         // Move SL to Entry + 0.05R (guarantees positive trade accounting for exchange fees)
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.05) : t.entry - (slDist * 0.05);
+         t.a_closed = true; 
+         t.be_done = true;
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +0.70R | 🛡️ تم نقل الوقف للدخول + رسوم (الصفقة مؤمنة بربح)`, 'success');
+      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
-         t.sl = t.direction === "LONG" ? price - p.atr14*0.5 : price + p.atr14*0.5;
+         t.sl = t.entry;
          t.a_closed = true;
+         t.be_done = true;
+         addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
       }
    }
 
+   // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      if (profitR >= 2.0) {
+      if (profitR >= 1.80) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
-         addLog(`🎯 EXIT B (40%) ${t.symbol} | RR 2.0`, 'success');
+         // Lock in TP1 level as floor profit
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.70) : t.entry - (slDist * 0.70);
+         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +1.80R | تم حجز الأرباح ورفع الوقف لمستوى +0.70R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
       }
    }
 
+   // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
    if (t.b_closed && !t.c_closed) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
-      if (profitR >= 3.5 || exhaust >= 8 || peak >= 8) {
+      if (profitR >= 3.50 || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
-         addLog(`🏁 EXIT C (25%) ${t.symbol} | RR 3.5+`, 'success');
-         closeTradeFull(t);
+         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +3.50R صيد الاتجاه بالكامل 🏆`, 'success');
+         closeTradeFull(t, "TP3 Full Target Hit");
+         return;
+      }
+   }
+
+   // 4. SMART EARLY LOSS MITIGATION
+   // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
+   if (!t.a_closed && profitR < -0.40) {
+      const c = p.klines;
+      const recentCloses = c.slice(-2).map((k: any) => k.close);
+      const isBreakingEMA = t.direction === "LONG" 
+         ? recentCloses.every((cl: number) => cl < p.ema21) 
+         : recentCloses.every((cl: number) => cl > p.ema21);
+      
+      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
+         addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
+         closeTradeFull(t, "Early Invalidation");
+         return;
       }
    }
 
    // Hard SL Hit
-   if (t.direction === "LONG" && price <= t.sl) closeTradeFull(t, "SL Hit");
-   if (t.direction === "SHORT" && price >= t.sl) closeTradeFull(t, "SL Hit");
+   if (t.direction === "LONG" && price <= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
+   if (t.direction === "SHORT" && price >= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
 }
 
 function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close - klines[klines.length-1].open); }

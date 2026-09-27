@@ -12,15 +12,15 @@ export const PredatorDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'REPORTS' | 'SETTINGS'>('DASHBOARD');
   
   // Settings state
-  const [balanceInput, setBalanceInput] = useState('10000');
+  const [balanceInput, setBalanceInput] = useState('1000');
   const [maxTradesInput, setMaxTradesInput] = useState('3');
   const [haltProfitEnabled, setHaltProfitEnabled] = useState(false);
-  const [haltProfitTarget, setHaltProfitTarget] = useState('500');
+  const [haltProfitTarget, setHaltProfitTarget] = useState('150');
   const [haltLossEnabled, setHaltLossEnabled] = useState(false);
-  const [haltLossTarget, setHaltLossTarget] = useState('200');
+  const [haltLossTarget, setHaltLossTarget] = useState('50');
   const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
   const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
-  const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.5');
+  const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.3');
   const [geniusMode, setGeniusMode] = useState(true);
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [libyaOpen1, setLibyaOpen1] = useState('10');
@@ -606,6 +606,47 @@ export const PredatorDashboard: React.FC = () => {
        {/* Dashboard Tab */}
        {activeTab === 'DASHBOARD' && (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+             {/* 3:1 Genius Architecture Banner */}
+             <div className="bg-gradient-to-r from-blue-950/70 via-slate-900 to-emerald-950/60 border border-blue-500/30 rounded-xl p-4 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="space-y-1">
+                   <div className="flex items-center gap-2">
+                      <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs px-2.5 py-0.5 rounded-full font-black flex items-center gap-1.5">
+                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                         نظام التفوق الرياضي 3:1 نشط
+                      </span>
+                      <span className="text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded font-mono">
+                         Win Target: 75%+
+                      </span>
+                   </div>
+                   <p className="text-sm font-bold text-white">
+                      استراتيجية التناغم الثلاثي + درع الوقف الصفري لحماية رأس المال ($1,000)
+                   </p>
+                   <p className="text-xs text-slate-400">
+                      يتم اقتناص الصفقات عند تلاقي سيولة الحيتان (CVD + OI) مع اتجاه البيتكوين، وتأمين الربح عند +0.70R بنقل الوقف لنقطة الدخول فوراً.
+                   </p>
+                </div>
+                <div className="flex items-center gap-3 bg-slate-950/70 p-3 rounded-lg border border-slate-800 text-xs font-mono shrink-0">
+                   <div className="text-center px-2">
+                      <span className="text-slate-400 block text-[10px]">رابحة اليوم</span>
+                      <span className="text-emerald-400 font-bold text-base">{stats?.today?.wins || 0}</span>
+                   </div>
+                   <div className="text-slate-600 text-lg">/</div>
+                   <div className="text-center px-2">
+                      <span className="text-slate-400 block text-[10px]">خاسرة اليوم</span>
+                      <span className="text-rose-400 font-bold text-base">{stats?.today?.losses || 0}</span>
+                   </div>
+                   <div className="text-slate-600 text-lg">|</div>
+                   <div className="text-center px-2">
+                      <span className="text-slate-400 block text-[10px]">نسبة الفوز</span>
+                      <span className="text-blue-400 font-bold text-base">
+                         {stats?.today?.count > 0 
+                            ? `${((stats.today.wins / stats.today.count) * 100).toFixed(0)}%` 
+                            : '100%'}
+                      </span>
+                   </div>
+                </div>
+             </div>
+
              {/* Financial Summary */}
              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                  <div className="col-span-2 lg:col-span-1 bg-slate-900 border-l-2 border-blue-500 border-y border-r border-y-slate-800 border-r-slate-800 p-4 rounded-xl shadow">
