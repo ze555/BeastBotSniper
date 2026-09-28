@@ -722,9 +722,9 @@ async function scoreEntry(symbol: string, ctx: any) {
    }
 
    function getGrade(score: number) {
-      if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.015, mult: 1.0 };
-      if (score >= 7.6) return { label: "🥈 APEX 3:1 SILVER", risk: 0.010, mult: 0.85 };
-      if (score >= 6.8) return { label: "🥉 BRONZE", risk: 0.008, mult: 0.70 };
+      if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.010, mult: 1.0 };
+      if (score >= 7.6) return { label: "🥈 APEX 3:1 SILVER", risk: 0.007, mult: 1.0 };
+      if (score >= 6.8) return { label: "🥉 BRONZE", risk: 0.005, mult: 1.0 };
       return { label: "⏳ WAIT", risk: 0, mult: 0 };
    }
 
@@ -758,19 +758,21 @@ function executeTrade(symbol: string, decision: any) {
       const sl = isPullback 
          ? Math.min(realLow, p.ema21) - (p.atr14 * slMultiplier)
          : realLow - (p.atr14 * slMultiplier);
-      const slDist = entry - sl;
+      const realSlDist = entry - sl;
+      if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
 
       const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
       const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
       const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
 
-      if ((tp3 - entry) / slDist < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض ${symbol}: RR دون الحد`, "error");
+      const calculatedRR = (tp3 - entry) / realSlDist;
+      if (calculatedRR < MIN_RR_REQUIRED) {
+         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
          return;
       }
 
-      let pos = riskAmt / slDist;
+      let pos = riskAmt / realSlDist;
       activeTrades.push({
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
@@ -802,16 +804,21 @@ function executeTrade(symbol: string, decision: any) {
       const sl = isPullback 
          ? Math.max(realHigh, p.ema21) + (p.atr14 * slMultiplier)
          : realHigh + (p.atr14 * slMultiplier);
-      const slDist = sl - entry;
+      const realSlDist = sl - entry;
+      if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
 
       const tp1 = entry - (initialSlDist * TP1_R);
       const tp2 = entry - (initialSlDist * TP2_R);
       const tp3 = entry - (initialSlDist * TP3_R);
 
-      if ((entry - tp3) / slDist < MIN_RR_REQUIRED) return;
+      const calculatedRR = (entry - tp3) / realSlDist;
+      if (calculatedRR < MIN_RR_REQUIRED) {
+         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+         return;
+      }
 
-      let pos = riskAmt / slDist;
+      let pos = riskAmt / realSlDist;
       activeTrades.push({
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
@@ -1060,11 +1067,24 @@ export async function runApexLoop() {
          await exitBrain(t, ctx);
       }
 
-      // Daily Loss Limit Protection (4% of initial balance)
+      // Daily Loss Limit Protection (4% of initial balance, including floating PnL)
       const dailyLossLimit = initialVirtualBalance * MAX_DAILY_LOSS;
-      if (todaysStats.pnl <= -dailyLossLimit) {
-         addLog(`🛑 DAILY LOSS LIMIT REACHED: ${todaysStats.pnl.toFixed(2)} / -${dailyLossLimit.toFixed(2)} | تم إيقاف الروبوت لحماية رأس المال`, "error");
+      let openFloatingPnl = 0;
+      for (const t of activeTrades) {
+         if (t.pnl) openFloatingPnl += t.pnl;
+      }
+      const totalDailyPnl = todaysStats.pnl + openFloatingPnl;
+
+      if (totalDailyPnl <= -dailyLossLimit) {
+         addLog(`🛑 DAILY LOSS LIMIT REACHED: إجمالي خسارة اليوم (محققة + عائمة) $${totalDailyPnl.toFixed(2)} بلغت الحد الأقصى -$${dailyLossLimit.toFixed(2)} (4%). تم إيقاف فتح صفقات جديدة لحماية رأس المال.`, "error");
          botActive = false;
+         isLoopRunning = false;
+         return;
+      }
+
+      // BTC Violent Regime check: if BTC is violent (ctx.tradeable === false), block new trades
+      if (ctx.tradeable === false) {
+         addLog("⚠️ BTC Violent Regime: تم حظر فتح صفقات جديدة نظراً لتذبذب بيتكوين العنيف.", "warn");
          isLoopRunning = false;
          return;
       }
