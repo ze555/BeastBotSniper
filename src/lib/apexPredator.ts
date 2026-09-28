@@ -1,5 +1,6 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
+import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
 
 const BINANCE_FAPI = "https://fapi.binance.com";
 let watcherInterval: NodeJS.Timeout | null = null;
@@ -121,7 +122,7 @@ export function addLog(msg: string, type: 'info'|'warn'|'success'|'error' = 'inf
 }
 
 export function resetDailyStatsIfNeeded() {
-   const today = new Date().toISOString().slice(0, 10);
+   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Tripoli' }).format(new Date());
    if (today !== statsDay) {
       todaysStats = {
          count: 0,
@@ -131,7 +132,7 @@ export function resetDailyStatsIfNeeded() {
          sumR: 0
       };
       statsDay = today;
-      addLog("📅 Daily statistics reset", "info");
+      addLog(`📅 Daily statistics reset (Libya 00:00: ${today})`, "info");
    }
 }
 
@@ -728,20 +729,79 @@ async function scoreEntry(symbol: string, ctx: any) {
       return { label: "⏳ WAIT", risk: 0, mult: 0 };
    }
 
+   // --- BEAST ARCHITECTURE REASONING EVALUATION ---
+   // Evaluates: Market Regime -> Flow Interpretation -> Scenarios -> Location -> Confirmation
+   const reasoning: ReasoningResult = evaluateSymbolReasoning(
+      symbol,
+      ctx,
+      p,
+      w,
+      { sl, ss }
+   );
+
    const minScore = geniusMode ? 7.6 : 6.8;
-   if (sl >= minScore && sl > ss) { 
-      apexPredatorStats.acceptedLongs++; 
-      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-      else apexPredatorStats.breakoutSetups++;
-      return { signal: "LONG", score: sl, grade: getGrade(sl), setupType, p, w, ctx }; 
+
+   // Confirmation Gatekeeper: PREDICTION != ENTRY and SIGNAL != CONFIRMATION
+   // Both directional signal AND strict ConfirmationEngine must agree
+   if (reasoning.confirmation.isConfirmed) {
+      if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
+         apexPredatorStats.acceptedLongs++;
+         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+         else apexPredatorStats.breakoutSetups++;
+
+         // Log deep reasoning breakdown
+         addLog(
+            `🧠 [REASONING CONFIRMED] LONG ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
+            `Primary: ${reasoning.scenario.primary.type} | Score: ${sl.toFixed(1)}/10`,
+            "info"
+         );
+
+         return {
+            signal: "LONG",
+            score: sl,
+            grade: getGrade(sl),
+            setupType: reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : setupType,
+            p,
+            w,
+            ctx,
+            reasoning
+         };
+      }
+
+      if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
+         apexPredatorStats.acceptedShorts++;
+         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+         else apexPredatorStats.breakoutSetups++;
+
+         addLog(
+            `🧠 [REASONING CONFIRMED] SHORT ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
+            `Primary: ${reasoning.scenario.primary.type} | Score: ${ss.toFixed(1)}/10`,
+            "info"
+         );
+
+         return {
+            signal: "SHORT",
+            score: ss,
+            grade: getGrade(ss),
+            setupType: reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : setupType,
+            p,
+            w,
+            ctx,
+            reasoning
+         };
+      }
    }
-   if (ss >= minScore && ss > sl) { 
-      apexPredatorStats.acceptedShorts++; 
-      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-      else apexPredatorStats.breakoutSetups++;
-      return { signal: "SHORT", score: ss, grade: getGrade(ss), setupType, p, w, ctx }; 
+
+   // If indicator score was high but confirmation rejected or waiting:
+   if ((sl >= minScore || ss >= minScore) && !reasoning.confirmation.isConfirmed) {
+      if (reasoning.location.nearResistance && sl >= minScore) {
+         addLog(`⏳ ${symbol}: سيناريو صعودي نشط (${reasoning.scenario.primary.type}) لكن السعر ملاصق للمقاومة (${reasoning.location.nearestResistance.toFixed(4)}). بانتظار التأكيد.`, "info");
+      } else if (reasoning.flow.state === "SHORT_COVERING") {
+         addLog(`⏳ ${symbol}: صعود السعر ناتج عن Short Covering (إغلاق عقود بيع وليس فتح عقود شراء جديدة). انتظار تراكم حقيقي.`, "info");
+      }
    }
-   return { signal: "WAIT", sl, ss };
+
+   return { signal: "WAIT", sl, ss, reasoning };
 }
 
 // --- SEC 5: EXECUTION ---
@@ -782,6 +842,7 @@ function executeTrade(symbol: string, decision: any) {
          setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
          setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
+         reasoning: decision.reasoning,
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
@@ -828,6 +889,7 @@ function executeTrade(symbol: string, decision: any) {
          setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
          setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
+         reasoning: decision.reasoning,
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
@@ -859,11 +921,17 @@ async function exitBrain(trade: any, ctx: any) {
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
 
-   // Floating PnL including realistic open position taker fee and slippage estimate
-   const rawFloating = t.direction === "LONG" ? (price - t.entry)*t.pos : (t.entry - price)*t.pos;
-   const estimatedExitFee = (price * t.pos) * feeRate;
-   const estimatedExitSlippage = (price * t.pos) * slippageRate;
-   t.pnl = rawFloating - (estimatedExitFee + estimatedExitSlippage);
+   // Floating PnL Mark-to-Market calculation (Exact match with closePart and closeTradeFull formulas)
+   const effectiveExitPrice = t.direction === "LONG"
+      ? price * (1 - slippageRate)
+      : price * (1 + slippageRate);
+
+   const rawRemainingFloating = (t.direction === "LONG" ? (effectiveExitPrice - t.entry) : (t.entry - effectiveExitPrice)) * t.pos;
+   const estimatedRemainingFees = ((t.entry * t.pos) + (effectiveExitPrice * t.pos)) * feeRate;
+   const remainingNetFloating = rawRemainingFloating - estimatedRemainingFees;
+
+   // t.pnl represents total Mark-to-Market net PnL of this trade (realized from partials + unrealized remaining)
+   t.pnl = (t.realizedPnl || 0) + remainingNetFloating;
 
    let emergency = false;
    let emReason = "";
@@ -1040,7 +1108,12 @@ export async function runApexLoop() {
       await updateDynamicWatchlist();
       const ctx = await getContext();
       
-      // Calculate overall Net PnL
+      // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)
+      for (const t of activeTrades) {
+         await exitBrain(t, ctx);
+      }
+
+      // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
       let totalFloatingPnl = 0;
       let totalRealizedPnl = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
       for (const t of activeTrades) {
@@ -1061,11 +1134,6 @@ export async function runApexLoop() {
          addLog(`🛑 الوصول لحد الخسارة المحدد ($${haltLossTarget})، تم إيقاف الروبوت.`, "error");
          return;
       }
-      
-      // Manage open trades (Always runs, even outside new trade hours)
-      for (const t of activeTrades) {
-         await exitBrain(t, ctx);
-      }
 
       // Daily Loss Limit Protection (4% of initial balance, including floating PnL)
       const dailyLossLimit = initialVirtualBalance * MAX_DAILY_LOSS;
@@ -1076,10 +1144,9 @@ export async function runApexLoop() {
       const totalDailyPnl = todaysStats.pnl + openFloatingPnl;
 
       if (totalDailyPnl <= -dailyLossLimit) {
-         addLog(`🛑 DAILY LOSS LIMIT REACHED: إجمالي خسارة اليوم (محققة + عائمة) $${totalDailyPnl.toFixed(2)} بلغت الحد الأقصى -$${dailyLossLimit.toFixed(2)} (4%). تم إيقاف فتح صفقات جديدة لحماية رأس المال.`, "error");
-         botActive = false;
+         addLog(`🛑 DAILY LOSS LIMIT REACHED: إجمالي خسارة اليوم (محققة + عائمة) $${totalDailyPnl.toFixed(2)} بلغت الحد الأقصى -$${dailyLossLimit.toFixed(2)} (4%). تم منع فتح صفقات جديدة لهذا اليوم مع استمرار إدارة الصفقات المفتوحة.`, "error");
          isLoopRunning = false;
-         return;
+         return; // Only skip scanning and new trade entry for this cycle, keeping bot active to manage existing trades!
       }
 
       // BTC Violent Regime check: if BTC is violent (ctx.tradeable === false), block new trades
