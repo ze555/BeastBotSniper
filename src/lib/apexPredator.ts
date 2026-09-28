@@ -5,6 +5,7 @@ const BINANCE_FAPI = "https://fapi.binance.com";
 let watcherInterval: NodeJS.Timeout | null = null;
 let activeTrades: any[] = [];
 let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
 
@@ -19,6 +20,9 @@ let lastWatchlistUpdate = 0;
 
 
 const MIN_RR_REQUIRED = 2.5;
+const TP1_R = 0.75;
+const TP2_R = 1.80;
+const TP3_R = 3.50;
 const MAX_OPEN_TRADES = 3;
 const MAX_DAILY_LOSS = 0.040;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -37,6 +41,11 @@ let smartBtcHoldEnabled = true;
 let btcVolThresholdStr = "0.80";
 let slAtrMultiplier = 1.3;
 let geniusMode = true;
+let pullbackSniperEnabled = true;
+let freeTradeSlotEnabled = true;
+let scanBatchSize = 25;
+let feeRate = 0.0004; // 0.04% default Binance VIP0 taker fee
+let slippageRate = 0.0002; // 0.02% estimated market slippage
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -54,6 +63,8 @@ let apexPredatorStats: any = {
   totalShortScanned: 0,
   acceptedLongs: 0,
   acceptedShorts: 0,
+  pullbackSetups: 0,
+  breakoutSetups: 0,
   rules: {
     market_context: { passed: 0, failed: 0 },
     whale_reader: { passed: 0, failed: 0 },
@@ -77,6 +88,11 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.btcVolThresholdStr !== undefined) btcVolThresholdStr = opts.btcVolThresholdStr;
       if (opts.slAtrMultiplier !== undefined) slAtrMultiplier = opts.slAtrMultiplier;
       if (opts.geniusMode !== undefined) geniusMode = opts.geniusMode;
+      if (opts.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = opts.pullbackSniperEnabled;
+      if (opts.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = opts.freeTradeSlotEnabled;
+      if (opts.scanBatchSize !== undefined) scanBatchSize = Number(opts.scanBatchSize) || 25;
+      if (opts.feeRate !== undefined) feeRate = Number(opts.feeRate);
+      if (opts.slippageRate !== undefined) slippageRate = Number(opts.slippageRate);
       if (opts.scheduleEnabled !== undefined) scheduleEnabled = opts.scheduleEnabled;
       if (opts.libyaOpen1 !== undefined) libyaOpen1 = opts.libyaOpen1;
       if (opts.libyaClose1 !== undefined) libyaClose1 = opts.libyaClose1;
@@ -104,10 +120,28 @@ export function addLog(msg: string, type: 'info'|'warn'|'success'|'error' = 'inf
    if (logs.length > 200) logs.pop();
 }
 
+export function resetDailyStatsIfNeeded() {
+   const today = new Date().toISOString().slice(0, 10);
+   if (today !== statsDay) {
+      todaysStats = {
+         count: 0,
+         wins: 0,
+         losses: 0,
+         pnl: 0,
+         sumR: 0
+      };
+      statsDay = today;
+      addLog("📅 Daily statistics reset", "info");
+   }
+}
+
 export function getLogs() { return logs; }
 export function getTrades() { return activeTrades; }
 export function getClosedTrades() { return closedTrades; }
 export function getStats() { 
+  const freeTradesCount = activeTrades.filter(t => t.be_done).length;
+  const riskedTradesCount = activeTrades.filter(t => !t.be_done).length;
+
   return { 
     ...apexPredatorStats,
     balance: virtualBalance,
@@ -121,6 +155,15 @@ export function getStats() {
     btcVolThresholdStr,
     slAtrMultiplier,
     geniusMode,
+    pullbackSniperEnabled,
+    freeTradeSlotEnabled,
+    scanBatchSize,
+    feeRate,
+    slippageRate,
+    freeTradesCount,
+    riskedTradesCount,
+    watchlistLength: WATCHLIST.length,
+    currentBatchProgress: `${Math.min(currentBatchIndex, WATCHLIST.length)} / ${WATCHLIST.length}`,
     scheduleEnabled,
     libyaOpen1,
     libyaClose1,
@@ -131,7 +174,28 @@ export function getStats() {
   }; 
 }
 export function getConfig() {
-  return { virtualBalance, initialVirtualBalance, maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget, smartBtcHoldEnabled, slAtrMultiplier, geniusMode, scheduleEnabled, libyaOpen1, libyaClose1, libyaOpen2, libyaClose2 };
+  return { 
+    virtualBalance, 
+    initialVirtualBalance, 
+    maxOpenTradesConfig, 
+    haltProfitEnabled, 
+    haltProfitTarget, 
+    haltLossEnabled, 
+    haltLossTarget, 
+    smartBtcHoldEnabled, 
+    slAtrMultiplier, 
+    geniusMode, 
+    pullbackSniperEnabled,
+    freeTradeSlotEnabled,
+    scanBatchSize,
+    feeRate,
+    slippageRate,
+    scheduleEnabled, 
+    libyaOpen1, 
+    libyaClose1, 
+    libyaOpen2, 
+    libyaClose2 
+  };
 }
 export function setConfig(config: any) {
   if (config.virtualBalance) virtualBalance = config.virtualBalance;
@@ -145,6 +209,11 @@ export function setConfig(config: any) {
   if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
   if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
   if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
+  if (config.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = config.pullbackSniperEnabled;
+  if (config.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = config.freeTradeSlotEnabled;
+  if (config.scanBatchSize !== undefined) scanBatchSize = Number(config.scanBatchSize) || 25;
+  if (config.feeRate !== undefined) feeRate = Number(config.feeRate);
+  if (config.slippageRate !== undefined) slippageRate = Number(config.slippageRate);
   if (config.scheduleEnabled !== undefined) scheduleEnabled = config.scheduleEnabled;
   if (config.libyaOpen1 !== undefined) libyaOpen1 = config.libyaOpen1;
   if (config.libyaClose1 !== undefined) libyaClose1 = config.libyaClose1;
@@ -188,12 +257,50 @@ async function updateDynamicWatchlist() {
    }
 }
 
+// --- CACHING & REST OPTIMIZATIONS ---
+interface CacheEntry {
+   data: any;
+   expiresAt: number;
+}
+const klineCache = new Map<string, CacheEntry>();
+const fundingCache = new Map<string, CacheEntry>();
+const oiCache = new Map<string, CacheEntry>();
+
+function getCached<T>(cache: Map<string, CacheEntry>, key: string): T | null {
+   const entry = cache.get(key);
+   if (!entry) return null;
+   if (Date.now() > entry.expiresAt) {
+      cache.delete(key);
+      return null;
+   }
+   return entry.data as T;
+}
+
+function setCached(cache: Map<string, CacheEntry>, key: string, data: any, ttlMs: number) {
+   // Limit cache size to prevent memory bloat
+   if (cache.size > 800) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey) cache.delete(oldestKey);
+   }
+   cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
 async function fetchKl(symbol: string, interval: string, limit: number) {
+   const cacheKey = `${symbol}:${interval}:${limit}`;
+   const cached = getCached<any[]>(klineCache, cacheKey);
+   if (cached) return cached;
+
+   // TTL based on timeframe: 4h cached for 60s, 15m for 20s, 5m for 10s
+   let ttl = 10000;
+   if (interval === "4h") ttl = 60000;
+   else if (interval === "15m") ttl = 20000;
+   else if (interval === "5m") ttl = 10000;
+
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines`, {
       params: { symbol, interval, limit },
       timeout: 5000
    });
-   return res.data.map((k: any) => ({
+   const parsed = res.data.map((k: any) => ({
       openTime: k[0],
       open: parseFloat(k[1]),
       high: parseFloat(k[2]),
@@ -204,18 +311,33 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
       takerBuy: parseFloat(k[9]),
       takerSell: parseFloat(k[5]) - parseFloat(k[9]) // volume - taker buy = taker sell
    }));
+
+   setCached(klineCache, cacheKey, parsed, ttl);
+   return parsed;
 }
 
 async function fetchFunding(symbol: string) {
+   const cached = getCached<number>(fundingCache, symbol);
+   if (cached !== null) return cached;
+
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex`, { params: { symbol }, timeout: 5000 });
-   return parseFloat(res.data.lastFundingRate);
+   const rate = parseFloat(res.data.lastFundingRate);
+   // Funding rates update every 8 hours, caching for 60 seconds is extremely safe
+   setCached(fundingCache, symbol, rate, 60000);
+   return rate;
 }
 
 async function fetchOI(symbol: string, period: string, limit: number = 5) {
+   const cacheKey = `${symbol}:${period}:${limit}`;
+   const cached = getCached<any[]>(oiCache, cacheKey);
+   if (cached) return cached;
+
    try {
        const res = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist`, {
          params: { symbol, period, limit }, timeout: 5000
        });
+       // Open interest data updates periodically; caching for 30s significantly reduces load
+       setCached(oiCache, cacheKey, res.data, 30000);
        return res.data;
    } catch { return []; }
 }
@@ -346,12 +468,12 @@ async function readWhale(symbol: string, btc_chg: number) {
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15
+      asset_strong, c15, c5, slope5, slope15
    };
 }
 
 // --- SEC 3: PRICE READER ---
-async function readPrice(symbol: string, kl: any[]) {
+async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
    if (!kl || kl.length < 50) {
       throw new Error("Insufficient klines for price reader");
    }
@@ -409,10 +531,45 @@ async function readPrice(symbol: string, kl: any[]) {
    const stData = calcSupertrend(hi, lo, cl, 10, 3);
    const st_dir = stData.directions.pop();
 
+   // 5m Multi-timeframe confluence
+   let conf5_bull = false;
+   let conf5_bear = false;
+   if (kl5 && kl5.length >= 15) {
+      const cl5 = kl5.map((k: any) => k.close);
+      const ema9_5 = calcEMA(cl5, 9).pop() || 0;
+      const ema21_5 = calcEMA(cl5, 21).pop() || 0;
+      const last5 = kl5[kl5.length - 1];
+      conf5_bull = last5.close > ema9_5 && ema9_5 >= ema21_5;
+      conf5_bear = last5.close < ema9_5 && ema9_5 <= ema21_5;
+   }
+
+   // Trend Pullback Sniper Calculations
+   const distEma21 = Math.abs(price - ema21) / (ema21 || 1);
+   const nearEma21Long = distEma21 <= 0.020 || (lo[lo.length-1] <= ema21 && price >= ema21 * 0.990);
+   const nearEma21Short = distEma21 <= 0.020 || (hi[hi.length-1] >= ema21 && price <= ema21 * 1.010);
+
+   const bull_align = price > ema21 && ema21 > ema50 && ema50 > ema200;
+   const bear_align = price < ema21 && ema21 < ema50 && ema50 < ema200;
+
+   const pullback_long = (bull_align || (price > ema50 && ema50 > ema200)) &&
+                         adx >= 18 &&
+                         nearEma21Long &&
+                         (l_wick >= body * 0.5 || c0.close > c0.open) &&
+                         cpos >= 0.40 &&
+                         rsi >= 38 && rsi <= 58 &&
+                         rvol < 3.2;
+
+   const pullback_short = (bear_align || (price < ema50 && ema50 < ema200)) &&
+                          adx >= 18 &&
+                          nearEma21Short &&
+                          (u_wick >= body * 0.5 || c0.close < c0.open) &&
+                          cpos <= 0.60 &&
+                          rsi >= 42 && rsi <= 62 &&
+                          rvol < 3.2;
+
    return {
       price, ema21, ema50, ema200, atr14,
-      bull_align: price > ema21 && ema21 > ema50 && ema50 > ema200,
-      bear_align: price < ema21 && ema21 < ema50 && ema50 < ema200,
+      bull_align, bear_align,
       HH_HL, LH_LL, compressed, rvol, avg_vol,
       strong_bull_c, strong_bear_c, cpos, bpct,
       stop_hunt_bull, stop_hunt_bear,
@@ -421,7 +578,8 @@ async function readPrice(symbol: string, kl: any[]) {
       st_bull: st_dir === 1, st_bear: st_dir === -1,
       taker: rng > 0 ? c0.takerBuy / (c0.takerBuy + c0.takerSell) : 0.5,
       klines: kl, res10, sup10, volFade: false,
-      u_wick, l_wick, body, rng
+      u_wick, l_wick, body, rng,
+      pullback_long, pullback_short, conf5_bull, conf5_bear
    };
 }
 
@@ -430,7 +588,7 @@ async function scoreEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
 
    const w = await readWhale(symbol, ctx.btc_chg);
-   const p = await readPrice(symbol, w.c15);
+   const p = await readPrice(symbol, w.c15, w.c5);
 
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
@@ -441,10 +599,11 @@ async function scoreEntry(symbol: string, ctx: any) {
    else if (p.rsi > 78 || p.rsi < 22) earlyReason = "RSI Exhst";
    else if (p.adx > 60) earlyReason = "ADX Exhst";
    else if (w.scenario === "SHORT_COVER" || w.scenario === "LONG_LIQ") earlyReason = `TEMP: ${w.scenario}`;
-   if (geniusMode && Math.abs(ctx.btc_chg) > 2.0 && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
+   if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
    if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
 
    let sl = 0.0, ss = 0.0;
+   let setupType = "BREAKOUT_MOMENTUM";
 
    // Layer 1
    let layer1_sl = 0, layer1_ss = 0;
@@ -510,6 +669,22 @@ async function scoreEntry(symbol: string, ctx: any) {
    sl += layer4_sl; ss += layer4_ss;
    if (layer4_sl > 0 || layer4_ss > 0) apexPredatorStats.rules.momentum_ignition.passed++; else apexPredatorStats.rules.momentum_ignition.failed++;
 
+   // Multi-Timeframe 5m Confluence bonus
+   if (p.conf5_bull) sl += 0.8;
+   if (p.conf5_bear) ss += 0.8;
+
+   // Trend Pullback Sniper Model bonus
+   if (pullbackSniperEnabled) {
+      if (p.pullback_long && (w.slope15 >= 0 || w.slope5 >= 0)) {
+         sl += 2.2;
+         setupType = "PULLBACK_SNIPER";
+      }
+      if (p.pullback_short && (w.slope15 <= 0 || w.slope5 <= 0)) {
+         ss += 2.2;
+         setupType = "PULLBACK_SNIPER";
+      }
+   }
+
    sl = Math.min(Math.max(sl, 0), 10);
    ss = Math.min(Math.max(ss, 0), 10);
 
@@ -554,26 +729,41 @@ async function scoreEntry(symbol: string, ctx: any) {
    }
 
    const minScore = geniusMode ? 7.6 : 6.8;
-   if (sl >= minScore && sl > ss) { apexPredatorStats.acceptedLongs++; return { signal: "LONG", score: sl, grade: getGrade(sl), p, w, ctx }; }
-   if (ss >= minScore && ss > sl) { apexPredatorStats.acceptedShorts++; return { signal: "SHORT", score: ss, grade: getGrade(ss), p, w, ctx }; }
+   if (sl >= minScore && sl > ss) { 
+      apexPredatorStats.acceptedLongs++; 
+      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+      else apexPredatorStats.breakoutSetups++;
+      return { signal: "LONG", score: sl, grade: getGrade(sl), setupType, p, w, ctx }; 
+   }
+   if (ss >= minScore && ss > sl) { 
+      apexPredatorStats.acceptedShorts++; 
+      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+      else apexPredatorStats.breakoutSetups++;
+      return { signal: "SHORT", score: ss, grade: getGrade(ss), setupType, p, w, ctx }; 
+   }
    return { signal: "WAIT", sl, ss };
 }
 
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
-   const { p, w, score, grade } = decision;
+   const { p, w, score, grade, setupType } = decision;
+   const isPullback = setupType === "PULLBACK_SNIPER";
    const riskAmt = virtualBalance * grade.risk * grade.mult;
 
    if (decision.signal === "LONG") {
       const entry = p.price;
       const c = p.klines;
       const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
-      const sl = realLow - (p.atr14 * slAtrMultiplier);
+      const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
+      const sl = isPullback 
+         ? Math.min(realLow, p.ema21) - (p.atr14 * slMultiplier)
+         : realLow - (p.atr14 * slMultiplier);
       const slDist = entry - sl;
+      const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry + (slDist * 0.75); // Quick Win TP1 (Banks 40% of trade)
-      const tp2 = entry + (slDist * 1.80); // Major Target TP2 (Banks 35% of trade)
-      const tp3 = entry + (slDist * 3.50); // Runner TP3 (Banks 25% of trade)
+      const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
+      const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
+      const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
 
       if ((tp3 - entry) / slDist < MIN_RR_REQUIRED) {
          addLog(`❌ رُفض ${symbol}: RR دون الحد`, "error");
@@ -582,11 +772,13 @@ function executeTrade(symbol: string, decision: any) {
 
       let pos = riskAmt / slDist;
       activeTrades.push({
-         symbol, direction: "LONG", entry, sl, tp1, tp2, tp3,
+         symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
+         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
+         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
          whaleData: {
             scenario: w.scenario,
@@ -601,27 +793,33 @@ function executeTrade(symbol: string, decision: any) {
             marketAlignment: p.bull_align ? "متوافق مع الصعود" : "فوضوي"
          }
       });
-      addLog(`✅ LONG ${symbol} | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ LONG ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    } else {
       const entry = p.price;
       const c = p.klines;
       const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
-      const sl = realHigh + (p.atr14 * slAtrMultiplier);
+      const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
+      const sl = isPullback 
+         ? Math.max(realHigh, p.ema21) + (p.atr14 * slMultiplier)
+         : realHigh + (p.atr14 * slMultiplier);
       const slDist = sl - entry;
+      const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry - (slDist * 0.75);
-      const tp2 = entry - (slDist * 1.80);
-      const tp3 = entry - (slDist * 3.50);
+      const tp1 = entry - (initialSlDist * TP1_R);
+      const tp2 = entry - (initialSlDist * TP2_R);
+      const tp3 = entry - (initialSlDist * TP3_R);
 
       if ((entry - tp3) / slDist < MIN_RR_REQUIRED) return;
 
       let pos = riskAmt / slDist;
       activeTrades.push({
-         symbol, direction: "SHORT", entry, sl, tp1, tp2, tp3,
+         symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
+         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
+         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
          whaleData: {
             scenario: w.scenario,
@@ -636,7 +834,7 @@ function executeTrade(symbol: string, decision: any) {
             marketAlignment: p.bear_align ? "متوافق مع الهبوط" : "فوضوي"
          }
       });
-      addLog(`✅ SHORT ${symbol} | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ SHORT ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    }
 }
 
@@ -649,12 +847,16 @@ async function exitBrain(trade: any, ctx: any) {
    const price = p.price;
    t.currentPrice = price;
 
-   const slDist = Math.abs(t.entry - t.sl);
+   const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
    const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
 
-   t.pnl = t.direction === "LONG" ? (price - t.entry)*t.pos : (t.entry - price)*t.pos;
+   // Floating PnL including realistic open position taker fee and slippage estimate
+   const rawFloating = t.direction === "LONG" ? (price - t.entry)*t.pos : (t.entry - price)*t.pos;
+   const estimatedExitFee = (price * t.pos) * feeRate;
+   const estimatedExitSlippage = (price * t.pos) * slippageRate;
+   t.pnl = rawFloating - (estimatedExitFee + estimatedExitSlippage);
 
    let emergency = false;
    let emReason = "";
@@ -699,15 +901,15 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
-   // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.70R)
+   // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
-      if (profitR >= 0.70) {
+      if (profitR >= TP1_R) {
          closePart(t, "A", t.part_a);
          // Move SL to Entry + 0.05R (guarantees positive trade accounting for exchange fees)
          t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.05) : t.entry - (slDist * 0.05);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +0.70R | 🛡️ تم نقل الوقف للدخول + رسوم (الصفقة مؤمنة بربح)`, 'success');
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف للدخول + رسوم (الصفقة مؤمنة بربح)`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry;
@@ -719,12 +921,12 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      if (profitR >= 1.80) {
+      if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
          // Lock in TP1 level as floor profit
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.70) : t.entry - (slDist * 0.70);
-         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +1.80R | تم حجز الأرباح ورفع الوقف لمستوى +0.70R`, 'success');
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
+         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
@@ -736,10 +938,10 @@ async function exitBrain(trade: any, ctx: any) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
-      if (profitR >= 3.50 || exhaust >= 8 || peak >= 8) {
+      if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +3.50R صيد الاتجاه بالكامل 🏆`, 'success');
+         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
          closeTradeFull(t, "TP3 Full Target Hit");
          return;
       }
@@ -771,25 +973,54 @@ function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close
 function closePart(t: any, part: string, pct: number) {
    const size = t.initialPos * pct;
    t.pos -= size;
-      const realizedPnl = (t.direction === "LONG" ? (t.currentPrice - t.entry) : (t.entry - t.currentPrice)) * size;
-      t.realizedPnl = (t.realizedPnl || 0) + realizedPnl;
-      virtualBalance += realizedPnl;
+   
+   // Effective exit price with simulated slippage
+   const effectiveExitPrice = t.direction === "LONG"
+      ? t.currentPrice * (1 - slippageRate)
+      : t.currentPrice * (1 + slippageRate);
+
+   const rawPnl = (t.direction === "LONG" ? (effectiveExitPrice - t.entry) : (t.entry - effectiveExitPrice)) * size;
+   const tradeFees = ((t.entry * size) + (effectiveExitPrice * size)) * feeRate;
+   const realizedPnl = rawPnl - tradeFees;
+
+   t.realizedPnl = (t.realizedPnl || 0) + realizedPnl;
+   t.totalFees = (t.totalFees || 0) + tradeFees;
+   virtualBalance += realizedPnl;
 }
 
 function closeTradeFull(t: any, reason: string = "") {
-   const finalPnl = (t.direction === "LONG" ? (t.currentPrice - t.entry) : (t.entry - t.currentPrice)) * t.pos;
-   t.realizedPnl = (t.realizedPnl || 0) + finalPnl;
-   virtualBalance += finalPnl;
+   if (t.pos > 0) {
+      const effectiveExitPrice = t.direction === "LONG"
+         ? t.currentPrice * (1 - slippageRate)
+         : t.currentPrice * (1 + slippageRate);
+
+      const rawFinalPnl = (t.direction === "LONG" ? (effectiveExitPrice - t.entry) : (t.entry - effectiveExitPrice)) * t.pos;
+      const finalFees = ((t.entry * t.pos) + (effectiveExitPrice * t.pos)) * feeRate;
+      const finalPnl = rawFinalPnl - finalFees;
+
+      t.realizedPnl = (t.realizedPnl || 0) + finalPnl;
+      t.totalFees = (t.totalFees || 0) + finalFees;
+      virtualBalance += finalPnl;
+   }
+
    t.exitTime = new Date().toISOString();
    t.exitReason = reason;
-   t.finalPnl = t.realizedPnl;
+   t.finalPnl = t.realizedPnl || 0;
    closedTrades.unshift(t);
    t.pos = 0;
    todaysStats.count++;
-   if (t.profitR > 0) todaysStats.wins++; else todaysStats.losses++;
+
+   // Neutral Breakeven threshold: avoid counting fee-friction scratches as distorted losses or false big wins
+   const rThreshold = 0.05;
+   if (t.profitR > rThreshold && t.finalPnl > 0.15) {
+      todaysStats.wins++;
+   } else if (t.profitR < -rThreshold && t.finalPnl < -0.15) {
+      todaysStats.losses++;
+   }
+
    todaysStats.pnl += t.finalPnl;
    activeTrades = activeTrades.filter(tr => tr !== t);
-   if (reason) addLog(`🛑 Full Exit ${t.symbol}: ${reason} | Final PnL: ${t.profitR.toFixed(2)}R`, 'warn');
+   if (reason) addLog(`🛑 Full Exit ${t.symbol}: ${reason} | Net PnL: $${t.finalPnl.toFixed(2)} (${t.profitR.toFixed(2)}R)`, t.finalPnl >= 0 ? 'success' : 'warn');
 }
 
 // --- SEC 9: MAIN LOOP ---
@@ -798,6 +1029,7 @@ export async function runApexLoop() {
 
    isLoopRunning = true;
    try {
+      resetDailyStatsIfNeeded();
       await updateDynamicWatchlist();
       const ctx = await getContext();
       
@@ -828,7 +1060,22 @@ export async function runApexLoop() {
          await exitBrain(t, ctx);
       }
 
-      if (activeTrades.length >= maxOpenTradesConfig) {
+      // Daily Loss Limit Protection (4% of initial balance)
+      const dailyLossLimit = initialVirtualBalance * MAX_DAILY_LOSS;
+      if (todaysStats.pnl <= -dailyLossLimit) {
+         addLog(`🛑 DAILY LOSS LIMIT REACHED: ${todaysStats.pnl.toFixed(2)} / -${dailyLossLimit.toFixed(2)} | تم إيقاف الروبوت لحماية رأس المال`, "error");
+         botActive = false;
+         isLoopRunning = false;
+         return;
+      }
+
+      // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
+      const riskedTrades = activeTrades.filter(t => !t.be_done);
+      const isCapacityFull = freeTradeSlotEnabled
+         ? (riskedTrades.length >= maxOpenTradesConfig || activeTrades.length >= maxOpenTradesConfig + 2)
+         : (activeTrades.length >= maxOpenTradesConfig);
+
+      if (isCapacityFull) {
          isLoopRunning = false;
          return;
       }
@@ -844,11 +1091,11 @@ export async function runApexLoop() {
          currentBatchIndex = 0;
       }
 
-      const batchSize = 10;
+      const batchSize = scanBatchSize;
       const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
       const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex);
       
-      addLog(`🦅 SCANNING BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة...`, "info");
+      addLog(`🦅 SCANNING TURBO BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة...`, "info");
       
       // Advance index for next run
       currentBatchIndex = endBatchIndex;
@@ -856,13 +1103,39 @@ export async function runApexLoop() {
          currentBatchIndex = 0; // Reset
       }
 
-      for (const sym of batchSymbols) {
-         if (activeTrades.length >= maxOpenTradesConfig) break;
-         if (activeTrades.find(t => t.symbol === sym)) continue;
-         
-         const dec = await scoreEntry(sym, ctx);
-         if (dec.signal === "LONG" || dec.signal === "SHORT") {
-            executeTrade(sym, dec);
+      const canOpenMore = () => {
+         const currentRisked = activeTrades.filter(t => !t.be_done).length;
+         if (freeTradeSlotEnabled) {
+            return currentRisked < maxOpenTradesConfig && activeTrades.length < (maxOpenTradesConfig + 2);
+         }
+         return activeTrades.length < maxOpenTradesConfig;
+      };
+
+      // Process batch symbols in fast concurrent chunks of 5
+      const chunkSize = 5;
+      for (let i = 0; i < batchSymbols.length; i += chunkSize) {
+         if (!canOpenMore()) break;
+         const chunk = batchSymbols.slice(i, i + chunkSize);
+         const promises = chunk.map(async (sym: string) => {
+            if (activeTrades.find(t => t.symbol === sym)) return null;
+            try {
+               const dec = await scoreEntry(sym, ctx);
+               return { sym, dec };
+            } catch {
+               return null;
+            }
+         });
+
+         const results = await Promise.allSettled(promises);
+         for (const res of results) {
+            if (res.status === "fulfilled" && res.value) {
+               const { sym, dec } = res.value;
+               if (!canOpenMore()) break;
+               if (activeTrades.find(t => t.symbol === sym)) continue;
+               if (dec.signal === "LONG" || dec.signal === "SHORT") {
+                  executeTrade(sym, dec);
+               }
+            }
          }
       }
    } catch (e: any) {
@@ -874,7 +1147,7 @@ export async function runApexLoop() {
 
 export function startEngine() {
    if (watcherInterval) clearInterval(watcherInterval);
-   watcherInterval = setInterval(runApexLoop, 60 * 1000); // Check every 1 minute
+   watcherInterval = setInterval(runApexLoop, 30 * 1000); // Check every 30 seconds for turbo responsiveness
    runApexLoop();
-   addLog("Apex Predator Engine Started", "success");
+   addLog("Apex Predator Engine Started with Turbo Scanner & Pullback Sniper", "success");
 }

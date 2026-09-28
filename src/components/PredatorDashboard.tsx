@@ -22,6 +22,11 @@ export const PredatorDashboard: React.FC = () => {
   const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
   const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.3');
   const [geniusMode, setGeniusMode] = useState(true);
+  const [pullbackSniperEnabled, setPullbackSniperEnabled] = useState(true);
+  const [freeTradeSlotEnabled, setFreeTradeSlotEnabled] = useState(true);
+  const [scanBatchSize, setScanBatchSize] = useState('25');
+  const [feeRateInput, setFeeRateInput] = useState('0.0004');
+  const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
   const [libyaOpen1, setLibyaOpen1] = useState('10');
   const [libyaClose1, setLibyaClose1] = useState('14');
@@ -51,7 +56,7 @@ export const PredatorDashboard: React.FC = () => {
         const data = await safeJson(statsRes);
         setStats(data);
         if (document.activeElement?.tagName !== 'INPUT') {
-            setBalanceInput(data.initialBalance?.toString() || '10000');
+            setBalanceInput(data.initialBalance?.toString() || '1000');
             setMaxTradesInput(data.maxOpenTrades?.toString() || '3');
             if (data.haltProfitTarget !== undefined) setHaltProfitTarget(data.haltProfitTarget.toString());
             if (data.haltProfitEnabled !== undefined) setHaltProfitEnabled(data.haltProfitEnabled);
@@ -61,6 +66,11 @@ export const PredatorDashboard: React.FC = () => {
             if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
             if (data.slAtrMultiplier !== undefined) setSlAtrMultiplier(data.slAtrMultiplier.toString());
             if (data.geniusMode !== undefined) setGeniusMode(data.geniusMode);
+            if (data.pullbackSniperEnabled !== undefined) setPullbackSniperEnabled(data.pullbackSniperEnabled);
+            if (data.freeTradeSlotEnabled !== undefined) setFreeTradeSlotEnabled(data.freeTradeSlotEnabled);
+            if (data.scanBatchSize !== undefined) setScanBatchSize(data.scanBatchSize.toString());
+            if (data.feeRate !== undefined) setFeeRateInput(data.feeRate.toString());
+            if (data.slippageRate !== undefined) setSlippageRateInput(data.slippageRate.toString());
             if (data.scheduleEnabled !== undefined) setScheduleEnabled(data.scheduleEnabled);
             if (data.libyaOpen1 !== undefined) setLibyaOpen1(data.libyaOpen1.toString());
             if (data.libyaClose1 !== undefined) setLibyaClose1(data.libyaClose1.toString());
@@ -84,8 +94,8 @@ export const PredatorDashboard: React.FC = () => {
       if (logsRes.ok) {
         setLogs(await safeJson(logsRes));
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // Ignore transient network blips during dev server restart or polling
     }
     setIsLoading(false);
   };
@@ -118,6 +128,11 @@ export const PredatorDashboard: React.FC = () => {
                   btcVolThresholdStr,
                   slAtrMultiplier: Number(slAtrMultiplier),
                   geniusMode,
+                  pullbackSniperEnabled,
+                  freeTradeSlotEnabled,
+                  scanBatchSize: Number(scanBatchSize),
+                  feeRate: Number(feeRateInput),
+                  slippageRate: Number(slippageRateInput),
                   scheduleEnabled,
                   libyaOpen1: Number(libyaOpen1),
                   libyaClose1: Number(libyaClose1),
@@ -186,12 +201,22 @@ export const PredatorDashboard: React.FC = () => {
                
                <div className="flex justify-between items-start mb-2">
                    <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                          <span className="text-xl font-black text-white">{t.symbol}</span>
                          <span className={`text-xs px-2 py-0.5 rounded font-bold ${t.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                             {t.direction}
                          </span>
                          <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded shadow-sm">{t.grade}</span>
+                         {t.setupLabel && (
+                            <span className="bg-blue-950/80 text-blue-300 border border-blue-500/40 text-[10px] px-2 py-0.5 rounded font-bold">
+                               {t.setupLabel}
+                            </span>
+                         )}
+                         {t.be_done && (
+                            <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 text-[10px] px-2 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
+                               🛡️ صفر مخاطرة (مؤمنة بربح)
+                            </span>
+                         )}
                       </div>
                       <div className="text-xs text-slate-400 mt-2 flex flex-col gap-1.5">
                           <div className="flex gap-4">
@@ -484,6 +509,39 @@ export const PredatorDashboard: React.FC = () => {
                         onChange={(e) => setSlAtrMultiplier(e.target.value)}
                         className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
                     />
+                 </div>
+
+                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-sm text-amber-400 font-bold block">نسبة رسوم المنصة (Trading Fee Rate)</label>
+                            <span className="text-[11px] text-slate-400 block leading-relaxed">
+                                القيمة الافتراضية 0.0004 (0.04% كـ Taker في بينانس). تخصم بدقة عند الدخول والخروج لمحاكاة واقعية.
+                            </span>
+                            <input 
+                                type="number" 
+                                step="0.0001"
+                                min="0"
+                                value={feeRateInput}
+                                onChange={(e) => setFeeRateInput(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-sm text-purple-400 font-bold block">الانزلاق السعري التقديري (Slippage Rate)</label>
+                            <span className="text-[11px] text-slate-400 block leading-relaxed">
+                                القيمة الافتراضية 0.0002 (0.02% انزلاق سعري). يضمن عدم تضخيم الأرباح في الحركات السريعة.
+                            </span>
+                            <input 
+                                type="number" 
+                                step="0.0001"
+                                min="0"
+                                value={slippageRateInput}
+                                onChange={(e) => setSlippageRateInput(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 focus:border-purple-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
+                            />
+                        </div>
+                    </div>
                  </div>
 
                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
