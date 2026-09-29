@@ -1,6 +1,7 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
+import { logRejectedSignal, logTradeDecision, logTradeJourneySnapshot, formatCandles } from "./researchLogger.js";
 
 const BINANCE_FAPI = "https://fapi.binance.com";
 let watcherInterval: NodeJS.Timeout | null = null;
@@ -794,14 +795,31 @@ async function scoreEntry(symbol: string, ctx: any) {
 
    // If indicator score was high but confirmation rejected or waiting:
    if ((sl >= minScore || ss >= minScore) && !reasoning.confirmation.isConfirmed) {
+      const rejectDirection = sl >= ss ? "LONG" : "SHORT";
+      const rejectScore = Math.max(sl, ss);
+      const rejectReason = reasoning.confirmation.reason || "Confirmation pending or failed";
+
       if (reasoning.location.nearResistance && sl >= minScore) {
          addLog(`⏳ ${symbol}: سيناريو صعودي نشط (${reasoning.scenario.primary.type}) لكن السعر ملاصق للمقاومة (${reasoning.location.nearestResistance.toFixed(4)}). بانتظار التأكيد.`, "info");
       } else if (reasoning.flow.state === "SHORT_COVERING") {
          addLog(`⏳ ${symbol}: صعود السعر ناتج عن Short Covering (إغلاق عقود بيع وليس فتح عقود شراء جديدة). انتظار تراكم حقيقي.`, "info");
       }
+
+      // Record in Research Logger for future post-analysis
+      logRejectedSignal({
+         symbol,
+         timeframe: "15m",
+         direction: rejectDirection,
+         signal_score: rejectScore,
+         rejection_reason: rejectReason,
+         p,
+         w,
+         ctx,
+         reasoning
+      });
    }
 
-   return { signal: "WAIT", sl, ss, reasoning };
+   return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
 }
 
 // --- SEC 5: EXECUTION ---
@@ -843,6 +861,9 @@ function executeTrade(symbol: string, decision: any) {
          setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
+         highestPrice: entry,
+         lowestPrice: entry,
+         candlesBeforeEntry: formatCandles(p.klines || [], 40),
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
@@ -890,6 +911,9 @@ function executeTrade(symbol: string, decision: any) {
          setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
+         highestPrice: entry,
+         lowestPrice: entry,
+         candlesBeforeEntry: formatCandles(p.klines || [], 40),
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
@@ -932,6 +956,9 @@ async function exitBrain(trade: any, ctx: any) {
 
    // t.pnl represents total Mark-to-Market net PnL of this trade (realized from partials + unrealized remaining)
    t.pnl = (t.realizedPnl || 0) + remainingNetFloating;
+
+   // Record trade journey periodic snapshot (MFE/MAE tracking)
+   logTradeJourneySnapshot(t, price, t.pnl);
 
    let emergency = false;
    let emReason = "";
@@ -1096,6 +1123,14 @@ function closeTradeFull(t: any, reason: string = "") {
    todaysStats.pnl += t.finalPnl;
    activeTrades = activeTrades.filter(tr => tr !== t);
    if (reason) addLog(`🛑 Full Exit ${t.symbol}: ${reason} | Net PnL: $${t.finalPnl.toFixed(2)} (${t.profitR.toFixed(2)}R)`, t.finalPnl >= 0 ? 'success' : 'warn');
+
+   // Record full post-trade diagnostic analysis in Research Logger
+   logTradeDecision(t, {
+      exitPrice: t.currentPrice || t.entry,
+      exitReason: reason || "Manual/Emergency Exit",
+      finalPnl: t.finalPnl,
+      fees: t.totalFees || 0
+   });
 }
 
 // --- SEC 9: MAIN LOOP ---

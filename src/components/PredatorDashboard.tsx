@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Activity, Target, TrendingUp, Swords, Play, Square, Terminal, LayoutDashboard, FileText, Settings as SettingsIcon, Save } from 'lucide-react';
+import { RefreshCw, Activity, Target, TrendingUp, Swords, Play, Square, Terminal, LayoutDashboard, FileText, Settings as SettingsIcon, Save, Download, Database } from 'lucide-react';
 
 export const PredatorDashboard: React.FC = () => {
   const [stats, setStats] = useState<any>(null);
@@ -651,6 +651,57 @@ export const PredatorDashboard: React.FC = () => {
                     {renderRuleStat('الزخم والسيولة', stats.rules?.momentum_ignition)}
                   </div>
                </div>
+             </div>
+
+             {/* Research & ChatGPT Analysis Dataset Card */}
+             <div className="bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/40 rounded-xl p-5 shadow-lg">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                   <div>
+                      <div className="flex items-center gap-2 mb-1">
+                         <Database className="w-5 h-5 text-blue-400" />
+                         <h2 className="text-lg text-white font-bold">حزمة بيانات البحث والتشخيص (ChatGPT Data Export)</h2>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                         سجل متكامل ومباشر لكل قرار تداول: الشموع السابقة (30-50 شمعة)، وحركة السعر أثناء الصفقة (MFE / MAE)، وشموع ما بعد الخروج، والإشارات المرفوضة وسبب رفضها. جاهزة للتحليل الفوري مع ChatGPT لتشخيص أسباب الخسائر وتحسين الدخول والخروج.
+                      </p>
+                   </div>
+                   <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                      <a
+                         href="/api/research/export-all"
+                         target="_blank"
+                         rel="noreferrer"
+                         download="beastbot_full_research_export.json"
+                         className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-2.5 rounded-lg font-bold shadow-md transition-all flex-1 sm:flex-none"
+                      >
+                         <Download className="w-4 h-4" />
+                         تحميل الحزمة الكاملة (JSON)
+                      </a>
+                      <a
+                         href="/api/research/trades"
+                         target="_blank"
+                         rel="noreferrer"
+                         className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs px-3 py-2.5 rounded-lg font-mono transition-all"
+                      >
+                         الصفقات المنفذة
+                      </a>
+                      <a
+                         href="/api/research/rejected"
+                         target="_blank"
+                         rel="noreferrer"
+                         className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs px-3 py-2.5 rounded-lg font-mono transition-all"
+                      >
+                         الإشارات المرفوضة
+                      </a>
+                      <a
+                         href="/api/research/performance"
+                         target="_blank"
+                         rel="noreferrer"
+                         className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs px-3 py-2.5 rounded-lg font-mono transition-all"
+                      >
+                         الملخص الإحصائي
+                      </a>
+                   </div>
+                </div>
              </div>
 
              {/* Closed Trades History */}

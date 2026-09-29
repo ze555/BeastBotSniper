@@ -3,6 +3,13 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig } from "./src/lib/apexPredator.js";
+import { 
+  getTradingDecisionsData, 
+  getRejectedSignalsData, 
+  getTradeJourneysData, 
+  getPerformanceSummaryData, 
+  getFullExportBundle 
+} from "./src/lib/researchLogger.js";
 
 async function startServer() {
   const app = express();
@@ -50,6 +57,30 @@ async function startServer() {
   app.get("/api/trades/active", (req, res) => res.json(getTrades()));
   app.get("/api/trades/closed", (req, res) => res.json(getClosedTrades()));
   app.get("/api/system/logs", (req, res) => res.json(getLogs()));
+
+  // ═══ ONLINE RESEARCH DATASET API (ChatGPT Analysis Endpoints) ═══
+  app.get("/api/research/trades", (req, res) => {
+    const limit = Number(req.query.limit) || 100;
+    res.json(getTradingDecisionsData(limit));
+  });
+
+  app.get("/api/research/rejected", (req, res) => {
+    const limit = Number(req.query.limit) || 100;
+    res.json(getRejectedSignalsData(limit));
+  });
+
+  app.get("/api/research/journeys", (req, res) => {
+    const limit = Number(req.query.limit) || 100;
+    res.json(getTradeJourneysData(limit));
+  });
+
+  app.get("/api/research/performance", (req, res) => {
+    res.json(getPerformanceSummaryData());
+  });
+
+  app.get("/api/research/export-all", (req, res) => {
+    res.json(getFullExportBundle());
+  });
   
   app.post("/api/gemini/analyze", async (req, res) => {
     try {

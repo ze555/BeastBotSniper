@@ -1,0 +1,47 @@
+{
+  "schema_version": "2.1.0",
+  "bot_version": "BeastBot-Apex-v2.1",
+  "updated_at": "2026-09-29T09:20:02.126Z",
+  "total_trades": 1,
+  "wins": 1,
+  "losses": 0,
+  "breakeven": 0,
+  "win_rate_percent": 100,
+  "total_pnl": 88.5,
+  "average_win": 88.5,
+  "average_loss": 0,
+  "profit_factor": 99.9,
+  "average_holding_time_seconds": 3600,
+  "by_direction": {
+    "LONG": {
+      "trades": 1,
+      "pnl": 88.5,
+      "wins": 1
+    },
+    "SHORT": {
+      "trades": 0,
+      "pnl": 0,
+      "wins": 0
+    }
+  },
+  "by_market_regime": {
+    "TREND": {
+      "trades": 1,
+      "pnl": 88.5,
+      "wins": 1
+    }
+  },
+  "by_exit_reason": {
+    "TP2 Reached": {
+      "count": 1,
+      "pnl": 88.5
+    }
+  },
+  "by_symbol": {
+    "ETHUSDT": {
+      "trades": 1,
+      "pnl": 88.5,
+      "wins": 1
+    }
+  }
+}
