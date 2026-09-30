@@ -1,7 +1,7 @@
 {
-  "schema_version": "2.3.0",
-  "bot_version": "BeastBot-Apex-v2.3",
-  "updated_at": "2026-09-29T15:06:24.422Z",
+  "schema_version": "2.4.0",
+  "bot_version": "BeastBot-Apex-v2.4",
+  "updated_at": "2026-09-30T10:26:01.009Z",
   "executed_trades_summary": {
     "total_trades": 1,
     "wins": 1,
@@ -33,14 +33,14 @@
       }
     },
     "by_session": {
-      "LONDON_NY_OVERLAP": {
+      "LONDON": {
         "trades": 1,
         "pnl": 88.5,
         "wins": 1
       }
     },
     "by_hour_bucket": {
-      "14:00-14:59": {
+      "09:00-09:59": {
         "trades": 1,
         "pnl": 88.5,
         "wins": 1
@@ -49,6 +49,14 @@
     "by_volatility_state": {
       "NORMAL": {
         "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      }
+    },
+    "by_loss_classification": {},
+    "by_entry_quality": {
+      "GOOD_ENTRY": {
+        "count": 1,
         "pnl": 88.5,
         "wins": 1
       }
@@ -66,6 +74,19 @@
         "wins": 1
       }
     }
+  },
+  "directional_accuracy_report": {
+    "total_predictions": 0,
+    "correct_direction_5m": 0,
+    "directional_accuracy_5m": 0,
+    "correct_direction_15m": 0,
+    "directional_accuracy_15m": 0,
+    "correct_direction_30m": 0,
+    "directional_accuracy_30m": 0,
+    "correct_direction_60m": 0,
+    "directional_accuracy_60m": 0,
+    "long_accuracy_15m": 0,
+    "short_accuracy_15m": 0
   },
   "rejected_signals_summary": {
     "total_rejected": 1,
@@ -87,24 +108,8 @@
         "unknown": 0
       }
     },
-    "by_symbol": {
-      "SOLUSDT": {
-        "total": 1,
-        "favorable": 0,
-        "adverse": 0
-      }
-    },
-    "by_rejection_reason": {
-      "Price is within 0.25% of major resistance. Awaiting confirmed breakout candle.": 1
-    },
-    "by_market_regime": {
-      "TREND_UP": 1
-    },
-    "by_session": {
-      "LONDON_NY_OVERLAP": 1
-    },
-    "by_signal_type": {
-      "BREAKOUT_LONG": 1
+    "by_timing_gate_state": {
+      "LATE_EXPANSION": 1
     }
   }
 }

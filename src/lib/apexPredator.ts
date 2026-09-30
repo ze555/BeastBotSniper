@@ -8,7 +8,9 @@ import {
    formatCandles,
    updateRejectedSignalsOutcomes,
    extractEntryTiming,
-   extractMarketRegimeContext
+   extractMarketRegimeContext,
+   registerTradeForDirectionTracking,
+   updateDirectionTracking
 } from "./researchLogger.js";
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -602,6 +604,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 
    // Passively update in-flight rejected signal future outcomes using candles and price already in memory
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
+   updateDirectionTracking(symbol, p.price);
 
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
@@ -865,7 +868,7 @@ function executeTrade(symbol: string, decision: any) {
       }
 
       let pos = riskAmt / realSlDist;
-      activeTrades.push({
+      const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
@@ -891,7 +894,9 @@ function executeTrade(symbol: string, decision: any) {
             adx: p.adx.toFixed(2),
             marketAlignment: p.bull_align ? "متوافق مع الصعود" : "فوضوي"
          }
-      });
+      };
+      activeTrades.push(newTrade);
+      registerTradeForDirectionTracking(newTrade);
       addLog(`✅ LONG ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    } else {
       const entry = p.price;
@@ -916,7 +921,7 @@ function executeTrade(symbol: string, decision: any) {
       }
 
       let pos = riskAmt / realSlDist;
-      activeTrades.push({
+      const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
@@ -942,7 +947,9 @@ function executeTrade(symbol: string, decision: any) {
             adx: p.adx.toFixed(2),
             marketAlignment: p.bear_align ? "متوافق مع الهبوط" : "فوضوي"
          }
-      });
+      };
+      activeTrades.push(newTrade);
+      registerTradeForDirectionTracking(newTrade);
       addLog(`✅ SHORT ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    }
 }

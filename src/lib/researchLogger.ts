@@ -1,20 +1,20 @@
 // ============================================================================
-// BeastBotSniper Data Logging & Research Dataset Engine (v2.3.0)
-// Full diagnostic trace for post-trade & rejected signal future outcome tracking
-// Designed for rigorous ChatGPT post-hoc dataset analysis:
-// - Session x Market Regime x Direction x Setup Type x Result
-// - Precise Entry Timing (UTC hour, minute, hour bucket, session)
-// - Volatility States (HIGH / LOW / NORMAL) and ATR ratios
+// BeastBotSniper Data Logging & Research Dataset Engine (v2.4.0)
+// Complete Diagnostic Engine for Research, Post-Mortem and Optimization:
+// - Directional Prediction Tracking (5m, 15m, 30m, 60m directionCorrect)
+// - Excursion Windows (MFE_5m/15m/30m/60m, MAE_5m/15m/30m/60m, MFE_R, MAE_R)
+// - Objective Loss Classification (DIRECTION_ERROR, TIMING_ERROR, LOCATION_ERROR, FLOW_ERROR, EXIT_ERROR, VALID_LOSS)
+// - Entry Quality Classification (GOOD_ENTRY, LATE_ENTRY, BAD_LOCATION, WEAK_CONFIRMATION, CONFLICTED_FLOW)
+// - Session x Market Regime x Direction x Timing Gate x Flow Persistence Telemetry
 // ============================================================================
 
 import fs from "fs";
 import path from "path";
 
-const SCHEMA_VERSION = "2.3.0";
-const BOT_VERSION = "BeastBot-Apex-v2.3";
+const SCHEMA_VERSION = "2.4.0";
+const BOT_VERSION = "BeastBot-Apex-v2.4";
 const RESEARCH_DIR = path.resolve(process.cwd(), "data", "research");
 
-// Ensure research output directory exists safely
 try {
    if (!fs.existsSync(RESEARCH_DIR)) {
       fs.mkdirSync(RESEARCH_DIR, { recursive: true });
@@ -29,17 +29,16 @@ const TRADE_JOURNEYS_FILE = path.join(RESEARCH_DIR, "trade_journeys.jsonl");
 const PERFORMANCE_SUMMARY_FILE = path.join(RESEARCH_DIR, "performance_summary.json");
 const DAILY_SUMMARY_FILE = path.join(RESEARCH_DIR, "daily_summary.jsonl");
 
-// In-memory buffer to prevent disk I/O bottlenecks and allow online API retrieval
 const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];
 const memoryJourneys: any[] = [];
 
-// Map to track active in-flight rejected signals for future outcome monitoring without extra API requests
+// Passive tracking maps (Zero Extra API Requests)
 const pendingRejectedMap = new Map<string, any>();
+const activeTradesDirectionMap = new Map<string, any>();
 
 let cachedSummary: any = null;
 
-// Helper to safely append to JSONL without blocking event loop
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
       const line = JSON.stringify(obj) + "\n";
@@ -51,7 +50,6 @@ function appendJsonlSafe(filePath: string, obj: any) {
    }
 }
 
-// Rewrite entire JSONL file safely when completed outcomes are finalized
 function rewriteJsonlSafe(filePath: string, items: any[]) {
    try {
       const content = items.map(item => JSON.stringify(item)).join("\n") + "\n";
@@ -65,12 +63,6 @@ function rewriteJsonlSafe(filePath: string, items: any[]) {
 
 // ----------------------------------------------------------------------------
 // 1. ENTRY TIMING EXTRACTION (Strict UTC)
-// Session buckets:
-// 00:00–07:59 -> "ASIA"
-// 08:00–12:59 -> "LONDON"
-// 13:00–16:59 -> "LONDON_NY_OVERLAP"
-// 17:00–20:59 -> "NEW_YORK"
-// 21:00–23:59 -> "LATE_US"
 // ----------------------------------------------------------------------------
 export interface EntryTiming {
    timezone: string;
@@ -135,13 +127,6 @@ export function extractEntryTiming(dateInput?: string | number | Date): EntryTim
 
 // ----------------------------------------------------------------------------
 // 2. MARKET REGIME & VOLATILITY STATE EXTRACTION
-// Evaluates:
-// - strategy_regime (TREND_UP, TREND_DOWN, RANGE, HIGH_VOLATILITY, TRANSITION)
-// - btc_regime
-// - rvol, atr14, atr20, atr_ratio
-// - volatility_state: HIGH if RVOL >= 2.0 or ATR14/ATR20 >= 1.4
-//                     LOW if RVOL <= 0.7 or ATR14/ATR20 <= 0.8
-//                     NORMAL otherwise
 // ----------------------------------------------------------------------------
 export interface MarketRegimeContext {
    strategy_regime: string;
@@ -192,7 +177,7 @@ export function extractMarketRegimeContext(p?: any, ctx?: any, reasoning?: any):
 }
 
 // ----------------------------------------------------------------------------
-// Format candle array consistently preserving REAL exchange timestamps
+// Format candle array preserving REAL exchange timestamps
 // ----------------------------------------------------------------------------
 export function formatCandles(klines: any[], limit: number = 50) {
    if (!Array.isArray(klines) || klines.length === 0) return [];
@@ -268,7 +253,184 @@ export function calculateDirectionalExcursions(direction: "LONG" | "SHORT" | str
 }
 
 // ----------------------------------------------------------------------------
-// 3. LOG REJECTED SIGNALS & INITIALIZE FUTURE OUTCOME TRACKING
+// 3. OBJECTIVE POST-MORTEM LOSS CLASSIFICATION ENGINE
+// Evaluates executed trade losses based on verifiable metrics:
+// - EXIT_ERROR: Trade achieved +1.0R or more before reversing to stop loss
+// - TIMING_ERROR: Direction was correct eventually, but entered during premature spike
+// - LOCATION_ERROR: Entered too close to extreme resistance/support without room
+// - FLOW_ERROR: Orderflow flipped from institutional accumulation to active unloading
+// - DIRECTION_ERROR: Price immediately trended against position with 0 positive follow-through
+// - VALID_LOSS: Execution followed high-conviction criteria, hit SL in normal market noise
+// ----------------------------------------------------------------------------
+export type LossClassificationType = 
+   | "DIRECTION_ERROR" 
+   | "TIMING_ERROR" 
+   | "LOCATION_ERROR" 
+   | "FLOW_ERROR" 
+   | "EXIT_ERROR" 
+   | "VALID_LOSS" 
+   | "UNKNOWN";
+
+export function classifyTradeLoss(trade: any, exitContext: { exitPrice: number; exitReason: string; finalPnl: number }): LossClassificationType {
+   if (exitContext.finalPnl >= -0.15) {
+      return "UNKNOWN"; // Not a loss
+   }
+
+   const mfeR = trade.maximum_favorable_excursion_r ?? trade.peak_r ?? 0;
+   const timingGateState = trade.reasoning?.timingGate?.state;
+   const isLate = trade.reasoning?.timingGate?.isLateEntry || timingGateState === "LATE_EXPANSION";
+   const location = trade.reasoning?.location;
+   const flowPersistence = trade.reasoning?.flow?.persistenceState;
+   const exitReason = exitContext.exitReason || trade.exitReason || "";
+
+   // 1. EXIT_ERROR: Trade achieved +1.0R or higher favorable excursion, then gave it all back
+   if (mfeR >= 1.0) {
+      return "EXIT_ERROR";
+   }
+
+   // 2. LOCATION_ERROR: Entry took place directly into an uncleared resistance or support
+   if (trade.direction === "LONG" && location && location.distanceToResistancePct < 0.0025 && !location.nearResistance) {
+      return "LOCATION_ERROR";
+   }
+   if (trade.direction === "SHORT" && location && location.distanceToSupportPct < 0.0025 && !location.nearSupport) {
+      return "LOCATION_ERROR";
+   }
+
+   // 3. TIMING_ERROR: Entered on late expansion / top or bottom before healthy retest
+   if (isLate || timingGateState === "LATE_EXPANSION" || timingGateState === "FAKE_BREAKOUT_RISK") {
+      return "TIMING_ERROR";
+   }
+
+   // 4. FLOW_ERROR: Flow was conflicted or broke immediately after entry
+   if (flowPersistence === "CONFLICTED" || flowPersistence === "WEAK" || exitReason.includes("Hidden Sell") || exitReason.includes("Inst Short")) {
+      return "FLOW_ERROR";
+   }
+
+   // 5. DIRECTION_ERROR: Never saw positive traction (MFE_R < 0.2) and immediately stopped out
+   if (mfeR < 0.25) {
+      return "DIRECTION_ERROR";
+   }
+
+   // 6. VALID_LOSS: High quality entry with good location and flow that took a disciplined loss
+   return "VALID_LOSS";
+}
+
+// ----------------------------------------------------------------------------
+// 4. ENTRY QUALITY CLASSIFICATION
+// ----------------------------------------------------------------------------
+export type EntryQualityType = 
+   | "GOOD_ENTRY" 
+   | "LATE_ENTRY" 
+   | "BAD_LOCATION" 
+   | "WEAK_CONFIRMATION" 
+   | "CONFLICTED_FLOW" 
+   | "UNKNOWN";
+
+export function classifyEntryQuality(trade: any): EntryQualityType {
+   const timingGate = trade.reasoning?.timingGate;
+   const flow = trade.reasoning?.flow;
+   const loc = trade.reasoning?.location;
+
+   if (flow?.persistenceState === "CONFLICTED" || flow?.state === "MIXED") {
+      return "CONFLICTED_FLOW";
+   }
+   if (timingGate?.isLateEntry || timingGate?.state === "LATE_EXPANSION") {
+      return "LATE_ENTRY";
+   }
+   if (trade.direction === "LONG" && loc && loc.distanceToResistancePct < 0.002) {
+      return "BAD_LOCATION";
+   }
+   if (trade.direction === "SHORT" && loc && loc.distanceToSupportPct < 0.002) {
+      return "BAD_LOCATION";
+   }
+   if (trade.score < 7.0 || timingGate?.state === "WAITING_FOR_CONFIRMATION") {
+      return "WEAK_CONFIRMATION";
+   }
+   return "GOOD_ENTRY";
+}
+
+// ----------------------------------------------------------------------------
+// 5. IN-FLIGHT DIRECTIONAL PREDICTION TRACKING (Zero API Calls)
+// ----------------------------------------------------------------------------
+export function registerTradeForDirectionTracking(trade: any) {
+   const tradeId = `${trade.symbol}_${new Date(trade.entryTime).getTime()}`;
+   activeTradesDirectionMap.set(tradeId, {
+      tradeId,
+      symbol: trade.symbol,
+      direction: trade.direction,
+      entryPrice: trade.entry,
+      entryTimeMs: new Date(trade.entryTime).getTime(),
+      tradeRef: trade,
+      snapshots: {
+         p_5m: null,
+         correct_5m: null,
+         mfe_5m: null,
+         mae_5m: null,
+         p_15m: null,
+         correct_15m: null,
+         mfe_15m: null,
+         mae_15m: null,
+         p_30m: null,
+         correct_30m: null,
+         mfe_30m: null,
+         mae_30m: null,
+         p_60m: null,
+         correct_60m: null,
+         mfe_60m: null,
+         mae_60m: null
+      },
+      highestPrice: trade.entry,
+      lowestPrice: trade.entry
+   });
+}
+
+export function updateDirectionTracking(symbol: string, currentPrice: number) {
+   if (activeTradesDirectionMap.size === 0 || !symbol || !currentPrice) return;
+   const now = Date.now();
+
+   for (const [id, item] of activeTradesDirectionMap.entries()) {
+      if (item.symbol !== symbol) continue;
+
+      if (currentPrice > item.highestPrice) item.highestPrice = currentPrice;
+      if (currentPrice < item.lowestPrice) item.lowestPrice = currentPrice;
+
+      const elapsedMinutes = (now - item.entryTimeMs) / 60000;
+      const isLong = item.direction === "LONG";
+      const priceChangePct = item.entryPrice > 0 ? ((currentPrice - item.entryPrice) / item.entryPrice) * 100 : 0;
+      const isDirectionCorrect = isLong ? priceChangePct > 0.05 : priceChangePct < -0.05;
+
+      const excursions = calculateDirectionalExcursions(item.direction, item.entryPrice, item.highestPrice, item.lowestPrice);
+
+      if (elapsedMinutes >= 5 && item.snapshots.p_5m === null) {
+         item.snapshots.p_5m = priceChangePct;
+         item.snapshots.correct_5m = isDirectionCorrect;
+         item.snapshots.mfe_5m = excursions.mfePercent;
+         item.snapshots.mae_5m = excursions.maePercent;
+      }
+      if (elapsedMinutes >= 15 && item.snapshots.p_15m === null) {
+         item.snapshots.p_15m = priceChangePct;
+         item.snapshots.correct_15m = isDirectionCorrect;
+         item.snapshots.mfe_15m = excursions.mfePercent;
+         item.snapshots.mae_15m = excursions.maePercent;
+      }
+      if (elapsedMinutes >= 30 && item.snapshots.p_30m === null) {
+         item.snapshots.p_30m = priceChangePct;
+         item.snapshots.correct_30m = isDirectionCorrect;
+         item.snapshots.mfe_30m = excursions.mfePercent;
+         item.snapshots.mae_30m = excursions.maePercent;
+      }
+      if (elapsedMinutes >= 60 && item.snapshots.p_60m === null) {
+         item.snapshots.p_60m = priceChangePct;
+         item.snapshots.correct_60m = isDirectionCorrect;
+         item.snapshots.mfe_60m = excursions.mfePercent;
+         item.snapshots.mae_60m = excursions.maePercent;
+         activeTradesDirectionMap.delete(id); // Finished 60m horizon
+      }
+   }
+}
+
+// ----------------------------------------------------------------------------
+// 6. LOG REJECTED SIGNALS
 // ----------------------------------------------------------------------------
 export function logRejectedSignal(payload: {
    symbol: string;
@@ -296,7 +458,9 @@ export function logRejectedSignal(payload: {
 
       if (reasoning) {
          if (reasoning.confirmation?.evidence) conditions_met.push(...reasoning.confirmation.evidence);
+         if (reasoning.timingGate?.evidence) conditions_met.push(...reasoning.timingGate.evidence);
          if (reasoning.confirmation?.missingItems) conditions_failed.push(...reasoning.confirmation.missingItems);
+         if (reasoning.timingGate?.missingItems) conditions_failed.push(...reasoning.timingGate.missingItems);
       }
       if (rejection_reason && !conditions_failed.includes(rejection_reason)) {
          conditions_failed.push(rejection_reason);
@@ -316,11 +480,13 @@ export function logRejectedSignal(payload: {
          rejection_reason,
          market_regime: marketContext.strategy_regime,
          flow_state: reasoning?.flow?.state || "UNKNOWN",
+         flow_persistence_state: reasoning?.flow?.persistenceState || "MODERATE",
+         flow_persistence_score: reasoning?.flow?.persistenceScore ?? 50,
          setup_type: reasoning?.scenario?.primary?.type || "BREAKOUT_MOMENTUM",
+         timing_gate_state: reasoning?.timingGate?.state || "WAITING_FOR_CONFIRMATION",
          conditions_met,
          conditions_failed,
          
-         // ═══ ENTRY TIMING & REGIME ANALYTICS ═══
          entry_timing: entryTiming,
          market_context: {
             ...marketContext,
@@ -342,6 +508,7 @@ export function logRejectedSignal(payload: {
             taker_ratio: p?.taker ?? null,
             cvd_slope15: w?.slope15 ?? null,
             cvd_slope5: w?.slope5 ?? null,
+            cvd_slope4h: w?.slope4h ?? null,
             oi_change: w?.oi_chg ?? null,
             funding_rate: w?.fund ?? null,
             supertrend: p?.st_bull ? "BULL" : p?.st_bear ? "BEAR" : "NEUTRAL"
@@ -349,6 +516,10 @@ export function logRejectedSignal(payload: {
          location: {
             nearest_resistance: reasoning?.location?.nearestResistance ?? null,
             nearest_support: reasoning?.location?.nearestSupport ?? null,
+            range_high: reasoning?.location?.rangeHigh ?? null,
+            range_low: reasoning?.location?.rangeLow ?? null,
+            distance_to_resistance_pct: reasoning?.location?.distanceToResistancePct ?? null,
+            distance_to_support_pct: reasoning?.location?.distanceToSupportPct ?? null,
             near_resistance: reasoning?.location?.nearResistance ?? false,
             near_support: reasoning?.location?.nearSupport ?? false,
             liquidity_data: "unavailable"
@@ -399,7 +570,7 @@ export function logRejectedSignal(payload: {
 }
 
 // ----------------------------------------------------------------------------
-// 4. PASSIVE FUTURE OUTCOME EVALUATOR (Zero Extra API Requests)
+// 7. PASSIVE FUTURE OUTCOME EVALUATOR (Zero Extra API Requests)
 // ----------------------------------------------------------------------------
 export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: number, currentKlines?: any[]) {
    if (pendingRejectedMap.size === 0 || !symbol || !currentPrice) return;
@@ -443,28 +614,24 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
          target.future_outcomes.snapshot_5m = makeSnapshot();
          needsRewrite = true;
       }
-
       if (elapsedMinutes >= 15 && !target.future_outcomes.snapshot_15m) {
          target.future_outcomes.snapshot_15m = makeSnapshot();
          target.excursions.mfe_15m = currentExcursion.mfePercent;
          target.excursions.mae_15m = currentExcursion.maePercent;
          needsRewrite = true;
       }
-
       if (elapsedMinutes >= 30 && !target.future_outcomes.snapshot_30m) {
          target.future_outcomes.snapshot_30m = makeSnapshot();
          target.excursions.mfe_30m = currentExcursion.mfePercent;
          target.excursions.mae_30m = currentExcursion.maePercent;
          needsRewrite = true;
       }
-
       if (elapsedMinutes >= 60 && !target.future_outcomes.snapshot_60m) {
          target.future_outcomes.snapshot_60m = makeSnapshot();
          target.excursions.mfe_60m = currentExcursion.mfePercent;
          target.excursions.mae_60m = currentExcursion.maePercent;
          needsRewrite = true;
       }
-
       if (elapsedMinutes >= 120 && !target.future_outcomes.snapshot_120m) {
          target.future_outcomes.snapshot_120m = makeSnapshot();
          target.excursions.mfe_120m = currentExcursion.mfePercent;
@@ -504,8 +671,7 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
 }
 
 // ----------------------------------------------------------------------------
-// 5. LOG COMPLETED TRADE DECISION
-// Full trade lifecycle from entry to exit with Entry Timing & Market Regime
+// 8. LOG COMPLETED TRADE DECISION
 // ----------------------------------------------------------------------------
 export function logTradeDecision(trade: any, exitContext: {
    exitPrice: number;
@@ -531,10 +697,10 @@ export function logTradeDecision(trade: any, exitContext: {
          ? Math.max(0, Math.floor((trade.timeOfLowestPrice - entryTime.getTime()) / 1000))
          : holdingSeconds;
 
-      let mfe = 0;
-      let mae = 0;
       const initialSlDist = trade.initialSlDist || Math.abs(entryPrice - trade.sl);
 
+      let mfe = 0;
+      let mae = 0;
       if (trade.direction === "LONG") {
          mfe = (highestPrice - entryPrice) / initialSlDist;
          mae = (entryPrice - lowestPrice) / initialSlDist;
@@ -546,7 +712,6 @@ export function logTradeDecision(trade: any, exitContext: {
       const pnlPercent = trade.initialPos > 0 ? (exitContext.finalPnl / (entryPrice * trade.initialPos)) * 100 : 0;
       const result = exitContext.finalPnl > 0.15 ? "WIN" : exitContext.finalPnl < -0.15 ? "LOSS" : "BREAKEVEN";
 
-      // Precise Entry Timing & Market Regime from trade object or parsed cleanly
       const entryTiming = trade.entryTiming || extractEntryTiming(trade.entryTime);
       const marketRegimeContext = trade.marketRegimeContext || extractMarketRegimeContext(
          trade.priceData,
@@ -554,11 +719,22 @@ export function logTradeDecision(trade: any, exitContext: {
          trade.reasoning
       );
 
+      // Directional prediction metrics from active snapshot tracking
+      const tradeId = `${trade.symbol}_${entryTime.getTime()}`;
+      const trackedSnapshots = activeTradesDirectionMap.get(tradeId)?.snapshots || {};
+
+      // Loss Classification & Entry Quality
+      const lossClassification = result === "LOSS" 
+         ? classifyTradeLoss({ ...trade, maximum_favorable_excursion_r: mfe }, exitContext)
+         : "UNKNOWN";
+
+      const entryQuality = classifyEntryQuality(trade);
+
       const event = {
          schema_version: SCHEMA_VERSION,
          bot_version: BOT_VERSION,
          event_type: "TRADING_DECISION",
-         trade_id: `${trade.symbol}_${entryTime.getTime()}`,
+         trade_id: tradeId,
          timestamp_entry: trade.entryTime,
          timestamp_exit: exitTime.toISOString(),
          symbol: trade.symbol,
@@ -571,6 +747,10 @@ export function logTradeDecision(trade: any, exitContext: {
          // ═══ ENTRY TIMING & REGIME ANALYTICS ═══
          entry_timing: entryTiming,
          market_context: marketRegimeContext,
+         timing_gate_state: trade.reasoning?.timingGate?.state || "CONFIRMED",
+         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "MODERATE",
+         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? 75,
+         entry_quality: entryQuality,
 
          entry_price: entryPrice,
          exit_price: exitContext.exitPrice,
@@ -589,12 +769,32 @@ export function logTradeDecision(trade: any, exitContext: {
          result,
          exit_reason: exitContext.exitReason,
          confidence_score: trade.score,
+
+         // ═══ EXCURSION METRICS ═══
          maximum_favorable_excursion_r: Number(mfe.toFixed(2)),
          maximum_adverse_excursion_r: Number(mae.toFixed(2)),
          highest_price_after_entry: highestPrice,
          lowest_price_after_entry: lowestPrice,
          time_to_MFE: timeToMfe,
          time_to_MAE: timeToMae,
+         
+         // ═══ DIRECTIONAL PREDICTION TRACKING ═══
+         directional_prediction: {
+            direction_predicted: trade.direction,
+            correct_5m: trackedSnapshots.correct_5m ?? null,
+            pnl_pct_5m: trackedSnapshots.p_5m ?? null,
+            correct_15m: trackedSnapshots.correct_15m ?? null,
+            pnl_pct_15m: trackedSnapshots.p_15m ?? null,
+            correct_30m: trackedSnapshots.correct_30m ?? null,
+            pnl_pct_30m: trackedSnapshots.p_30m ?? null,
+            correct_60m: trackedSnapshots.correct_60m ?? null,
+            pnl_pct_60m: trackedSnapshots.p_60m ?? null,
+            mfe_15m_pct: trackedSnapshots.mfe_15m ?? null,
+            mae_15m_pct: trackedSnapshots.mae_15m ?? null
+         },
+
+         // ═══ LOSS CLASSIFICATION ═══
+         loss_classification: lossClassification,
          
          // Context at Entry
          entry_context: {
@@ -606,13 +806,14 @@ export function logTradeDecision(trade: any, exitContext: {
             location_at_entry: trade.reasoning?.location || null
          },
          
-         // Candlestick Snapshots (Before entry & During trade)
          candles_before_entry: trade.candlesBeforeEntry || [],
          candles_during_trade: formatCandles(exitContext.currentKlines || [], 30)
       };
 
       memoryDecisions.unshift(event);
       if (memoryDecisions.length > 200) memoryDecisions.pop();
+
+      activeTradesDirectionMap.delete(tradeId);
 
       appendJsonlSafe(TRADING_DECISIONS_FILE, event);
       updateSummaries(event);
@@ -622,7 +823,7 @@ export function logTradeDecision(trade: any, exitContext: {
 }
 
 // ----------------------------------------------------------------------------
-// 6. LOG TRADE JOURNEY (In-flight snapshot with time tracking)
+// 9. LOG TRADE JOURNEY (In-flight snapshot with time tracking)
 // ----------------------------------------------------------------------------
 export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: number) {
    try {
@@ -669,8 +870,7 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
 }
 
 // ----------------------------------------------------------------------------
-// 7. SUMMARY GENERATOR (Raw statistics without any trading recommendations)
-// Aggregates Session x Market Regime x Direction x Setup Type
+// 10. SUMMARY GENERATOR (Raw statistics without any trading recommendations)
 // ----------------------------------------------------------------------------
 function updateSummaries(lastTrade: any) {
    try {
@@ -701,6 +901,17 @@ function updateSummaries(lastTrade: any) {
       const bySession: Record<string, any> = {};
       const byHourBucket: Record<string, any> = {};
       const byVolatilityState: Record<string, any> = {};
+      const byLossClassification: Record<string, any> = {};
+      const byEntryQuality: Record<string, any> = {};
+
+      // Directional Accuracy Aggregators
+      let eval5m = 0, correct5m = 0;
+      let eval15m = 0, correct15m = 0;
+      let eval30m = 0, correct30m = 0;
+      let eval60m = 0, correct60m = 0;
+
+      let longEval15m = 0, longCorrect15m = 0;
+      let shortEval15m = 0, shortCorrect15m = 0;
 
       for (const t of allTrades) {
          if (!bySymbol[t.symbol]) bySymbol[t.symbol] = { trades: 0, pnl: 0, wins: 0 };
@@ -738,10 +949,39 @@ function updateSummaries(lastTrade: any) {
          byVolatilityState[volState].pnl += t.pnl;
          if (t.result === "WIN") byVolatilityState[volState].wins++;
 
+         // Loss classification
+         if (t.result === "LOSS") {
+            const lossType = t.loss_classification || "UNKNOWN";
+            if (!byLossClassification[lossType]) byLossClassification[lossType] = { count: 0, pnl: 0 };
+            byLossClassification[lossType].count++;
+            byLossClassification[lossType].pnl += t.pnl;
+         }
+
+         // Entry Quality
+         const quality = t.entry_quality || "UNKNOWN";
+         if (!byEntryQuality[quality]) byEntryQuality[quality] = { count: 0, pnl: 0, wins: 0 };
+         byEntryQuality[quality].count++;
+         byEntryQuality[quality].pnl += t.pnl;
+         if (t.result === "WIN") byEntryQuality[quality].wins++;
+
          const rsn = t.exit_reason || "UNKNOWN";
          if (!byExitReason[rsn]) byExitReason[rsn] = { count: 0, pnl: 0 };
          byExitReason[rsn].count++;
          byExitReason[rsn].pnl += t.pnl;
+
+         // Directional tracking stats
+         const dp = t.directional_prediction;
+         if (dp) {
+            if (dp.correct_5m !== null) { eval5m++; if (dp.correct_5m) correct5m++; }
+            if (dp.correct_15m !== null) {
+               eval15m++;
+               if (dp.correct_15m) correct15m++;
+               if (t.side === "LONG") { longEval15m++; if (dp.correct_15m) longCorrect15m++; }
+               if (t.side === "SHORT") { shortEval15m++; if (dp.correct_15m) shortCorrect15m++; }
+            }
+            if (dp.correct_30m !== null) { eval30m++; if (dp.correct_30m) correct30m++; }
+            if (dp.correct_60m !== null) { eval60m++; if (dp.correct_60m) correct60m++; }
+         }
       }
 
       // ═══ REJECTED SIGNALS RESEARCH BREAKDOWNS ═══
@@ -754,11 +994,7 @@ function updateSummaries(lastTrade: any) {
          LONG: { total: 0, favorable: 0, adverse: 0, unknown: 0 },
          SHORT: { total: 0, favorable: 0, adverse: 0, unknown: 0 }
       };
-      const rejectedBySymbol: Record<string, any> = {};
-      const rejectedByReason: Record<string, any> = {};
-      const rejectedByRegime: Record<string, any> = {};
-      const rejectedBySession: Record<string, any> = {};
-      const rejectedBySignalType: Record<string, any> = {};
+      const rejectedByTimingGate: Record<string, any> = {};
 
       for (const r of allRejected) {
          const side = r.direction === "LONG" || r.direction === "SHORT" ? r.direction : "WAIT";
@@ -769,26 +1005,9 @@ function updateSummaries(lastTrade: any) {
             else rejectedByDirection[side].unknown++;
          }
 
-         if (!rejectedBySymbol[r.symbol]) rejectedBySymbol[r.symbol] = { total: 0, favorable: 0, adverse: 0 };
-         rejectedBySymbol[r.symbol].total++;
-         if (r.post_rejection_outcome === "FAVORABLE") rejectedBySymbol[r.symbol].favorable++;
-         if (r.post_rejection_outcome === "ADVERSE") rejectedBySymbol[r.symbol].adverse++;
-
-         const reasonKey = r.rejection_reason || "Unspecified";
-         if (!rejectedByReason[reasonKey]) rejectedByReason[reasonKey] = 0;
-         rejectedByReason[reasonKey]++;
-
-         const regimeKey = r.market_context?.strategy_regime || r.market_regime || "UNKNOWN";
-         if (!rejectedByRegime[regimeKey]) rejectedByRegime[regimeKey] = 0;
-         rejectedByRegime[regimeKey]++;
-
-         const sessKey = r.entry_timing?.session || "UNKNOWN";
-         if (!rejectedBySession[sessKey]) rejectedBySession[sessKey] = 0;
-         rejectedBySession[sessKey]++;
-
-         const typeKey = r.setup_type || "BREAKOUT_MOMENTUM";
-         if (!rejectedBySignalType[typeKey]) rejectedBySignalType[typeKey] = 0;
-         rejectedBySignalType[typeKey]++;
+         const tgState = r.timing_gate_state || "UNKNOWN";
+         if (!rejectedByTimingGate[tgState]) rejectedByTimingGate[tgState] = 0;
+         rejectedByTimingGate[tgState]++;
       }
 
       const summary = {
@@ -811,8 +1030,23 @@ function updateSummaries(lastTrade: any) {
             by_session: bySession,
             by_hour_bucket: byHourBucket,
             by_volatility_state: byVolatilityState,
+            by_loss_classification: byLossClassification,
+            by_entry_quality: byEntryQuality,
             by_exit_reason: byExitReason,
             by_symbol: bySymbol
+         },
+         directional_accuracy_report: {
+            total_predictions: eval15m,
+            correct_direction_5m: correct5m,
+            directional_accuracy_5m: eval5m > 0 ? Number(((correct5m / eval5m) * 100).toFixed(1)) : 0,
+            correct_direction_15m: correct15m,
+            directional_accuracy_15m: eval15m > 0 ? Number(((correct15m / eval15m) * 100).toFixed(1)) : 0,
+            correct_direction_30m: correct30m,
+            directional_accuracy_30m: eval30m > 0 ? Number(((correct30m / eval30m) * 100).toFixed(1)) : 0,
+            correct_direction_60m: correct60m,
+            directional_accuracy_60m: eval60m > 0 ? Number(((correct60m / eval60m) * 100).toFixed(1)) : 0,
+            long_accuracy_15m: longEval15m > 0 ? Number(((longCorrect15m / longEval15m) * 100).toFixed(1)) : 0,
+            short_accuracy_15m: shortEval15m > 0 ? Number(((shortCorrect15m / shortEval15m) * 100).toFixed(1)) : 0
          },
          rejected_signals_summary: {
             total_rejected: allRejected.length,
@@ -821,11 +1055,7 @@ function updateSummaries(lastTrade: any) {
             adverse_rejections: adverseRejections.length,
             unknown_rejections: unknownRejections.length,
             by_direction: rejectedByDirection,
-            by_symbol: rejectedBySymbol,
-            by_rejection_reason: rejectedByReason,
-            by_market_regime: rejectedByRegime,
-            by_session: rejectedBySession,
-            by_signal_type: rejectedBySignalType
+            by_timing_gate_state: rejectedByTimingGate
          }
       };
 
@@ -857,7 +1087,7 @@ function updateSummaries(lastTrade: any) {
 }
 
 // ----------------------------------------------------------------------------
-// 8. PUBLIC ACCESS API EXPORTS
+// 11. PUBLIC ACCESS API EXPORTS
 // ----------------------------------------------------------------------------
 export function getTradingDecisionsData(limit: number = 100) {
    return memoryDecisions.slice(0, limit);
@@ -882,6 +1112,7 @@ export function getPerformanceSummaryData() {
       schema_version: SCHEMA_VERSION,
       bot_version: BOT_VERSION,
       executed_trades_summary: { total_trades: 0 },
+      directional_accuracy_report: { total_predictions: 0 },
       rejected_signals_summary: { total_rejected: 0 }
    };
 }
