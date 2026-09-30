@@ -1,7 +1,15 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
-import { logRejectedSignal, logTradeDecision, logTradeJourneySnapshot, formatCandles } from "./researchLogger.js";
+import {
+   logRejectedSignal,
+   logTradeDecision,
+   logTradeJourneySnapshot,
+   formatCandles,
+   updateRejectedSignalsOutcomes,
+   extractEntryTiming,
+   extractMarketRegimeContext
+} from "./researchLogger.js";
 
 const BINANCE_FAPI = "https://fapi.binance.com";
 let watcherInterval: NodeJS.Timeout | null = null;
@@ -570,7 +578,7 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
                           rvol < 3.2;
 
    return {
-      price, ema21, ema50, ema200, atr14,
+      price, ema21, ema50, ema200, atr14, atr20,
       bull_align, bear_align,
       HH_HL, LH_LL, compressed, rvol, avg_vol,
       strong_bull_c, strong_bear_c, cpos, bpct,
@@ -591,6 +599,9 @@ async function scoreEntry(symbol: string, ctx: any) {
 
    const w = await readWhale(symbol, ctx.btc_chg);
    const p = await readPrice(symbol, w.c15, w.c5);
+
+   // Passively update in-flight rejected signal future outcomes using candles and price already in memory
+   updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
 
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
@@ -824,9 +835,12 @@ async function scoreEntry(symbol: string, ctx: any) {
 
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
-   const { p, w, score, grade, setupType } = decision;
+   const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
    const riskAmt = virtualBalance * grade.risk * grade.mult;
+
+   const entryTiming = extractEntryTiming();
+   const marketRegimeContext = extractMarketRegimeContext(p, ctx, reasoning);
 
    if (decision.signal === "LONG") {
       const entry = p.price;
@@ -854,6 +868,7 @@ function executeTrade(symbol: string, decision: any) {
       activeTrades.push({
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
+         entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
@@ -904,6 +919,7 @@ function executeTrade(symbol: string, decision: any) {
       activeTrades.push({
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
+         entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,

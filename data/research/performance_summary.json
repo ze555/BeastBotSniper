@@ -1,47 +1,110 @@
 {
-  "schema_version": "2.1.0",
-  "bot_version": "BeastBot-Apex-v2.1",
-  "updated_at": "2026-09-29T09:20:02.126Z",
-  "total_trades": 1,
-  "wins": 1,
-  "losses": 0,
-  "breakeven": 0,
-  "win_rate_percent": 100,
-  "total_pnl": 88.5,
-  "average_win": 88.5,
-  "average_loss": 0,
-  "profit_factor": 99.9,
-  "average_holding_time_seconds": 3600,
-  "by_direction": {
-    "LONG": {
-      "trades": 1,
-      "pnl": 88.5,
-      "wins": 1
+  "schema_version": "2.3.0",
+  "bot_version": "BeastBot-Apex-v2.3",
+  "updated_at": "2026-09-29T15:06:24.422Z",
+  "executed_trades_summary": {
+    "total_trades": 1,
+    "wins": 1,
+    "losses": 0,
+    "breakeven": 0,
+    "win_rate_percent": 100,
+    "total_pnl": 88.5,
+    "average_win": 88.5,
+    "average_loss": 0,
+    "profit_factor": 99.9,
+    "average_holding_time_seconds": 3600,
+    "by_direction": {
+      "LONG": {
+        "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      },
+      "SHORT": {
+        "trades": 0,
+        "pnl": 0,
+        "wins": 0
+      }
     },
-    "SHORT": {
-      "trades": 0,
-      "pnl": 0,
-      "wins": 0
+    "by_market_regime": {
+      "TREND_UP": {
+        "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      }
+    },
+    "by_session": {
+      "LONDON_NY_OVERLAP": {
+        "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      }
+    },
+    "by_hour_bucket": {
+      "14:00-14:59": {
+        "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      }
+    },
+    "by_volatility_state": {
+      "NORMAL": {
+        "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      }
+    },
+    "by_exit_reason": {
+      "TP2 Reached": {
+        "count": 1,
+        "pnl": 88.5
+      }
+    },
+    "by_symbol": {
+      "ETHUSDT": {
+        "trades": 1,
+        "pnl": 88.5,
+        "wins": 1
+      }
     }
   },
-  "by_market_regime": {
-    "TREND": {
-      "trades": 1,
-      "pnl": 88.5,
-      "wins": 1
-    }
-  },
-  "by_exit_reason": {
-    "TP2 Reached": {
-      "count": 1,
-      "pnl": 88.5
-    }
-  },
-  "by_symbol": {
-    "ETHUSDT": {
-      "trades": 1,
-      "pnl": 88.5,
-      "wins": 1
+  "rejected_signals_summary": {
+    "total_rejected": 1,
+    "rejected_with_outcome": 0,
+    "favorable_rejections": 0,
+    "adverse_rejections": 0,
+    "unknown_rejections": 1,
+    "by_direction": {
+      "LONG": {
+        "total": 1,
+        "favorable": 0,
+        "adverse": 0,
+        "unknown": 1
+      },
+      "SHORT": {
+        "total": 0,
+        "favorable": 0,
+        "adverse": 0,
+        "unknown": 0
+      }
+    },
+    "by_symbol": {
+      "SOLUSDT": {
+        "total": 1,
+        "favorable": 0,
+        "adverse": 0
+      }
+    },
+    "by_rejection_reason": {
+      "Price is within 0.25% of major resistance. Awaiting confirmed breakout candle.": 1
+    },
+    "by_market_regime": {
+      "TREND_UP": 1
+    },
+    "by_session": {
+      "LONDON_NY_OVERLAP": 1
+    },
+    "by_signal_type": {
+      "BREAKOUT_LONG": 1
     }
   }
 }
