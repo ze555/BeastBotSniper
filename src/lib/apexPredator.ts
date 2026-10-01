@@ -1030,11 +1030,11 @@ async function exitBrain(trade: any, ctx: any) {
    if (!t.a_closed) {
       if (profitR >= TP1_R) {
          closePart(t, "A", t.part_a);
-         // Move SL to Entry + 0.05R (guarantees positive trade accounting for exchange fees)
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.05) : t.entry - (slDist * 0.05);
+         // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف للدخول + رسوم (الصفقة مؤمنة بربح)`, 'success');
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry;
