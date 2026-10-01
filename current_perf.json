@@ -1,0 +1,189 @@
+{
+  "schema_version": "2.4.0",
+  "bot_version": "BeastBot-Apex-v2.4",
+  "updated_at": "2026-10-01T17:29:31.976Z",
+  "executed_trades_summary": {
+    "total_trades": 6,
+    "wins": 1,
+    "losses": 5,
+    "breakeven": 0,
+    "win_rate_percent": 16.67,
+    "total_pnl": -69.97,
+    "average_win": 2.11,
+    "average_loss": 14.42,
+    "profit_factor": 0.03,
+    "average_holding_time_seconds": 4641,
+    "by_direction": {
+      "LONG": {
+        "trades": 0,
+        "pnl": 0,
+        "wins": 0
+      },
+      "SHORT": {
+        "trades": 6,
+        "pnl": -69.97000000000001,
+        "wins": 1
+      }
+    },
+    "by_market_regime": {
+      "TREND_DOWN": {
+        "trades": 4,
+        "pnl": -61.63000000000001,
+        "wins": 0
+      },
+      "RANGE": {
+        "trades": 2,
+        "pnl": -8.34,
+        "wins": 1
+      }
+    },
+    "by_session": {
+      "LONDON_NY_OVERLAP": {
+        "trades": 3,
+        "pnl": -36.25,
+        "wins": 1
+      },
+      "LONDON": {
+        "trades": 3,
+        "pnl": -33.72,
+        "wins": 0
+      }
+    },
+    "by_hour_bucket": {
+      "13:00-13:59": {
+        "trades": 3,
+        "pnl": -36.25,
+        "wins": 1
+      },
+      "12:00-12:59": {
+        "trades": 2,
+        "pnl": -23.27,
+        "wins": 0
+      },
+      "10:00-10:59": {
+        "trades": 1,
+        "pnl": -10.45,
+        "wins": 0
+      }
+    },
+    "by_volatility_state": {
+      "NORMAL": {
+        "trades": 3,
+        "pnl": -48.81,
+        "wins": 0
+      },
+      "LOW": {
+        "trades": 3,
+        "pnl": -21.16,
+        "wins": 1
+      }
+    },
+    "by_loss_classification": {
+      "LOCATION_ERROR": {
+        "count": 2,
+        "pnl": -21.299999999999997
+      },
+      "VALID_LOSS": {
+        "count": 2,
+        "pnl": -23.27
+      },
+      "DIRECTION_ERROR": {
+        "count": 1,
+        "pnl": -27.51
+      }
+    },
+    "by_entry_quality": {
+      "BAD_LOCATION": {
+        "count": 5,
+        "pnl": -59.45,
+        "wins": 1
+      },
+      "GOOD_ENTRY": {
+        "count": 1,
+        "pnl": -10.52,
+        "wins": 0
+      }
+    },
+    "by_exit_reason": {
+      "SL Hit": {
+        "count": 5,
+        "pnl": -72.08000000000001
+      },
+      "Breakeven Protected Exit": {
+        "count": 1,
+        "pnl": 2.11
+      }
+    },
+    "by_symbol": {
+      "GRASSUSDT": {
+        "trades": 1,
+        "pnl": -10.85,
+        "wins": 0
+      },
+      "AAPLUSDT": {
+        "trades": 1,
+        "pnl": 2.11,
+        "wins": 1
+      },
+      "MUUSDT": {
+        "trades": 1,
+        "pnl": -12.75,
+        "wins": 0
+      },
+      "MUUUSDT": {
+        "trades": 1,
+        "pnl": -10.52,
+        "wins": 0
+      },
+      "CBRSUSDT": {
+        "trades": 1,
+        "pnl": -27.51,
+        "wins": 0
+      },
+      "1000PEPEUSDT": {
+        "trades": 1,
+        "pnl": -10.45,
+        "wins": 0
+      }
+    }
+  },
+  "directional_accuracy_report": {
+    "total_predictions": 0,
+    "correct_direction_5m": 0,
+    "directional_accuracy_5m": 0,
+    "correct_direction_15m": 0,
+    "directional_accuracy_15m": 0,
+    "correct_direction_30m": 0,
+    "directional_accuracy_30m": 0,
+    "correct_direction_60m": 0,
+    "directional_accuracy_60m": 0,
+    "long_accuracy_15m": 0,
+    "short_accuracy_15m": 0
+  },
+  "rejected_signals_summary": {
+    "total_rejected": 200,
+    "rejected_with_outcome": 103,
+    "favorable_rejections": 0,
+    "adverse_rejections": 0,
+    "unknown_rejections": 200,
+    "by_direction": {
+      "LONG": {
+        "total": 21,
+        "favorable": 0,
+        "adverse": 0,
+        "unknown": 21
+      },
+      "SHORT": {
+        "total": 179,
+        "favorable": 0,
+        "adverse": 0,
+        "unknown": 179
+      }
+    },
+    "by_timing_gate_state": {
+      "WAITING_FOR_CONFIRMATION": 169,
+      "CONFIRMED": 27,
+      "FAKE_BREAKOUT_RISK": 4
+    }
+  }
+}

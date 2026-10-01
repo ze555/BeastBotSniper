@@ -784,6 +784,23 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
+         // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
+         if (ctx.regime === "BULL_STRONG") {
+            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "SHORT",
+               signal_score: ss,
+               rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          apexPredatorStats.acceptedShorts++;
          if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
          else apexPredatorStats.breakoutSetups++;
