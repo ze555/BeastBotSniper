@@ -1061,49 +1061,13 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 2. PROFIT EXPANSION (TP2: +1.80R) & CONSERVATIVE HYBRID PROTECTIONS
+   // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      const peakMfe = t.peak_r || profitR;
-
-      // Milestone 1: At +1.00R MFE -> Monotonically advance SL to +0.50R
-      const targetSl50 = t.direction === "LONG" ? t.entry + (slDist * 0.50) : t.entry - (slDist * 0.50);
-      if (peakMfe >= 1.00 && !t.milestone_1r_locked) {
-         if (t.direction === "LONG" ? t.sl < targetSl50 : t.sl > targetSl50) {
-            t.sl = targetSl50;
-            t.milestone_1r_locked = true;
-            addLog(`🛡️ [MILESTONE 1] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.50R رابحة`, 'info');
-         }
-      }
-
-      // Milestone 2: At +1.50R MFE -> Monotonically advance SL to +0.90R
-      const targetSl90 = t.direction === "LONG" ? t.entry + (slDist * 0.90) : t.entry - (slDist * 0.90);
-      if (peakMfe >= 1.50 && !t.milestone_1_5r_locked) {
-         if (t.direction === "LONG" ? t.sl < targetSl90 : t.sl > targetSl90) {
-            t.sl = targetSl90;
-            t.milestone_1_5r_locked = true;
-            addLog(`🛡️ [MILESTONE 2] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.90R رابحة`, 'info');
-         }
-      }
-
-      // Dynamic Giveback Protection: If MFE >= +1.15R and price retraces >= 0.35R from peak
-      if (peakMfe >= 1.15) {
-         const givebackDecay = peakMfe - profitR;
-         const givebackThreshold = 0.35; // Data-validated robust threshold
-         if (givebackDecay >= givebackThreshold) {
-            addLog(`🛡️ [GIVEBACK PROTECT] ${t.symbol}: تراجع ${givebackDecay.toFixed(2)}R من قمة +${peakMfe.toFixed(2)}R | إغلاق وتأمين الأرباح المتبقية عند +${profitR.toFixed(2)}R`, 'warn');
-            closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-            return;
-         }
-      }
-
       if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
-         // Lock in TP1 level as floor profit (+0.75R)
-         const targetSlTp1 = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         if (t.direction === "LONG" ? t.sl < targetSlTp1 : t.sl > targetSlTp1) {
-            t.sl = targetSlTp1;
-         }
+         // Lock in TP1 level as floor profit
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
          addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
