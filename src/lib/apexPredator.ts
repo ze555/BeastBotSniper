@@ -44,13 +44,6 @@ let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
 let maxOpenTradesConfig = 3;
 
-// ============================================================================
-// EXIT ENGINE FEATURE FLAGS (Controlled Experimentation Baseline)
-// ============================================================================
-export const ENABLE_PRE_TP1_GIVEBACK_EXIT = false;
-export const ENABLE_MFE_MILESTONE_STOPS = false;
-export const ENABLE_POST_TP1_GIVEBACK_EXIT = false;
-
 // New Config
 let haltProfitEnabled = false;
 let haltProfitTarget = 150;
@@ -1050,87 +1043,31 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
-   const peakMfe = t.peak_r || profitR;
-
-   // --- TIER-1 GIVEBACK PROTECTION (Works before and after TP1) ---
-   // FEATURE FLAG: Disabled in production to allow trades like RAYSOL to breathe. Telemetry preserved.
-   if (ENABLE_PRE_TP1_GIVEBACK_EXIT && peakMfe >= 0.55 && (peakMfe - profitR) >= 0.25) {
-      closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-      return;
-   }
-   // -------------------------------------------------------------
-
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
       if (profitR >= TP1_R) {
          closePart(t, "A", t.part_a);
-         // Move SL to Entry + 0.30R (Base Profit Floor: secures +0.30R floor on remaining 60%)
-         const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-         t.sl = baseFloorSl;
+         // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لقاع حماية الأرباح +0.30R (حماية الـ 60% المتبقية)`, 'success');
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
+         closePart(t, "A", t.part_a);
+         t.sl = t.entry;
+         t.a_closed = true;
+         t.be_done = true;
+         addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
       }
-      // Note: Pre-TP1 profit protection / breakeven moves before +0.75R (e.g. at +0.35R) are DISABLED.
-      // Pre-TP1 allows only Initial Stop + Early Structural Invalidation.
    }
 
-   // 2. PROFIT EXPANSION (TP2: +1.80R) & CONSERVATIVE HYBRID PROTECTIONS
+   // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      const peakMfe = t.peak_r || profitR;
-
-      // Base Profit Floor Guarantee: Ensure stop is NEVER worse than +0.30R
-      const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-      if (t.direction === "LONG") {
-         t.sl = Math.max(t.sl, baseFloorSl);
-      } else {
-         t.sl = Math.min(t.sl, baseFloorSl);
-      }
-
-      // Feature Flag: MFE Milestones (+1.00R -> +0.50R, +1.50R -> +0.90R)
-      // Isolated behind feature flag (default false) to test separately against Base +0.30R floor
-      if (ENABLE_MFE_MILESTONE_STOPS) {
-         // Milestone 1: At +1.00R MFE -> Advance SL to +0.50R
-         const targetSl50 = t.direction === "LONG" ? t.entry + (slDist * 0.50) : t.entry - (slDist * 0.50);
-         if (peakMfe >= 1.00 && !t.milestone_1r_locked) {
-            if (t.direction === "LONG" ? t.sl < targetSl50 : t.sl > targetSl50) {
-               t.sl = targetSl50;
-               t.milestone_1r_locked = true;
-               addLog(`🛡️ [MILESTONE 1] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.50R رابحة`, 'info');
-            }
-         }
-
-         // Milestone 2: At +1.50R MFE -> Advance SL to +0.90R
-         const targetSl90 = t.direction === "LONG" ? t.entry + (slDist * 0.90) : t.entry - (slDist * 0.90);
-         if (peakMfe >= 1.50 && !t.milestone_1_5r_locked) {
-            if (t.direction === "LONG" ? t.sl < targetSl90 : t.sl > targetSl90) {
-               t.sl = targetSl90;
-               t.milestone_1_5r_locked = true;
-               addLog(`🛡️ [MILESTONE 2] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.90R رابحة`, 'info');
-            }
-         }
-      }
-
-      // Feature Flag: Dynamic Giveback Protection (MFE >= +1.15R && giveback >= 0.35R)
-      // Isolated behind feature flag (default false) to prevent choking runners like RAVE
-      if (ENABLE_POST_TP1_GIVEBACK_EXIT && peakMfe >= 1.15) {
-         const givebackDecay = peakMfe - profitR;
-         const givebackThreshold = 0.35;
-         if (givebackDecay >= givebackThreshold) {
-            addLog(`🛡️ [GIVEBACK PROTECT] ${t.symbol}: تراجع ${givebackDecay.toFixed(2)}R من قمة +${peakMfe.toFixed(2)}R | إغلاق وتأمين الأرباح المتبقية عند +${profitR.toFixed(2)}R`, 'warn');
-            closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-            return;
-         }
-      }
-
       if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
-         // Lock in TP1 level as floor profit (+0.75R)
-         const targetSlTp1 = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         if (t.direction === "LONG" ? t.sl < targetSlTp1 : t.sl > targetSlTp1) {
-            t.sl = targetSlTp1;
-         }
+         // Lock in TP1 level as floor profit
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
          addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
@@ -1138,25 +1075,10 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // --- MOMENTUM STAGNATION CUT ---
-   const entryMs = typeof t.entryTime === "number" ? t.entryTime : new Date(t.entryTime).getTime();
-   const nowMs = p.time ? (typeof p.time === "number" ? p.time : new Date(p.time).getTime()) : Date.now();
-   const tradeAgeMinutes = (nowMs - entryMs) / 60000;
-   const isUnderEma = t.direction === "LONG" ? price < p.ema21 : price > p.ema21;
-   if (tradeAgeMinutes >= 35 && (t.peak_r || profitR) <= 0.15 && isUnderEma && profitR <= 0.0) {
-       closeTradeFull(t, "Momentum Stagnation Cut");
-       return;
-   }
-   // -------------------------------
-
    // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
    if (t.b_closed && !t.c_closed) {
-      const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-      if (t.direction === "LONG") { 
-         t.sl = Math.max(t.sl, price - trailDist, baseFloorSl); 
-      } else { 
-         t.sl = Math.min(t.sl, price + trailDist, baseFloorSl); 
-      }
+      if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
+      else { t.sl = Math.min(t.sl, price + trailDist); }
 
       if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
@@ -1169,14 +1091,14 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 4. SMART EARLY LOSS MITIGATION
    // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
-   if (!t.a_closed && profitR <= -0.40) {
+   if (!t.a_closed && profitR < -0.40) {
       const c = p.klines;
       const recentCloses = c.slice(-2).map((k: any) => k.close);
       const isBreakingEMA = t.direction === "LONG" 
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      if (isBreakingEMA) {
+      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
          addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
          closeTradeFull(t, "Early Invalidation");
          return;
