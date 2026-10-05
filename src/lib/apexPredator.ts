@@ -1095,6 +1095,12 @@ async function exitBrain(trade: any, ctx: any) {
             return;
          }
       }
+      // --- [NEW] TIER-1 GIVEBACK PROTECTION ---
+      if (peakMfe >= 0.55 && (peakMfe - profitR) >= 0.25) {
+         closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
+         return;
+      }
+      // ----------------------------------------
 
       if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
@@ -1110,6 +1116,15 @@ async function exitBrain(trade: any, ctx: any) {
          t.b_closed = true;
       }
    }
+
+   // --- [NEW] MOMENTUM STAGNATION CUT ---
+   const tradeAgeMinutes = (Date.now() - t.entryTime) / 60000;
+   const isUnderEma = t.direction === "LONG" ? price < p.ema21 : price > p.ema21;
+   if (tradeAgeMinutes >= 35 && (t.peak_r || profitR) <= 0.15 && isUnderEma && profitR <= 0.0) {
+       closeTradeFull(t, "Momentum Stagnation Cut");
+       return;
+   }
+   // -------------------------------------
 
    // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
    if (t.b_closed && !t.c_closed) {
