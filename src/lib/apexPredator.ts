@@ -1043,6 +1043,15 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
+   const peakMfe = t.peak_r || profitR;
+
+   // --- TIER-1 GIVEBACK PROTECTION (Works before and after TP1) ---
+   if (peakMfe >= 0.55 && (peakMfe - profitR) >= 0.25) {
+      closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
+      return;
+   }
+   // -------------------------------------------------------------
+
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
       if (profitR >= TP1_R) {
@@ -1095,12 +1104,6 @@ async function exitBrain(trade: any, ctx: any) {
             return;
          }
       }
-      // --- [NEW] TIER-1 GIVEBACK PROTECTION ---
-      if (peakMfe >= 0.55 && (peakMfe - profitR) >= 0.25) {
-         closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-         return;
-      }
-      // ----------------------------------------
 
       if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
@@ -1117,14 +1120,16 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // --- [NEW] MOMENTUM STAGNATION CUT ---
-   const tradeAgeMinutes = (Date.now() - t.entryTime) / 60000;
+   // --- MOMENTUM STAGNATION CUT ---
+   const entryMs = typeof t.entryTime === "number" ? t.entryTime : new Date(t.entryTime).getTime();
+   const nowMs = p.time ? (typeof p.time === "number" ? p.time : new Date(p.time).getTime()) : Date.now();
+   const tradeAgeMinutes = (nowMs - entryMs) / 60000;
    const isUnderEma = t.direction === "LONG" ? price < p.ema21 : price > p.ema21;
    if (tradeAgeMinutes >= 35 && (t.peak_r || profitR) <= 0.15 && isUnderEma && profitR <= 0.0) {
        closeTradeFull(t, "Momentum Stagnation Cut");
        return;
    }
-   // -------------------------------------
+   // -------------------------------
 
    // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
    if (t.b_closed && !t.c_closed) {
@@ -1142,14 +1147,14 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 4. SMART EARLY LOSS MITIGATION
    // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
-   if (!t.a_closed && profitR < -0.40) {
+   if (!t.a_closed && profitR <= -0.40) {
       const c = p.klines;
       const recentCloses = c.slice(-2).map((k: any) => k.close);
       const isBreakingEMA = t.direction === "LONG" 
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
+      if (isBreakingEMA) {
          addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
          closeTradeFull(t, "Early Invalidation");
          return;
