@@ -1,6 +1,7 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
+import { DirectionStateEngine, DirectionDecision } from "./directionStateEngine.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -20,6 +21,17 @@ let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
+
+// ═══ DIRECTION LIFECYCLE ENGINE REGISTRY ═══
+const symbolDirectionEngines = new Map<string, DirectionStateEngine>();
+export function getDirectionEngine(symbol: string): DirectionStateEngine {
+   let engine = symbolDirectionEngines.get(symbol);
+   if (!engine) {
+      engine = new DirectionStateEngine(symbol);
+      symbolDirectionEngines.set(symbol, engine);
+   }
+   return engine;
+}
 
 // ═══ CONFIGURATION ═══
 let WATCHLIST: string[] = [
@@ -261,8 +273,8 @@ async function updateDynamicWatchlist() {
          .filter((s: any) => !excludedBases.some(base => s.symbol.replace('USDT', '') === base))
          .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)); // Sort by USDT volume
 
-      // Take top 150 symbols to avoid low liquidity garbage
-      symbols = symbols.slice(0, 150).map((s: any) => s.symbol);
+      // Full Universe: All valid Binance USDT perpetuals enter Direction Lifecycle Engine without 150-symbol restriction
+      symbols = symbols.map((s: any) => s.symbol);
 
       if (symbols.length > 0) {
          // Keep BTC out of the rotation if we want, or just let it rotate. Let's make sure BTC is there? Actually it's fine.
@@ -625,123 +637,42 @@ async function scoreEntry(symbol: string, ctx: any) {
    if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
    if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
 
-   let sl = 0.0, ss = 0.0;
-   let setupType = "BREAKOUT_MOMENTUM";
-
-   // Layer 1
-   let layer1_sl = 0, layer1_ss = 0;
-   if (ctx.regime === "BULL_STRONG") { layer1_sl += 3.0; }
-   else if (ctx.regime === "BULL_WEAK") { layer1_sl += 2.0; layer1_ss += 0.5; }
-   else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 0.5; layer1_ss += 2.0; }
-   else if (ctx.regime === "BEAR_STRONG") { layer1_ss += 3.0; }
-   sl += layer1_sl; ss += layer1_ss;
-   if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; 
-   else {
-       apexPredatorStats.rules.market_context.failed++;
-       console.log(`[Market Context Failed] ctx.regime=${ctx.regime}, price=${ctx.price}, ema200=${ctx.ema200}`);
-   }
-
-   // Layer 2
-   let layer2_sl = 0, layer2_ss = 0;
-   if (w.scenario === "INST_LONG") layer2_sl += 3.0;
-   else if (w.scenario === "INST_SHORT") layer2_ss += 3.0;
-   else if (w.scenario === "BULL_TRAP") { layer2_ss += 2.5; layer2_sl -= 1.0; }
-   else if (w.scenario === "BEAR_TRAP") { layer2_sl += 2.5; layer2_ss -= 1.0; }
-
-   if (w.hidden_buy) layer2_sl += 1.5;
-   if (w.hidden_sell) layer2_ss += 1.5;
-   if (w.strong_acc) layer2_sl += 0.5;
-   if (w.strong_dis) layer2_ss += 0.5;
-   if (w.asset_strong) layer2_sl += 0.5;
-   if (w.f_gold_long) layer2_sl += 0.5;
-   if (w.f_gold_short) layer2_ss += 0.5;
-   sl += layer2_sl; ss += layer2_ss;
-   if (layer2_sl > 0 || layer2_ss > 0) apexPredatorStats.rules.whale_reader.passed++; else apexPredatorStats.rules.whale_reader.failed++;
-
-   // Layer 3
-   let layer3_sl = 0, layer3_ss = 0;
-   if (p.bull_align && p.HH_HL) layer3_sl += 2.0;
-   else if (p.bull_align) layer3_sl += 1.2;
-   if (p.bear_align && p.LH_LL) layer3_ss += 2.0;
-   else if (p.bear_align) layer3_ss += 1.2;
-
-   if (p.compressed) { layer3_sl += 0.3; layer3_ss += 0.3; }
-   if (p.stop_hunt_bull) layer3_sl += 1.0;
-   if (p.stop_hunt_bear) layer3_ss += 1.0;
-   sl += layer3_sl; ss += layer3_ss;
-   if (layer3_sl > 0 || layer3_ss > 0) apexPredatorStats.rules.price_structure.passed++; else apexPredatorStats.rules.price_structure.failed++;
-
-   // Layer 4
-   let layer4_sl = 0, layer4_ss = 0;
-   if (p.strong_bull_c && p.rvol > 1.5) layer4_sl += 1.2;
-   else if (p.strong_bull_c) layer4_sl += 0.7;
-   if (p.strong_bear_c && p.rvol > 1.5) layer4_ss += 1.2;
-   else if (p.strong_bear_c) layer4_ss += 0.7;
-
-   if (p.cpos > 0.8) layer4_sl += 0.3;
-   if (p.cpos < 0.2) layer4_ss += 0.3;
-
-   if (p.di_plus > p.di_minus && p.adx > 22 && p.hist_bull && p.rsi_bull && p.st_bull) layer4_sl += 1.0;
-   else if (p.di_plus > p.di_minus && p.adx > 22) layer4_sl += 0.5;
-
-   if (p.di_minus > p.di_plus && p.adx > 22 && p.hist_bear && p.rsi_bear && p.st_bear) layer4_ss += 1.0;
-   else if (p.di_minus > p.di_plus && p.adx > 22) layer4_ss += 0.5;
-
-   if (p.taker > 0.58) layer4_sl += 0.2;
-   if (p.taker < 0.42) layer4_ss += 0.2;
-   sl += layer4_sl; ss += layer4_ss;
-   if (layer4_sl > 0 || layer4_ss > 0) apexPredatorStats.rules.momentum_ignition.passed++; else apexPredatorStats.rules.momentum_ignition.failed++;
-
-   // Multi-Timeframe 5m Confluence bonus
-   if (p.conf5_bull) sl += 0.8;
-   if (p.conf5_bear) ss += 0.8;
-
-   // Trend Pullback Sniper Model bonus
-   if (pullbackSniperEnabled) {
-      if (p.pullback_long && (w.slope15 >= 0 || w.slope5 >= 0)) {
-         sl += 2.2;
-         setupType = "PULLBACK_SNIPER";
-      }
-      if (p.pullback_short && (w.slope15 <= 0 || w.slope5 <= 0)) {
-         ss += 2.2;
-         setupType = "PULLBACK_SNIPER";
-      }
-   }
-
-   sl = Math.min(Math.max(sl, 0), 10);
-   ss = Math.min(Math.max(ss, 0), 10);
-
-   if (sl > 0) apexPredatorStats.totalLongScanned++;
-   if (ss > 0) apexPredatorStats.totalShortScanned++;
-
    if (earlyReason) {
       if (earlyReason === "BLOCKED") return { signal: "BLOCKED" };
       return { signal: "WAIT", reason: earlyReason };
    }
 
-   // High win-rate filters for 3:1 Genius Mode
-   if (geniusMode) {
-      // 1. Strict Market Regime filter:
-      if (ctx.regime.includes("BEAR") && !w.asset_strong) {
-         sl = 0; // Don't buy in bear regime unless asset is extremely strong against BTC
-      }
-      if (ctx.regime.includes("BULL") && !w.asset_strong) {
-         ss = 0; // Don't short in bull regime unless asset is clearly collapsing
-      }
+   // ═══ DIRECTION LIFECYCLE STATE MACHINE EVALUATION ═══
+   // Driven by Evidence Chains (Structure -> Breakout -> Retest -> Flow -> Volume)
+   // NOT democratic indicator scoring!
+   const dirEngine = getDirectionEngine(symbol);
+   const lastKline = (p.klines && p.klines.length > 0) ? p.klines[p.klines.length - 1] : null;
+   const dirDecision = dirEngine.processCandle({
+      time: lastKline ? (lastKline.openTime || Date.now()) : Date.now(),
+      open: lastKline ? lastKline.open : p.price,
+      high: lastKline ? lastKline.high : p.price,
+      low: lastKline ? lastKline.low : p.price,
+      close: p.price,
+      volume: (p.rvol || 1.0) * (p.avg_vol || 1000),
+      takerBuyBase: (p.taker || 0.5) * (p.rvol || 1.0) * (p.avg_vol || 1000)
+   }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
 
-      // 2. High-probability RSI Momentum Corridor:
-      if (p.rsi > 68) sl -= 2.5; // Avoid buying overbought tops
-      if (p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms
-      if (p.rsi >= 50 && p.rsi <= 66) sl += 1.0;
-      if (p.rsi <= 50 && p.rsi >= 34) ss += 1.0;
+   // Direction State Machine governs direction strictly
+   if (!dirDecision.canEnter || dirDecision.direction === "UNKNOWN") {
+      return { signal: "WAIT", reason: `Direction State: ${dirDecision.state} (Awaiting confirmed structure)` };
+   }
 
-      // 3. Supertrend & Trend Confluence:
-      if (p.st_bull && p.price > p.ema50) sl += 1.2;
-      if (p.st_bear && p.price < p.ema50) ss += 1.2;
+   let sl = 0.0, ss = 0.0;
+   let setupType = "BREAKOUT_MOMENTUM";
 
-      // 4. Whale Orderflow Bias:
-      if (w.scenario === "INST_LONG" && w.triple_bull) sl += 1.5;
-      if (w.scenario === "INST_SHORT" && w.triple_bear) ss += 1.5;
+   if (dirDecision.direction === "LONG") {
+      sl = dirDecision.state === "CONFIRMED_LONG" ? 8.8 : 7.8;
+      setupType = dirDecision.state === "CONFIRMED_LONG" ? "BREAKOUT_MOMENTUM" : "FORMING_EARLY_LONG";
+      apexPredatorStats.totalLongScanned++;
+   } else if (dirDecision.direction === "SHORT") {
+      ss = dirDecision.state === "CONFIRMED_SHORT" ? 8.8 : 7.8;
+      setupType = dirDecision.state === "CONFIRMED_SHORT" ? "BREAKDOWN_MOMENTUM" : "FORMING_EARLY_SHORT";
+      apexPredatorStats.totalShortScanned++;
    }
 
    function getGrade(score: number) {
@@ -786,7 +717,8 @@ async function scoreEntry(symbol: string, ctx: any) {
             p,
             w,
             ctx,
-            reasoning
+            reasoning,
+            dirDecision
          };
       }
 
@@ -826,7 +758,8 @@ async function scoreEntry(symbol: string, ctx: any) {
             p,
             w,
             ctx,
-            reasoning
+            reasoning,
+            dirDecision
          };
       }
    }
@@ -906,6 +839,8 @@ function executeTrade(symbol: string, decision: any) {
          highestPrice: entry,
          lowestPrice: entry,
          candlesBeforeEntry: formatCandles(p.klines || [], 40),
+         directionState: decision.dirDecision?.state || "CONFIRMED_LONG",
+         directionEvidence: decision.dirDecision?.evidenceChain,
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
@@ -959,6 +894,8 @@ function executeTrade(symbol: string, decision: any) {
          highestPrice: entry,
          lowestPrice: entry,
          candlesBeforeEntry: formatCandles(p.klines || [], 40),
+         directionState: decision.dirDecision?.state || "CONFIRMED_SHORT",
+         directionEvidence: decision.dirDecision?.evidenceChain,
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
@@ -1051,6 +988,44 @@ async function exitBrain(trade: any, ctx: any) {
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
    const peakMfe = t.peak_r || profitR;
+
+   // ═══ DIRECTION LIFECYCLE MANAGEMENT (State-driven exits & protections) ═══
+   const dirEngine = getDirectionEngine(t.symbol);
+   if (p.klines && p.klines.length > 0) {
+      const lastK = p.klines[p.klines.length - 1];
+      const dirDecision = dirEngine.processCandle({
+         time: lastK.openTime || Date.now(),
+         open: lastK.open,
+         high: lastK.high,
+         low: lastK.low,
+         close: price,
+         volume: lastK.volume || 1000,
+         takerBuyBase: lastK.takerBuyBase
+      }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
+
+      t.directionState = dirDecision.state;
+
+      // 1. WEAKENING: Protect profits / tighten stop
+      if ((t.direction === "LONG" && dirDecision.state === "WEAKENING_LONG") ||
+          (t.direction === "SHORT" && dirDecision.state === "WEAKENING_SHORT")) {
+         if (profitR > 0.20 && !t.weakening_protected) {
+            t.weakening_protected = true;
+            const protectSl = t.direction === "LONG" 
+               ? Math.max(t.sl, t.entry + (slDist * Math.max(0.10, profitR - 0.25)))
+               : Math.min(t.sl, t.entry - (slDist * Math.max(0.10, profitR - 0.25)));
+            t.sl = protectSl;
+            addLog(`⚠️ [DIRECTION WEAKENING] ${t.symbol}: ضعف هيكلي مؤكد (${dirDecision.state}) | تم تضييق الوقف لحماية الأرباح عند ${profitR.toFixed(2)}R`, "warn");
+         }
+      }
+
+      // 2. INVALIDATION: Immediate exit upon thesis death
+      if ((t.direction === "LONG" && dirDecision.state === "INVALIDATED_LONG") ||
+          (t.direction === "SHORT" && dirDecision.state === "INVALIDATED_SHORT")) {
+         addLog(`🛑 [DIRECTION INVALIDATED] ${t.symbol}: إبطال فرضية الاتجاه بالكامل (${dirDecision.state}) | خروج فوري عند ${profitR.toFixed(2)}R لتجنب الخسارة الكبرى`, "error");
+         closeTradeFull(t, "Direction Thesis Invalidated");
+         return;
+      }
+   }
 
    // --- TIER-1 GIVEBACK PROTECTION (Works before and after TP1) ---
    // FEATURE FLAG: Disabled in production to allow trades like RAYSOL to breathe. Telemetry preserved.
