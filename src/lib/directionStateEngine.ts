@@ -158,13 +158,17 @@ export class DirectionStateEngine {
     const ema50 = calcEma(Math.min(50, n));
 
     // Orderflow metrics (Taker ratio & CVD)
+    // If takerBuyBase is undefined, accurately proxies buying pressure via Money Flow Multiplier ((close - low)/(high - low))
     const takers = this.candleHistory.map(c => {
-      const tb = c.takerBuyBase !== undefined ? c.takerBuyBase : c.volume * 0.5;
-      return tb / (c.volume || 1);
+      if (c.takerBuyBase !== undefined) return c.takerBuyBase / (c.volume || 1);
+      const span = c.high - c.low;
+      return span > 0 ? (c.close - c.low) / span : 0.5;
     });
     const cvdDeltas = this.candleHistory.map(c => {
-      const tb = c.takerBuyBase !== undefined ? c.takerBuyBase : c.volume * 0.5;
-      return 2 * tb - c.volume;
+      if (c.takerBuyBase !== undefined) return 2 * c.takerBuyBase - c.volume;
+      const span = c.high - c.low;
+      const ratio = span > 0 ? (c.close - c.low) / span : 0.5;
+      return (2 * ratio - 1) * c.volume;
     });
 
     const recentTaker5 = takers.slice(-5).reduce((a, b) => a + b, 0) / 5;
@@ -638,9 +642,21 @@ export class DirectionStateEngine {
     let entryType: DirectionDecision["entryType"] = "NONE";
     let managementAction: DirectionDecision["managementAction"] = "NONE";
 
+    const latest = this.transitionLog.length > 0 ? this.transitionLog[this.transitionLog.length - 1] : null;
+
     if (this.state === "FORMING_LONG" || this.state === "FORMING_SHORT") {
-      canEnter = true;
-      entryType = "FORMING_EARLY";
+      // Minimum Evidence Chain for early entry: Volume must NOT be dry, flow must be non-conflicted and supportive
+      const hasMinimumEvidence = latest?.volume !== "DRY" &&
+        (isLong ? (latest?.takerFlow === "BUYING_DOMINANT" && latest?.cvd === "BULLISH")
+                : (latest?.takerFlow === "SELLING_DOMINANT" && latest?.cvd === "BEARISH"));
+
+      if (hasMinimumEvidence) {
+        canEnter = true;
+        entryType = "FORMING_EARLY";
+      } else {
+        canEnter = false;
+        entryType = "NONE";
+      }
       managementAction = "HOLD";
     } else if (this.state === "CONFIRMED_LONG" || this.state === "CONFIRMED_SHORT") {
       canEnter = true;
@@ -653,8 +669,6 @@ export class DirectionStateEngine {
     } else if (this.state === "INVALIDATED_LONG" || this.state === "INVALIDATED_SHORT") {
       managementAction = "EXIT_INVALIDATED";
     }
-
-    const latest = this.transitionLog.length > 0 ? this.transitionLog[this.transitionLog.length - 1] : null;
 
     return {
       direction: dir,
@@ -680,4 +694,57 @@ export class DirectionStateEngine {
       latestTransition: latest
     };
   }
+}
+
+export interface TimingResult {
+  canExecute: boolean;
+  timingAction: "GO" | "WAIT";
+  timingReason: string;
+  isLateExpansion: boolean;
+}
+
+/**
+ * Timing Engine: Purely responsible for execution timing (GO vs WAIT).
+ * STRICT LAW: Timing Engine CAN NEVER alter direction (LONG -> SHORT or SHORT -> LONG).
+ */
+export function evaluateDirectionTiming(
+  direction: "LONG" | "SHORT" | "UNKNOWN",
+  candle: CandleData,
+  ema21: number,
+  atr14: number,
+  rsi: number
+): TimingResult {
+  if (direction === "UNKNOWN") {
+    return { canExecute: false, timingAction: "WAIT", timingReason: "No direction established", isLateExpansion: false };
+  }
+
+  if (direction === "LONG") {
+    const distFromEma = candle.close - ema21;
+    const isExtended = (atr14 > 0 && distFromEma > atr14 * 1.8) || rsi > 72;
+    if (isExtended) {
+      return {
+        canExecute: false,
+        timingAction: "WAIT",
+        timingReason: `Over-extended timing: Price is ${(distFromEma / (atr14 || 1)).toFixed(1)}x ATR above EMA21 (RSI: ${rsi.toFixed(1)}). Await retest / consolidation.`,
+        isLateExpansion: true
+      };
+    }
+    return { canExecute: true, timingAction: "GO", timingReason: "Timing optimal: Clean location near EMA21", isLateExpansion: false };
+  }
+
+  if (direction === "SHORT") {
+    const distFromEma = ema21 - candle.close;
+    const isExtended = (atr14 > 0 && distFromEma > atr14 * 1.8) || rsi < 28;
+    if (isExtended) {
+      return {
+        canExecute: false,
+        timingAction: "WAIT",
+        timingReason: `Over-extended timing: Price is ${(distFromEma / (atr14 || 1)).toFixed(1)}x ATR below EMA21 (RSI: ${rsi.toFixed(1)}). Await pullback to resistance.`,
+        isLateExpansion: true
+      };
+    }
+    return { canExecute: true, timingAction: "GO", timingReason: "Timing optimal: Clean location near EMA21", isLateExpansion: false };
+  }
+
+  return { canExecute: false, timingAction: "WAIT", timingReason: "Neutral", isLateExpansion: false };
 }

@@ -1,7 +1,7 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
-import { DirectionStateEngine, DirectionDecision } from "./directionStateEngine.js";
+import { DirectionStateEngine, DirectionDecision, evaluateDirectionTiming, TimingResult } from "./directionStateEngine.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -646,8 +646,22 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Driven by Evidence Chains (Structure -> Breakout -> Retest -> Flow -> Volume)
    // NOT democratic indicator scoring!
    const dirEngine = getDirectionEngine(symbol);
+   if (dirEngine.transitionLog.length === 0 && p.klines && p.klines.length >= 15) {
+      const warmupSlice = p.klines.slice(-30, -1);
+      for (const k of warmupSlice) {
+         dirEngine.processCandle({
+            time: k.openTime || Date.now(),
+            open: k.open,
+            high: k.high,
+            low: k.low,
+            close: k.close,
+            volume: k.volume || 1000,
+            takerBuyBase: k.takerBuy || (k.volume * 0.5)
+         }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
+      }
+   }
    const lastKline = (p.klines && p.klines.length > 0) ? p.klines[p.klines.length - 1] : null;
-   const dirDecision = dirEngine.processCandle({
+   const currentCandleData = {
       time: lastKline ? (lastKline.openTime || Date.now()) : Date.now(),
       open: lastKline ? lastKline.open : p.price,
       high: lastKline ? lastKline.high : p.price,
@@ -655,35 +669,54 @@ async function scoreEntry(symbol: string, ctx: any) {
       close: p.price,
       volume: (p.rvol || 1.0) * (p.avg_vol || 1000),
       takerBuyBase: (p.taker || 0.5) * (p.rvol || 1.0) * (p.avg_vol || 1000)
-   }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
+   };
+   const dirDecision = dirEngine.processCandle(currentCandleData, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
 
    // Direction State Machine governs direction strictly
    if (!dirDecision.canEnter || dirDecision.direction === "UNKNOWN") {
       return { signal: "WAIT", reason: `Direction State: ${dirDecision.state} (Awaiting confirmed structure)` };
    }
 
-   let sl = 0.0, ss = 0.0;
-   let setupType = "BREAKOUT_MOMENTUM";
-
-   if (dirDecision.direction === "LONG") {
-      sl = dirDecision.state === "CONFIRMED_LONG" ? 8.8 : 7.8;
-      setupType = dirDecision.state === "CONFIRMED_LONG" ? "BREAKOUT_MOMENTUM" : "FORMING_EARLY_LONG";
-      apexPredatorStats.totalLongScanned++;
-   } else if (dirDecision.direction === "SHORT") {
-      ss = dirDecision.state === "CONFIRMED_SHORT" ? 8.8 : 7.8;
-      setupType = dirDecision.state === "CONFIRMED_SHORT" ? "BREAKDOWN_MOMENTUM" : "FORMING_EARLY_SHORT";
-      apexPredatorStats.totalShortScanned++;
+   // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
+   if (dirDecision.direction === "SHORT" && ctx.regime === "BULL_STRONG") {
+      addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
+      logRejectedSignal({
+         symbol,
+         timeframe: "15m",
+         direction: "SHORT",
+         signal_score: 7.8,
+         rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
+         p,
+         w,
+         ctx
+      });
+      return { signal: "WAIT", reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.", dirDecision };
    }
 
-   function getGrade(score: number) {
-      if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.010, mult: 1.0 };
-      if (score >= 7.6) return { label: "🥈 APEX 3:1 SILVER", risk: 0.007, mult: 1.0 };
-      if (score >= 6.8) return { label: "🥉 BRONZE", risk: 0.005, mult: 1.0 };
-      return { label: "⏳ WAIT", risk: 0, mult: 0 };
+   // ═══ TIMING ENGINE EVALUATION ═══
+   // Timing Engine decides ONLY: GO or WAIT
+   // STRICT LAW: Timing Engine CAN NEVER alter direction (LONG -> SHORT or SHORT -> LONG)
+   const timingResult = evaluateDirectionTiming(
+      dirDecision.direction,
+      currentCandleData,
+      p.ema21,
+      p.atr14,
+      p.rsi
+   );
+
+   if (!timingResult.canExecute || timingResult.timingAction === "WAIT") {
+      addLog(`⏳ ${symbol}: اتجاه مؤكد [${dirDecision.state}] لكن التوقيت [WAIT]: ${timingResult.timingReason}`, "info");
+      return {
+         signal: "WAIT",
+         reason: `Direction: ${dirDecision.direction} (${dirDecision.state}) | Timing Gate: WAIT (${timingResult.timingReason})`,
+         dirDecision,
+         timingResult
+      };
    }
 
-   // --- BEAST ARCHITECTURE REASONING EVALUATION ---
-   // Evaluates: Market Regime -> Flow Interpretation -> Scenarios -> Location -> Confirmation
+   // --- BEAST ARCHITECTURE REASONING EVALUATION (Context, Telemetry & Deep Flow Logging) ---
+   const sl = dirDecision.direction === "LONG" ? (dirDecision.state === "CONFIRMED_LONG" ? 8.8 : 7.8) : 0.0;
+   const ss = dirDecision.direction === "SHORT" ? (dirDecision.state === "CONFIRMED_SHORT" ? 8.8 : 7.8) : 0.0;
    const reasoning: ReasoningResult = evaluateSymbolReasoning(
       symbol,
       ctx,
@@ -692,76 +725,71 @@ async function scoreEntry(symbol: string, ctx: any) {
       { sl, ss }
    );
 
-   const minScore = geniusMode ? 7.6 : 6.8;
+   function getGrade(score: number) {
+      if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.010, mult: 1.0 };
+      if (score >= 7.6) return { label: "🥈 APEX 3:1 SILVER", risk: 0.007, mult: 1.0 };
+      if (score >= 6.8) return { label: "🥉 BRONZE", risk: 0.005, mult: 1.0 };
+      return { label: "⏳ WAIT", risk: 0, mult: 0 };
+   }
 
-   // Confirmation Gatekeeper: PREDICTION != ENTRY and SIGNAL != CONFIRMATION
-   // Both directional signal AND strict ConfirmationEngine must agree
-   if (reasoning.confirmation.isConfirmed) {
-      if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
-         apexPredatorStats.acceptedLongs++;
-         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-         else apexPredatorStats.breakoutSetups++;
+   if (dirDecision.direction === "LONG") {
+      const execScore = sl;
+      const setupType = dirDecision.entryType === "FORMING_EARLY" 
+         ? "FORMING_EARLY_LONG" 
+         : (reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM");
+      apexPredatorStats.totalLongScanned++;
+      apexPredatorStats.acceptedLongs++;
+      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+      else apexPredatorStats.breakoutSetups++;
 
-         // Log deep reasoning breakdown
-         addLog(
-            `🧠 [REASONING CONFIRMED] LONG ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
-            `Primary: ${reasoning.scenario.primary.type} | Score: ${sl.toFixed(1)}/10`,
-            "info"
-         );
+      addLog(
+         `🚀 [DIRECTION DECISION] LONG ${symbol} | State: ${dirDecision.state} (${dirDecision.entryType}) | ` +
+         `Timing: GO | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state}`,
+         "success"
+      );
 
-         return {
-            signal: "LONG",
-            score: sl,
-            grade: getGrade(sl),
-            setupType: reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : setupType,
-            p,
-            w,
-            ctx,
-            reasoning,
-            dirDecision
-         };
-      }
+      return {
+         signal: "LONG",
+         score: execScore,
+         grade: getGrade(execScore),
+         setupType,
+         p,
+         w,
+         ctx,
+         reasoning,
+         dirDecision,
+         timingResult
+      };
+   }
 
-      if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
-         if (ctx.regime === "BULL_STRONG") {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "SHORT",
-               signal_score: ss,
-               rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
+   if (dirDecision.direction === "SHORT") {
+      const execScore = ss;
+      const setupType = dirDecision.entryType === "FORMING_EARLY" 
+         ? "FORMING_EARLY_SHORT" 
+         : (reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : "BREAKDOWN_MOMENTUM");
+      apexPredatorStats.totalShortScanned++;
+      apexPredatorStats.acceptedShorts++;
+      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+      else apexPredatorStats.breakoutSetups++;
 
-         apexPredatorStats.acceptedShorts++;
-         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-         else apexPredatorStats.breakoutSetups++;
+      addLog(
+         `🚀 [DIRECTION DECISION] SHORT ${symbol} | State: ${dirDecision.state} (${dirDecision.entryType}) | ` +
+         `Timing: GO | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state}`,
+         "success"
+      );
 
-         addLog(
-            `🧠 [REASONING CONFIRMED] SHORT ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
-            `Primary: ${reasoning.scenario.primary.type} | Score: ${ss.toFixed(1)}/10`,
-            "info"
-         );
-
-         return {
-            signal: "SHORT",
-            score: ss,
-            grade: getGrade(ss),
-            setupType: reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : setupType,
-            p,
-            w,
-            ctx,
-            reasoning,
-            dirDecision
-         };
-      }
+      return {
+         signal: "SHORT",
+         score: execScore,
+         grade: getGrade(execScore),
+         setupType,
+         p,
+         w,
+         ctx,
+         reasoning,
+         dirDecision,
+         timingResult
+      };
    }
 
    // If indicator score was high but confirmation rejected or waiting:
@@ -832,8 +860,10 @@ function executeTrade(symbol: string, decision: any) {
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
-         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
+         setupType: decision.setupType || (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupLabel: decision.setupType === "FORMING_EARLY_LONG" 
+            ? "🌱 تشكّل مبكر" 
+            : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"),
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
@@ -887,8 +917,10 @@ function executeTrade(symbol: string, decision: any) {
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
-         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
+         setupType: decision.setupType || (isPullback ? "PULLBACK_SNIPER" : "BREAKDOWN_MOMENTUM"),
+         setupLabel: decision.setupType === "FORMING_EARLY_SHORT" 
+            ? "🌱 تشكّل مبكر" 
+            : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"),
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,

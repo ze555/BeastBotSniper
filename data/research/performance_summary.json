@@ -1,7 +1,7 @@
 {
   "schema_version": "2.4.0",
   "bot_version": "BeastBot-Apex-v2.4",
-  "updated_at": "2026-10-06T18:47:05.897Z",
+  "updated_at": "2026-10-06T20:19:04.531Z",
   "executed_trades_summary": {
     "total_trades": 1,
     "wins": 1,
@@ -40,7 +40,7 @@
       }
     },
     "by_hour_bucket": {
-      "17:00-17:59": {
+      "19:00-19:59": {
         "trades": 1,
         "pnl": 88.5,
         "wins": 1
