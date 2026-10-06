@@ -1,7 +1,6 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
-import { DirectionStateEngine, DirectionDecision, evaluateDirectionTiming, TimingResult } from "./directionStateEngine.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -21,17 +20,6 @@ let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
-
-// ═══ DIRECTION LIFECYCLE ENGINE REGISTRY ═══
-const symbolDirectionEngines = new Map<string, DirectionStateEngine>();
-export function getDirectionEngine(symbol: string): DirectionStateEngine {
-   let engine = symbolDirectionEngines.get(symbol);
-   if (!engine) {
-      engine = new DirectionStateEngine(symbol);
-      symbolDirectionEngines.set(symbol, engine);
-   }
-   return engine;
-}
 
 // ═══ CONFIGURATION ═══
 let WATCHLIST: string[] = [
@@ -55,13 +43,6 @@ const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
 let maxOpenTradesConfig = 3;
-
-// ============================================================================
-// EXIT ENGINE FEATURE FLAGS (Controlled Experimentation Baseline)
-// ============================================================================
-export const ENABLE_PRE_TP1_GIVEBACK_EXIT = false;
-export const ENABLE_MFE_MILESTONE_STOPS = false;
-export const ENABLE_POST_TP1_GIVEBACK_EXIT = false;
 
 // New Config
 let haltProfitEnabled = false;
@@ -273,8 +254,8 @@ async function updateDynamicWatchlist() {
          .filter((s: any) => !excludedBases.some(base => s.symbol.replace('USDT', '') === base))
          .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)); // Sort by USDT volume
 
-      // Full Universe: All valid Binance USDT perpetuals enter Direction Lifecycle Engine without 150-symbol restriction
-      symbols = symbols.map((s: any) => s.symbol);
+      // Take top 150 symbols to avoid low liquidity garbage
+      symbols = symbols.slice(0, 150).map((s: any) => s.symbol);
 
       if (symbols.length > 0) {
          // Keep BTC out of the rotation if we want, or just let it rotate. Let's make sure BTC is there? Actually it's fine.
@@ -637,93 +618,124 @@ async function scoreEntry(symbol: string, ctx: any) {
    if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
    if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
 
+   let sl = 0.0, ss = 0.0;
+   let setupType = "BREAKOUT_MOMENTUM";
+
+   // Layer 1
+   let layer1_sl = 0, layer1_ss = 0;
+   if (ctx.regime === "BULL_STRONG") { layer1_sl += 3.0; }
+   else if (ctx.regime === "BULL_WEAK") { layer1_sl += 2.0; layer1_ss += 0.5; }
+   else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 0.5; layer1_ss += 2.0; }
+   else if (ctx.regime === "BEAR_STRONG") { layer1_ss += 3.0; }
+   sl += layer1_sl; ss += layer1_ss;
+   if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; 
+   else {
+       apexPredatorStats.rules.market_context.failed++;
+       console.log(`[Market Context Failed] ctx.regime=${ctx.regime}, price=${ctx.price}, ema200=${ctx.ema200}`);
+   }
+
+   // Layer 2
+   let layer2_sl = 0, layer2_ss = 0;
+   if (w.scenario === "INST_LONG") layer2_sl += 3.0;
+   else if (w.scenario === "INST_SHORT") layer2_ss += 3.0;
+   else if (w.scenario === "BULL_TRAP") { layer2_ss += 2.5; layer2_sl -= 1.0; }
+   else if (w.scenario === "BEAR_TRAP") { layer2_sl += 2.5; layer2_ss -= 1.0; }
+
+   if (w.hidden_buy) layer2_sl += 1.5;
+   if (w.hidden_sell) layer2_ss += 1.5;
+   if (w.strong_acc) layer2_sl += 0.5;
+   if (w.strong_dis) layer2_ss += 0.5;
+   if (w.asset_strong) layer2_sl += 0.5;
+   if (w.f_gold_long) layer2_sl += 0.5;
+   if (w.f_gold_short) layer2_ss += 0.5;
+   sl += layer2_sl; ss += layer2_ss;
+   if (layer2_sl > 0 || layer2_ss > 0) apexPredatorStats.rules.whale_reader.passed++; else apexPredatorStats.rules.whale_reader.failed++;
+
+   // Layer 3
+   let layer3_sl = 0, layer3_ss = 0;
+   if (p.bull_align && p.HH_HL) layer3_sl += 2.0;
+   else if (p.bull_align) layer3_sl += 1.2;
+   if (p.bear_align && p.LH_LL) layer3_ss += 2.0;
+   else if (p.bear_align) layer3_ss += 1.2;
+
+   if (p.compressed) { layer3_sl += 0.3; layer3_ss += 0.3; }
+   if (p.stop_hunt_bull) layer3_sl += 1.0;
+   if (p.stop_hunt_bear) layer3_ss += 1.0;
+   sl += layer3_sl; ss += layer3_ss;
+   if (layer3_sl > 0 || layer3_ss > 0) apexPredatorStats.rules.price_structure.passed++; else apexPredatorStats.rules.price_structure.failed++;
+
+   // Layer 4
+   let layer4_sl = 0, layer4_ss = 0;
+   if (p.strong_bull_c && p.rvol > 1.5) layer4_sl += 1.2;
+   else if (p.strong_bull_c) layer4_sl += 0.7;
+   if (p.strong_bear_c && p.rvol > 1.5) layer4_ss += 1.2;
+   else if (p.strong_bear_c) layer4_ss += 0.7;
+
+   if (p.cpos > 0.8) layer4_sl += 0.3;
+   if (p.cpos < 0.2) layer4_ss += 0.3;
+
+   if (p.di_plus > p.di_minus && p.adx > 22 && p.hist_bull && p.rsi_bull && p.st_bull) layer4_sl += 1.0;
+   else if (p.di_plus > p.di_minus && p.adx > 22) layer4_sl += 0.5;
+
+   if (p.di_minus > p.di_plus && p.adx > 22 && p.hist_bear && p.rsi_bear && p.st_bear) layer4_ss += 1.0;
+   else if (p.di_minus > p.di_plus && p.adx > 22) layer4_ss += 0.5;
+
+   if (p.taker > 0.58) layer4_sl += 0.2;
+   if (p.taker < 0.42) layer4_ss += 0.2;
+   sl += layer4_sl; ss += layer4_ss;
+   if (layer4_sl > 0 || layer4_ss > 0) apexPredatorStats.rules.momentum_ignition.passed++; else apexPredatorStats.rules.momentum_ignition.failed++;
+
+   // Multi-Timeframe 5m Confluence bonus
+   if (p.conf5_bull) sl += 0.8;
+   if (p.conf5_bear) ss += 0.8;
+
+   // Trend Pullback Sniper Model bonus
+   if (pullbackSniperEnabled) {
+      if (p.pullback_long && (w.slope15 >= 0 || w.slope5 >= 0)) {
+         sl += 2.2;
+         setupType = "PULLBACK_SNIPER";
+      }
+      if (p.pullback_short && (w.slope15 <= 0 || w.slope5 <= 0)) {
+         ss += 2.2;
+         setupType = "PULLBACK_SNIPER";
+      }
+   }
+
+   sl = Math.min(Math.max(sl, 0), 10);
+   ss = Math.min(Math.max(ss, 0), 10);
+
+   if (sl > 0) apexPredatorStats.totalLongScanned++;
+   if (ss > 0) apexPredatorStats.totalShortScanned++;
+
    if (earlyReason) {
       if (earlyReason === "BLOCKED") return { signal: "BLOCKED" };
       return { signal: "WAIT", reason: earlyReason };
    }
 
-   // ═══ DIRECTION LIFECYCLE STATE MACHINE EVALUATION ═══
-   // Driven by Evidence Chains (Structure -> Breakout -> Retest -> Flow -> Volume)
-   // NOT democratic indicator scoring!
-   const dirEngine = getDirectionEngine(symbol);
-   if (dirEngine.transitionLog.length === 0 && p.klines && p.klines.length >= 15) {
-      const warmupSlice = p.klines.slice(-30, -1);
-      for (const k of warmupSlice) {
-         dirEngine.processCandle({
-            time: k.openTime || Date.now(),
-            open: k.open,
-            high: k.high,
-            low: k.low,
-            close: k.close,
-            volume: k.volume || 1000,
-            takerBuyBase: k.takerBuy || (k.volume * 0.5)
-         }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
+   // High win-rate filters for 3:1 Genius Mode
+   if (geniusMode) {
+      // 1. Strict Market Regime filter:
+      if (ctx.regime.includes("BEAR") && !w.asset_strong) {
+         sl = 0; // Don't buy in bear regime unless asset is extremely strong against BTC
       }
+      if (ctx.regime.includes("BULL") && !w.asset_strong) {
+         ss = 0; // Don't short in bull regime unless asset is clearly collapsing
+      }
+
+      // 2. High-probability RSI Momentum Corridor:
+      if (p.rsi > 68) sl -= 2.5; // Avoid buying overbought tops
+      if (p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms
+      if (p.rsi >= 50 && p.rsi <= 66) sl += 1.0;
+      if (p.rsi <= 50 && p.rsi >= 34) ss += 1.0;
+
+      // 3. Supertrend & Trend Confluence:
+      if (p.st_bull && p.price > p.ema50) sl += 1.2;
+      if (p.st_bear && p.price < p.ema50) ss += 1.2;
+
+      // 4. Whale Orderflow Bias:
+      if (w.scenario === "INST_LONG" && w.triple_bull) sl += 1.5;
+      if (w.scenario === "INST_SHORT" && w.triple_bear) ss += 1.5;
    }
-   const lastKline = (p.klines && p.klines.length > 0) ? p.klines[p.klines.length - 1] : null;
-   const currentCandleData = {
-      time: lastKline ? (lastKline.openTime || Date.now()) : Date.now(),
-      open: lastKline ? lastKline.open : p.price,
-      high: lastKline ? lastKline.high : p.price,
-      low: lastKline ? lastKline.low : p.price,
-      close: p.price,
-      volume: (p.rvol || 1.0) * (p.avg_vol || 1000),
-      takerBuyBase: (p.taker || 0.5) * (p.rvol || 1.0) * (p.avg_vol || 1000)
-   };
-   const dirDecision = dirEngine.processCandle(currentCandleData, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
-
-   // Direction State Machine governs direction strictly
-   if (!dirDecision.canEnter || dirDecision.direction === "UNKNOWN") {
-      return { signal: "WAIT", reason: `Direction State: ${dirDecision.state} (Awaiting confirmed structure)` };
-   }
-
-   // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
-   if (dirDecision.direction === "SHORT" && ctx.regime === "BULL_STRONG") {
-      addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
-      logRejectedSignal({
-         symbol,
-         timeframe: "15m",
-         direction: "SHORT",
-         signal_score: 7.8,
-         rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
-         p,
-         w,
-         ctx
-      });
-      return { signal: "WAIT", reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.", dirDecision };
-   }
-
-   // ═══ TIMING ENGINE EVALUATION ═══
-   // Timing Engine decides ONLY: GO or WAIT
-   // STRICT LAW: Timing Engine CAN NEVER alter direction (LONG -> SHORT or SHORT -> LONG)
-   const timingResult = evaluateDirectionTiming(
-      dirDecision.direction,
-      currentCandleData,
-      p.ema21,
-      p.atr14,
-      p.rsi
-   );
-
-   if (!timingResult.canExecute || timingResult.timingAction === "WAIT") {
-      addLog(`⏳ ${symbol}: اتجاه مؤكد [${dirDecision.state}] لكن التوقيت [WAIT]: ${timingResult.timingReason}`, "info");
-      return {
-         signal: "WAIT",
-         reason: `Direction: ${dirDecision.direction} (${dirDecision.state}) | Timing Gate: WAIT (${timingResult.timingReason})`,
-         dirDecision,
-         timingResult
-      };
-   }
-
-   // --- BEAST ARCHITECTURE REASONING EVALUATION (Context, Telemetry & Deep Flow Logging) ---
-   const sl = dirDecision.direction === "LONG" ? (dirDecision.state === "CONFIRMED_LONG" ? 8.8 : 7.8) : 0.0;
-   const ss = dirDecision.direction === "SHORT" ? (dirDecision.state === "CONFIRMED_SHORT" ? 8.8 : 7.8) : 0.0;
-   const reasoning: ReasoningResult = evaluateSymbolReasoning(
-      symbol,
-      ctx,
-      p,
-      w,
-      { sl, ss }
-   );
 
    function getGrade(score: number) {
       if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.010, mult: 1.0 };
@@ -732,64 +744,84 @@ async function scoreEntry(symbol: string, ctx: any) {
       return { label: "⏳ WAIT", risk: 0, mult: 0 };
    }
 
-   if (dirDecision.direction === "LONG") {
-      const execScore = sl;
-      const setupType = dirDecision.entryType === "FORMING_EARLY" 
-         ? "FORMING_EARLY_LONG" 
-         : (reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM");
-      apexPredatorStats.totalLongScanned++;
-      apexPredatorStats.acceptedLongs++;
-      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-      else apexPredatorStats.breakoutSetups++;
+   // --- BEAST ARCHITECTURE REASONING EVALUATION ---
+   // Evaluates: Market Regime -> Flow Interpretation -> Scenarios -> Location -> Confirmation
+   const reasoning: ReasoningResult = evaluateSymbolReasoning(
+      symbol,
+      ctx,
+      p,
+      w,
+      { sl, ss }
+   );
 
-      addLog(
-         `🚀 [DIRECTION DECISION] LONG ${symbol} | State: ${dirDecision.state} (${dirDecision.entryType}) | ` +
-         `Timing: GO | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state}`,
-         "success"
-      );
+   const minScore = geniusMode ? 7.6 : 6.8;
 
-      return {
-         signal: "LONG",
-         score: execScore,
-         grade: getGrade(execScore),
-         setupType,
-         p,
-         w,
-         ctx,
-         reasoning,
-         dirDecision,
-         timingResult
-      };
-   }
+   // Confirmation Gatekeeper: PREDICTION != ENTRY and SIGNAL != CONFIRMATION
+   // Both directional signal AND strict ConfirmationEngine must agree
+   if (reasoning.confirmation.isConfirmed) {
+      if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
+         apexPredatorStats.acceptedLongs++;
+         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+         else apexPredatorStats.breakoutSetups++;
 
-   if (dirDecision.direction === "SHORT") {
-      const execScore = ss;
-      const setupType = dirDecision.entryType === "FORMING_EARLY" 
-         ? "FORMING_EARLY_SHORT" 
-         : (reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : "BREAKDOWN_MOMENTUM");
-      apexPredatorStats.totalShortScanned++;
-      apexPredatorStats.acceptedShorts++;
-      if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-      else apexPredatorStats.breakoutSetups++;
+         // Log deep reasoning breakdown
+         addLog(
+            `🧠 [REASONING CONFIRMED] LONG ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
+            `Primary: ${reasoning.scenario.primary.type} | Score: ${sl.toFixed(1)}/10`,
+            "info"
+         );
 
-      addLog(
-         `🚀 [DIRECTION DECISION] SHORT ${symbol} | State: ${dirDecision.state} (${dirDecision.entryType}) | ` +
-         `Timing: GO | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state}`,
-         "success"
-      );
+         return {
+            signal: "LONG",
+            score: sl,
+            grade: getGrade(sl),
+            setupType: reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : setupType,
+            p,
+            w,
+            ctx,
+            reasoning
+         };
+      }
 
-      return {
-         signal: "SHORT",
-         score: execScore,
-         grade: getGrade(execScore),
-         setupType,
-         p,
-         w,
-         ctx,
-         reasoning,
-         dirDecision,
-         timingResult
-      };
+      if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
+         // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
+         if (ctx.regime === "BULL_STRONG") {
+            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "SHORT",
+               signal_score: ss,
+               rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
+         apexPredatorStats.acceptedShorts++;
+         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
+         else apexPredatorStats.breakoutSetups++;
+
+         addLog(
+            `🧠 [REASONING CONFIRMED] SHORT ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
+            `Primary: ${reasoning.scenario.primary.type} | Score: ${ss.toFixed(1)}/10`,
+            "info"
+         );
+
+         return {
+            signal: "SHORT",
+            score: ss,
+            grade: getGrade(ss),
+            setupType: reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : setupType,
+            p,
+            w,
+            ctx,
+            reasoning
+         };
+      }
    }
 
    // If indicator score was high but confirmation rejected or waiting:
@@ -860,17 +892,13 @@ function executeTrade(symbol: string, decision: any) {
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: decision.setupType || (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
-         setupLabel: decision.setupType === "FORMING_EARLY_LONG" 
-            ? "🌱 تشكّل مبكر" 
-            : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"),
+         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
+         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
          candlesBeforeEntry: formatCandles(p.klines || [], 40),
-         directionState: decision.dirDecision?.state || "CONFIRMED_LONG",
-         directionEvidence: decision.dirDecision?.evidenceChain,
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
@@ -917,17 +945,13 @@ function executeTrade(symbol: string, decision: any) {
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: decision.setupType || (isPullback ? "PULLBACK_SNIPER" : "BREAKDOWN_MOMENTUM"),
-         setupLabel: decision.setupType === "FORMING_EARLY_SHORT" 
-            ? "🌱 تشكّل مبكر" 
-            : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"),
+         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
+         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
          candlesBeforeEntry: formatCandles(p.klines || [], 40),
-         directionState: decision.dirDecision?.state || "CONFIRMED_SHORT",
-         directionEvidence: decision.dirDecision?.evidenceChain,
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
@@ -1019,125 +1043,31 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
-   const peakMfe = t.peak_r || profitR;
-
-   // ═══ DIRECTION LIFECYCLE MANAGEMENT (State-driven exits & protections) ═══
-   const dirEngine = getDirectionEngine(t.symbol);
-   if (p.klines && p.klines.length > 0) {
-      const lastK = p.klines[p.klines.length - 1];
-      const dirDecision = dirEngine.processCandle({
-         time: lastK.openTime || Date.now(),
-         open: lastK.open,
-         high: lastK.high,
-         low: lastK.low,
-         close: price,
-         volume: lastK.volume || 1000,
-         takerBuyBase: lastK.takerBuyBase
-      }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
-
-      t.directionState = dirDecision.state;
-
-      // 1. WEAKENING: Protect profits / tighten stop
-      if ((t.direction === "LONG" && dirDecision.state === "WEAKENING_LONG") ||
-          (t.direction === "SHORT" && dirDecision.state === "WEAKENING_SHORT")) {
-         if (profitR > 0.20 && !t.weakening_protected) {
-            t.weakening_protected = true;
-            const protectSl = t.direction === "LONG" 
-               ? Math.max(t.sl, t.entry + (slDist * Math.max(0.10, profitR - 0.25)))
-               : Math.min(t.sl, t.entry - (slDist * Math.max(0.10, profitR - 0.25)));
-            t.sl = protectSl;
-            addLog(`⚠️ [DIRECTION WEAKENING] ${t.symbol}: ضعف هيكلي مؤكد (${dirDecision.state}) | تم تضييق الوقف لحماية الأرباح عند ${profitR.toFixed(2)}R`, "warn");
-         }
-      }
-
-      // 2. INVALIDATION: Immediate exit upon thesis death
-      if ((t.direction === "LONG" && dirDecision.state === "INVALIDATED_LONG") ||
-          (t.direction === "SHORT" && dirDecision.state === "INVALIDATED_SHORT")) {
-         addLog(`🛑 [DIRECTION INVALIDATED] ${t.symbol}: إبطال فرضية الاتجاه بالكامل (${dirDecision.state}) | خروج فوري عند ${profitR.toFixed(2)}R لتجنب الخسارة الكبرى`, "error");
-         closeTradeFull(t, "Direction Thesis Invalidated");
-         return;
-      }
-   }
-
-   // --- TIER-1 GIVEBACK PROTECTION (Works before and after TP1) ---
-   // FEATURE FLAG: Disabled in production to allow trades like RAYSOL to breathe. Telemetry preserved.
-   if (ENABLE_PRE_TP1_GIVEBACK_EXIT && peakMfe >= 0.55 && (peakMfe - profitR) >= 0.25) {
-      closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-      return;
-   }
-   // -------------------------------------------------------------
-
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
       if (profitR >= TP1_R) {
          closePart(t, "A", t.part_a);
-         // Move SL to Entry + 0.30R (Base Profit Floor: secures +0.30R floor on remaining 60%)
-         const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-         t.sl = baseFloorSl;
+         // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لقاع حماية الأرباح +0.30R (حماية الـ 60% المتبقية)`, 'success');
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
+         closePart(t, "A", t.part_a);
+         t.sl = t.entry;
+         t.a_closed = true;
+         t.be_done = true;
+         addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
       }
-      // Note: Pre-TP1 profit protection / breakeven moves before +0.75R (e.g. at +0.35R) are DISABLED.
-      // Pre-TP1 allows only Initial Stop + Early Structural Invalidation.
    }
 
-   // 2. PROFIT EXPANSION (TP2: +1.80R) & CONSERVATIVE HYBRID PROTECTIONS
+   // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      const peakMfe = t.peak_r || profitR;
-
-      // Base Profit Floor Guarantee: Ensure stop is NEVER worse than +0.30R
-      const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-      if (t.direction === "LONG") {
-         t.sl = Math.max(t.sl, baseFloorSl);
-      } else {
-         t.sl = Math.min(t.sl, baseFloorSl);
-      }
-
-      // Feature Flag: MFE Milestones (+1.00R -> +0.50R, +1.50R -> +0.90R)
-      // Isolated behind feature flag (default false) to test separately against Base +0.30R floor
-      if (ENABLE_MFE_MILESTONE_STOPS) {
-         // Milestone 1: At +1.00R MFE -> Advance SL to +0.50R
-         const targetSl50 = t.direction === "LONG" ? t.entry + (slDist * 0.50) : t.entry - (slDist * 0.50);
-         if (peakMfe >= 1.00 && !t.milestone_1r_locked) {
-            if (t.direction === "LONG" ? t.sl < targetSl50 : t.sl > targetSl50) {
-               t.sl = targetSl50;
-               t.milestone_1r_locked = true;
-               addLog(`🛡️ [MILESTONE 1] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.50R رابحة`, 'info');
-            }
-         }
-
-         // Milestone 2: At +1.50R MFE -> Advance SL to +0.90R
-         const targetSl90 = t.direction === "LONG" ? t.entry + (slDist * 0.90) : t.entry - (slDist * 0.90);
-         if (peakMfe >= 1.50 && !t.milestone_1_5r_locked) {
-            if (t.direction === "LONG" ? t.sl < targetSl90 : t.sl > targetSl90) {
-               t.sl = targetSl90;
-               t.milestone_1_5r_locked = true;
-               addLog(`🛡️ [MILESTONE 2] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.90R رابحة`, 'info');
-            }
-         }
-      }
-
-      // Feature Flag: Dynamic Giveback Protection (MFE >= +1.15R && giveback >= 0.35R)
-      // Isolated behind feature flag (default false) to prevent choking runners like RAVE
-      if (ENABLE_POST_TP1_GIVEBACK_EXIT && peakMfe >= 1.15) {
-         const givebackDecay = peakMfe - profitR;
-         const givebackThreshold = 0.35;
-         if (givebackDecay >= givebackThreshold) {
-            addLog(`🛡️ [GIVEBACK PROTECT] ${t.symbol}: تراجع ${givebackDecay.toFixed(2)}R من قمة +${peakMfe.toFixed(2)}R | إغلاق وتأمين الأرباح المتبقية عند +${profitR.toFixed(2)}R`, 'warn');
-            closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-            return;
-         }
-      }
-
       if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
-         // Lock in TP1 level as floor profit (+0.75R)
-         const targetSlTp1 = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         if (t.direction === "LONG" ? t.sl < targetSlTp1 : t.sl > targetSlTp1) {
-            t.sl = targetSlTp1;
-         }
+         // Lock in TP1 level as floor profit
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
          addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
@@ -1145,25 +1075,10 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // --- MOMENTUM STAGNATION CUT ---
-   const entryMs = typeof t.entryTime === "number" ? t.entryTime : new Date(t.entryTime).getTime();
-   const nowMs = p.time ? (typeof p.time === "number" ? p.time : new Date(p.time).getTime()) : Date.now();
-   const tradeAgeMinutes = (nowMs - entryMs) / 60000;
-   const isUnderEma = t.direction === "LONG" ? price < p.ema21 : price > p.ema21;
-   if (tradeAgeMinutes >= 35 && (t.peak_r || profitR) <= 0.15 && isUnderEma && profitR <= 0.0) {
-       closeTradeFull(t, "Momentum Stagnation Cut");
-       return;
-   }
-   // -------------------------------
-
    // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
    if (t.b_closed && !t.c_closed) {
-      const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-      if (t.direction === "LONG") { 
-         t.sl = Math.max(t.sl, price - trailDist, baseFloorSl); 
-      } else { 
-         t.sl = Math.min(t.sl, price + trailDist, baseFloorSl); 
-      }
+      if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
+      else { t.sl = Math.min(t.sl, price + trailDist); }
 
       if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
@@ -1176,14 +1091,14 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 4. SMART EARLY LOSS MITIGATION
    // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
-   if (!t.a_closed && profitR <= -0.40) {
+   if (!t.a_closed && profitR < -0.40) {
       const c = p.klines;
       const recentCloses = c.slice(-2).map((k: any) => k.close);
       const isBreakingEMA = t.direction === "LONG" 
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      if (isBreakingEMA) {
+      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
          addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
          closeTradeFull(t, "Early Invalidation");
          return;

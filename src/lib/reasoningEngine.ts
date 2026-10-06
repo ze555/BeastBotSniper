@@ -168,15 +168,12 @@ export function detectMarketRegime(ctx: any, p: any): MarketRegimeType {
       return "TREND_UP";
    }
    if (assetBearAlign && p.adx > 25 && p.price < p.ema21) {
-      if (ctx?.regime === "BULL_STRONG" || ctx?.regime?.includes("BULL_STRONG")) {
-         return "TRANSITION";
-      }
       return "TREND_DOWN";
    }
 
    const structureDivergence = (p.bull_align && p.LH_LL) || (p.bear_align && p.HH_HL);
    const maCompression = Math.abs(p.ema50 - p.ema200) / (p.ema200 || 1) < 0.008;
-   if (structureDivergence || (maCompression && p.adx < 20)) {
+   if (structureDivergence || (maCompression && p.adx < 22)) {
       return "TRANSITION";
    }
 
@@ -859,31 +856,6 @@ export function checkConfirmation(
          reason: "High volatility / violent market environment: New entries prohibited.",
          evidence,
          missingItems: ["Volatility stabilization"]
-      };
-   }
-
-   // 1b. Strict Gate 1b: Dead Range Filter (Pre-breakout vs Dead Range)
-   // Data proof: RANGE entries with RVOL < 1.15 and weak flow have a 93.3% loss rate.
-   if (regime === "RANGE" && ((p.rvol || 1.0) < 1.15 && flow.persistenceScore < 70)) {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Dead Range: Insufficient volume expansion (RVOL: ${(p.rvol || 1.0).toFixed(2)} < 1.15) and weak institutional flow in range environment.`,
-         evidence,
-         missingItems: ["Volume expansion (RVOL >= 1.15) or strong institutional accumulation in range"]
-      };
-   }
-
-   // 1c. Strict Gate 1c: Global Volume Participation Floor
-   // Data proof: Trades entered during volume droughts (e.g. DOGE RVOL 0.05, ETH RVOL 0.57) fail to expand and bleed.
-   // Require minimum RVOL >= 0.75 across all market regimes.
-   if ((p.rvol || 1.0) < 0.75) {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Volume Drought: Market volume is too thin (RVOL: ${(p.rvol || 1.0).toFixed(2)} < 0.75). Entries prohibited without volume participation.`,
-         evidence,
-         missingItems: ["Volume participation (RVOL >= 0.75)"]
       };
    }
 
