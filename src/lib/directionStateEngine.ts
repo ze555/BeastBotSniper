@@ -127,11 +127,7 @@ export class DirectionStateEngine {
     btcContext: { regime?: string; btc_chg?: number } = {},
     oiContext: { oiChg?: number } = {}
   ): DirectionDecision {
-    if (this.candleHistory.length > 0 && this.candleHistory[this.candleHistory.length - 1].time === candle.time) {
-      this.candleHistory[this.candleHistory.length - 1] = candle;
-    } else {
-      this.candleHistory.push(candle);
-    }
+    this.candleHistory.push(candle);
     const n = this.candleHistory.length;
 
     // Minimum warmup period of 15 candles required to determine swing structure
@@ -287,8 +283,8 @@ export class DirectionStateEngine {
       case "FORMING_LONG": {
         const bl = this.breakoutLevel || swingHigh;
 
-        // Invalidation: Price falls below structural invalidation level AND breaks under EMA50
-        if (curClose < (this.invalidationPrice || ema50) && curClose < ema50 * 0.995) {
+        // Invalidation: Price falls below structural invalidation level or breaks under EMA50
+        if (curClose < (this.invalidationPrice || ema50) || curClose < ema50 * 0.998) {
           transition(
             "INVALIDATED_LONG",
             "INVALIDATION_EVENT",
@@ -339,8 +335,8 @@ export class DirectionStateEngine {
       case "CONFIRMED_LONG": {
         const bl = this.breakoutLevel || swingHigh;
 
-        // Invalidation: Price sinks back below former resistance AND breaches EMA50
-        if (curClose < bl * 0.995 && curClose < ema50) {
+        // Invalidation: Price sinks back below breakout level by > 0.3%
+        if (curClose < bl * 0.997 || curClose < ema50) {
           transition(
             "INVALIDATED_LONG",
             "INVALIDATION_EVENT",
@@ -466,8 +462,8 @@ export class DirectionStateEngine {
       case "FORMING_SHORT": {
         const sl = this.supportLevel || swingLow;
 
-        // Invalidation: Price reclaims invalidation ceiling AND crosses above EMA50
-        if (curClose > (this.invalidationPrice || ema50) && curClose > ema50 * 1.005) {
+        // Invalidation: Price reclaims invalidation ceiling or crosses above EMA50
+        if (curClose > (this.invalidationPrice || ema50) || curClose > ema50 * 1.002) {
           transition(
             "INVALIDATED_SHORT",
             "INVALIDATION_EVENT",
@@ -516,8 +512,7 @@ export class DirectionStateEngine {
       case "CONFIRMED_SHORT": {
         const sl = this.supportLevel || swingLow;
 
-        // Invalidation: Price reclaimed former support AND breaches above EMA50
-        if (curClose > sl * 1.005 && curClose > ema50) {
+        if (curClose > sl * 1.003 || curClose > ema50) {
           transition(
             "INVALIDATED_SHORT",
             "INVALIDATION_EVENT",

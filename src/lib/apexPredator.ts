@@ -989,18 +989,16 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // Fresh trade grace period (15 minutes): Allow newly entered trades to breathe without premature instant abortion
-   const tradeAgeMins = t.entryTime ? (Date.now() - new Date(t.entryTime).getTime()) / 60000 : 999;
-
-   if (tradeAgeMins >= 15) {
-      if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
-      if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
-      if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
-   }
+   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
+   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
+   
+   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
+   const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
+   if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
-      closeTradeFull(t, `Emergency Exit (${emReason})`);
+      closeTradeFull(t);
       return;
    }
 
