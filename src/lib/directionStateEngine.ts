@@ -158,17 +158,13 @@ export class DirectionStateEngine {
     const ema50 = calcEma(Math.min(50, n));
 
     // Orderflow metrics (Taker ratio & CVD)
-    // If takerBuyBase is undefined, accurately proxies buying pressure via Money Flow Multiplier ((close - low)/(high - low))
     const takers = this.candleHistory.map(c => {
-      if (c.takerBuyBase !== undefined) return c.takerBuyBase / (c.volume || 1);
-      const span = c.high - c.low;
-      return span > 0 ? (c.close - c.low) / span : 0.5;
+      const tb = c.takerBuyBase !== undefined ? c.takerBuyBase : c.volume * 0.5;
+      return tb / (c.volume || 1);
     });
     const cvdDeltas = this.candleHistory.map(c => {
-      if (c.takerBuyBase !== undefined) return 2 * c.takerBuyBase - c.volume;
-      const span = c.high - c.low;
-      const ratio = span > 0 ? (c.close - c.low) / span : 0.5;
-      return (2 * ratio - 1) * c.volume;
+      const tb = c.takerBuyBase !== undefined ? c.takerBuyBase : c.volume * 0.5;
+      return 2 * tb - c.volume;
     });
 
     const recentTaker5 = takers.slice(-5).reduce((a, b) => a + b, 0) / 5;
