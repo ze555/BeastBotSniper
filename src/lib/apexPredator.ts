@@ -45,6 +45,49 @@ let initialVirtualBalance = 1000;
 let maxOpenTradesConfig = 3;
 
 // ============================================================================
+// EXECUTION FILTER (BeastBotSniper Execution Rules)
+// ============================================================================
+export interface ExecutionFilterResult {
+   blocked: boolean;
+   reason?: string;
+}
+
+export function evaluateExecutionFilter(
+   direction: "LONG" | "SHORT",
+   btcRegime: string,
+   assetState: string
+): ExecutionFilterResult {
+   // 1. حظر SHORT: عندما يكون "BTC Regime = BULL_STRONG" وحالة الأصل "TRANSITION" أو "TREND_UP"
+   if (
+      direction === "SHORT" &&
+      btcRegime === "BULL_STRONG" &&
+      (assetState === "TRANSITION" || assetState === "TREND_UP")
+   ) {
+      return {
+         blocked: true,
+         reason: `Execution Filter: Blocked SHORT because BTC Regime is BULL_STRONG and Asset State is ${assetState}.`
+      };
+   }
+
+   // 2. حظر LONG: عندما يكون "BTC Regime = BULL_WEAK" وحالة الأصل "TRANSITION" أو "TREND_DOWN"
+   if (
+      direction === "LONG" &&
+      btcRegime === "BULL_WEAK" &&
+      (assetState === "TRANSITION" || assetState === "TREND_DOWN")
+   ) {
+      return {
+         blocked: true,
+         reason: `Execution Filter: Blocked LONG because BTC Regime is BULL_WEAK and Asset State is ${assetState}.`
+      };
+   }
+
+   // 3. حالة "RANGE" والحالات غير المحظورة تترك وفق النظام الأصلي
+   return {
+      blocked: false
+   };
+}
+
+// ============================================================================
 // EXIT ENGINE FEATURE FLAGS (Controlled Experimentation Baseline)
 // ============================================================================
 export const ENABLE_PRE_TP1_GIVEBACK_EXIT = false;
@@ -767,6 +810,24 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
+         // EXECUTION FILTER: Block LONG if BTC is BULL_WEAK and asset state is TRANSITION or TREND_DOWN
+         const filterResult = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime);
+         if (filterResult.blocked) {
+            addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة LONG على ${symbol}: ${filterResult.reason}`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "LONG",
+               signal_score: sl,
+               rejection_reason: filterResult.reason || "Execution Filter: Blocked LONG trade",
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          apexPredatorStats.acceptedLongs++;
          if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
          else apexPredatorStats.breakoutSetups++;
@@ -791,15 +852,16 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
-         if (ctx.regime === "BULL_STRONG") {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
+         // EXECUTION FILTER: Block SHORT if BTC is BULL_STRONG and asset state is TRANSITION or TREND_UP
+         const filterResult = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime);
+         if (filterResult.blocked) {
+            addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة SHORT على ${symbol}: ${filterResult.reason}`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "SHORT",
                signal_score: ss,
-               rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
+               rejection_reason: filterResult.reason || "Execution Filter: Blocked SHORT trade",
                p,
                w,
                ctx,
@@ -863,6 +925,16 @@ async function scoreEntry(symbol: string, ctx: any) {
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
+
+   // Execution Filter Guard: applies to all entry and re-entry paths
+   if (decision.signal === "LONG" || decision.signal === "SHORT") {
+      const execFilter = evaluateExecutionFilter(decision.signal, ctx?.regime, reasoning?.regime);
+      if (execFilter.blocked) {
+         addLog(`🛡️ [EXECUTION FILTER GUARD] تم رفض تنفيذ صفقة ${decision.signal} على ${symbol}: ${execFilter.reason}`, "warn");
+         return;
+      }
+   }
+
    const isPullback = setupType === "PULLBACK_SNIPER";
    const riskAmt = virtualBalance * grade.risk * grade.mult;
 
