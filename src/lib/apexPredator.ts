@@ -1,7 +1,8 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
-import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
+import { evaluateSymbolReasoning, detectMarketRegime, ReasoningResult } from "./reasoningEngine.js";
 import { DirectionStateEngine, DirectionDecision, evaluateDirectionTiming, TimingResult } from "./directionStateEngine.js";
+import { evaluateExecutionFilter } from "./executionFilter.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -677,22 +678,6 @@ async function scoreEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: `Direction State: ${dirDecision.state} (Awaiting confirmed structure)` };
    }
 
-   // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
-   if (dirDecision.direction === "SHORT" && ctx.regime === "BULL_STRONG") {
-      addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
-      logRejectedSignal({
-         symbol,
-         timeframe: "15m",
-         direction: "SHORT",
-         signal_score: 7.8,
-         rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
-         p,
-         w,
-         ctx
-      });
-      return { signal: "WAIT", reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.", dirDecision };
-   }
-
    // ═══ TIMING ENGINE EVALUATION ═══
    // Timing Engine decides ONLY: GO or WAIT
    // STRICT LAW: Timing Engine CAN NEVER alter direction (LONG -> SHORT or SHORT -> LONG)
@@ -724,6 +709,37 @@ async function scoreEntry(symbol: string, ctx: any) {
       w,
       { sl, ss }
    );
+
+   // ═══ EXECUTION FILTER (STRICT SELECTIVE PROHIBITION) ═══
+   // 1. Prohibit SHORT: When BTC Regime is "BULL_STRONG" and Asset Regime is "TRANSITION" or "TREND_UP".
+   // 2. Prohibit LONG: When BTC Regime is "BULL_WEAK" and Asset Regime is "TRANSITION" or "TREND_DOWN".
+   // - RANGE is explicitly NOT blocked (original system logic preserved).
+   // - Open trades are NEVER terminated by this filter.
+   const assetRegime = reasoning.regime;
+   const btcRegime = ctx.regime;
+   const execFilterResult = evaluateExecutionFilter(dirDecision.direction, btcRegime, assetRegime);
+
+   if (!execFilterResult.allowed) {
+      addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة ${dirDecision.direction} على ${symbol}: ${execFilterResult.blockedReason}`, "warn");
+      logRejectedSignal({
+         symbol,
+         timeframe: "15m",
+         direction: dirDecision.direction,
+         signal_score: dirDecision.direction === "LONG" ? sl : ss,
+         rejection_reason: execFilterResult.blockedReason!,
+         p,
+         w,
+         ctx,
+         reasoning
+      });
+      return {
+         signal: "WAIT",
+         reason: execFilterResult.blockedReason,
+         dirDecision,
+         timingResult,
+         reasoning
+      };
+   }
 
    function getGrade(score: number) {
       if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.010, mult: 1.0 };
@@ -824,6 +840,16 @@ async function scoreEntry(symbol: string, ctx: any) {
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
+
+   // Execution Filter Defense-in-Depth gate across all execution and re-entry pathways
+   const assetRegime = reasoning?.regime || detectMarketRegime(ctx, p);
+   const btcRegime = ctx?.regime || "UNKNOWN";
+   const filterCheck = evaluateExecutionFilter(decision.signal, btcRegime, assetRegime);
+   if (!filterCheck.allowed) {
+      addLog(`🛡️ [EXECUTION FILTER BLOCKED] ${symbol} ${decision.signal}: ${filterCheck.blockedReason}`, "warn");
+      return;
+   }
+
    const isPullback = setupType === "PULLBACK_SNIPER";
    const riskAmt = virtualBalance * grade.risk * grade.mult;
 
