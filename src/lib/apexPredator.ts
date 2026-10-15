@@ -47,6 +47,12 @@ let maxOpenTradesConfig = 3;
 // ============================================================================
 // EXECUTION FILTER (BeastBotSniper Execution Rules)
 // ============================================================================
+export interface ExecutionFilterOptions {
+   hourUtc?: number;
+   rvol?: number;
+   adx?: number;
+}
+
 export interface ExecutionFilterResult {
    blocked: boolean;
    reason?: string;
@@ -55,9 +61,19 @@ export interface ExecutionFilterResult {
 export function evaluateExecutionFilter(
    direction: "LONG" | "SHORT",
    btcRegime: string,
-   assetState: string
+   assetState: string,
+   options?: ExecutionFilterOptions
 ): ExecutionFilterResult {
-   // 1. حظر SHORT: عندما يكون "BTC Regime = BULL_STRONG" وحالة الأصل "TRANSITION" أو "TREND_UP"
+   // 1. فلتر الساعات السامة عالية التذبذب والخسائر (05:00-06:59 UTC, 13:00-13:59 UTC, 18:00-18:59 UTC)
+   const TOXIC_HOURS_UTC = [5, 6, 13, 18];
+   if (options?.hourUtc !== undefined && TOXIC_HOURS_UTC.includes(options.hourUtc)) {
+      return {
+         blocked: true,
+         reason: `Execution Filter: Blocked entry during toxic hour ${options.hourUtc}:00 UTC (high chop / fakeout liquidation window).`
+      };
+   }
+
+   // 2. حظر SHORT: عندما يكون "BTC Regime = BULL_STRONG" وحالة الأصل "TRANSITION" أو "TREND_UP"
    if (
       direction === "SHORT" &&
       btcRegime === "BULL_STRONG" &&
@@ -69,7 +85,7 @@ export function evaluateExecutionFilter(
       };
    }
 
-   // 2. حظر LONG: عندما يكون "BTC Regime = BULL_WEAK" وحالة الأصل "TRANSITION" أو "TREND_DOWN"
+   // 3. حظر LONG: عندما يكون "BTC Regime = BULL_WEAK" وحالة الأصل "TRANSITION" أو "TREND_DOWN"
    if (
       direction === "LONG" &&
       btcRegime === "BULL_WEAK" &&
@@ -81,7 +97,37 @@ export function evaluateExecutionFilter(
       };
    }
 
-   // 3. حالة "RANGE" والحالات غير المحظورة تترك وفق النظام الأصلي
+   // 4. حظر صفقات الشراء (LONG) في نظام RANGE أثناء صعود البيتكوين (BULL_STRONG أو BULL_WEAK)
+   // لمنع فخاخ سحب السيولة نحو البيتكوين والتذبذب الراكد
+   if (
+      direction === "LONG" &&
+      assetState === "RANGE" &&
+      (btcRegime === "BULL_STRONG" || btcRegime === "BULL_WEAK")
+   ) {
+      return {
+         blocked: true,
+         reason: `Execution Filter: Blocked LONG in RANGE during BTC ${btcRegime} (liquidity trap & stagnant chop).`
+      };
+   }
+
+   // 5. تصفية صفقات الـ RANGE الراكدة عديمة الزخم والفوليوم (Dead Chop)
+   // اشتراط RVOL >= 1.20 و ADX >= 18 لصفقات النطاق العرضي لضمان وجود فوليوم انفجاري Pre-Breakout
+   if (assetState === "RANGE") {
+      if (options?.rvol !== undefined && options.rvol < 1.2) {
+         return {
+            blocked: true,
+            reason: `Execution Filter: Blocked RANGE trade due to low volume (RVOL ${options.rvol.toFixed(2)} < 1.20 required for range expansion).`
+         };
+      }
+      if (options?.adx !== undefined && options.adx < 18) {
+         return {
+            blocked: true,
+            reason: `Execution Filter: Blocked RANGE trade due to weak trend momentum (ADX ${options.adx.toFixed(1)} < 18 required for range breakout).`
+         };
+      }
+   }
+
+   // الحالات الأخرى تترك وفق النظام الأصلي
    return {
       blocked: false
    };
@@ -810,8 +856,12 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
-         // EXECUTION FILTER: Block LONG if BTC is BULL_WEAK and asset state is TRANSITION or TREND_DOWN
-         const filterResult = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime);
+         // EXECUTION FILTER: Enhanced multi-rule check (Toxic hours, BTC regimes, RANGE longs, Dead Chop)
+         const filterResult = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, {
+            hourUtc: new Date().getUTCHours(),
+            rvol: p.rvol,
+            adx: p.adx
+         });
          if (filterResult.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة LONG على ${symbol}: ${filterResult.reason}`, "warn");
             logRejectedSignal({
@@ -852,8 +902,12 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // EXECUTION FILTER: Block SHORT if BTC is BULL_STRONG and asset state is TRANSITION or TREND_UP
-         const filterResult = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime);
+         // EXECUTION FILTER: Enhanced multi-rule check (Toxic hours, BTC regimes, Dead Chop)
+         const filterResult = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, {
+            hourUtc: new Date().getUTCHours(),
+            rvol: p.rvol,
+            adx: p.adx
+         });
          if (filterResult.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة SHORT على ${symbol}: ${filterResult.reason}`, "warn");
             logRejectedSignal({
@@ -928,7 +982,11 @@ function executeTrade(symbol: string, decision: any) {
 
    // Execution Filter Guard: applies to all entry and re-entry paths
    if (decision.signal === "LONG" || decision.signal === "SHORT") {
-      const execFilter = evaluateExecutionFilter(decision.signal, ctx?.regime, reasoning?.regime);
+      const execFilter = evaluateExecutionFilter(decision.signal, ctx?.regime, reasoning?.regime, {
+         hourUtc: new Date().getUTCHours(),
+         rvol: p?.rvol,
+         adx: p?.adx
+      });
       if (execFilter.blocked) {
          addLog(`🛡️ [EXECUTION FILTER GUARD] تم رفض تنفيذ صفقة ${decision.signal} على ${symbol}: ${execFilter.reason}`, "warn");
          return;

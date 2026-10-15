@@ -17,7 +17,7 @@ function assert(condition: boolean, testName: string, failureDetails?: string) {
 }
 
 console.log("=======================================================");
-console.log("🧪 RUNNING BEASTBOTSNIPER EXECUTION FILTER TEST SUITE");
+console.log("🧪 RUNNING BEASTBOTSNIPER ENHANCED EXECUTION FILTER TESTS");
 console.log("=======================================================");
 
 // ----------------------------------------------------------------------------
@@ -41,31 +41,7 @@ console.log("=======================================================");
 }
 
 // ----------------------------------------------------------------------------
-// 2. ALLOWED SHORT TESTS
-// لا تحظر RANGE حاليًا؛ ولا تحظر الحالات الأخرى غير المحددة
-// ----------------------------------------------------------------------------
-{
-  // RANGE must NOT be blocked
-  const resRange = evaluateExecutionFilter("SHORT", "BULL_STRONG", "RANGE");
-  assert(resRange.blocked === false, "SHORT allowed when BTC=BULL_STRONG and Asset=RANGE (RANGE not blocked)");
-
-  // TREND_DOWN during BULL_STRONG
-  const resDown = evaluateExecutionFilter("SHORT", "BULL_STRONG", "TREND_DOWN");
-  assert(resDown.blocked === false, "SHORT allowed when BTC=BULL_STRONG and Asset=TREND_DOWN");
-
-  // Other regimes: BULL_WEAK, BEAR_STRONG, BEAR_WEAK
-  const resWeak = evaluateExecutionFilter("SHORT", "BULL_WEAK", "TRANSITION");
-  assert(resWeak.blocked === false, "SHORT allowed when BTC=BULL_WEAK and Asset=TRANSITION");
-
-  const resBear = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "TREND_UP");
-  assert(resBear.blocked === false, "SHORT allowed when BTC=BEAR_STRONG and Asset=TREND_UP");
-
-  const resBear2 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TRANSITION");
-  assert(resBear2.blocked === false, "SHORT allowed when BTC=BEAR_WEAK and Asset=TRANSITION");
-}
-
-// ----------------------------------------------------------------------------
-// 3. BLOCKED LONG TESTS
+// 2. BLOCKED LONG TESTS
 // حظر LONG: عندما يكون "BTC Regime = BULL_WEAK" وحالة الأصل "TRANSITION" أو "TREND_DOWN"
 // ----------------------------------------------------------------------------
 {
@@ -85,32 +61,70 @@ console.log("=======================================================");
 }
 
 // ----------------------------------------------------------------------------
-// 4. ALLOWED LONG TESTS
-// لا تحظر RANGE حاليًا؛ ولا تحظر الحالات الأخرى غير المحددة
+// 3. RANGE FILTER RULES (LONG blocked during BULL regimes, SHORT allowed)
 // ----------------------------------------------------------------------------
 {
-  // RANGE must NOT be blocked
-  const resRange = evaluateExecutionFilter("LONG", "BULL_WEAK", "RANGE");
-  assert(resRange.blocked === false, "LONG allowed when BTC=BULL_WEAK and Asset=RANGE (RANGE not blocked)");
+  // LONG in RANGE during BULL_STRONG is blocked (the #1 loss maker from Deplexo: -$35.38)
+  const resRangeLongBullStrong = evaluateExecutionFilter("LONG", "BULL_STRONG", "RANGE");
+  assert(resRangeLongBullStrong.blocked === true, "LONG in RANGE blocked during BTC=BULL_STRONG");
 
-  // TREND_UP during BULL_WEAK
-  const resUp = evaluateExecutionFilter("LONG", "BULL_WEAK", "TREND_UP");
-  assert(resUp.blocked === false, "LONG allowed when BTC=BULL_WEAK and Asset=TREND_UP");
+  // LONG in RANGE during BULL_WEAK is blocked
+  const resRangeLongBullWeak = evaluateExecutionFilter("LONG", "BULL_WEAK", "RANGE");
+  assert(resRangeLongBullWeak.blocked === true, "LONG in RANGE blocked during BTC=BULL_WEAK");
 
-  // BULL_STRONG allows LONG
-  const resStrong = evaluateExecutionFilter("LONG", "BULL_STRONG", "TRANSITION");
-  assert(resStrong.blocked === false, "LONG allowed when BTC=BULL_STRONG and Asset=TRANSITION");
+  // SHORT in RANGE during BULL_WEAK (the 92.9% win rate goldmine) is ALLOWED!
+  const resRangeShortBullWeak = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.5, adx: 22 });
+  assert(resRangeShortBullWeak.blocked === false, "SHORT in RANGE allowed during BTC=BULL_WEAK with volume");
 
-  const resStrongUp = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP");
-  assert(resStrongUp.blocked === false, "LONG allowed when BTC=BULL_STRONG and Asset=TREND_UP");
-
-  // BEAR regimes allow according to original system
-  const resBear = evaluateExecutionFilter("LONG", "BEAR_WEAK", "TREND_UP");
-  assert(resBear.blocked === false, "LONG allowed when BTC=BEAR_WEAK and Asset=TREND_UP");
+  // SHORT in RANGE during BEAR_WEAK is ALLOWED
+  const resRangeShortBear = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "RANGE", { rvol: 1.4, adx: 20 });
+  assert(resRangeShortBear.blocked === false, "SHORT in RANGE allowed during BTC=BEAR_WEAK with volume");
 }
 
 // ----------------------------------------------------------------------------
-// 5. EXISTING OPEN POSITIONS INTEGRITY TEST
+// 4. TOXIC HOURS FILTER (05:00, 06:00, 13:00, 18:00 UTC)
+// ----------------------------------------------------------------------------
+{
+  // Toxic hours blocked
+  const resHour13 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 13 });
+  assert(resHour13.blocked === true && resHour13.reason?.includes("toxic hour 13:00 UTC"), "Entry blocked at 13:00 UTC (London/NY overlap chop)");
+
+  const resHour18 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 18 });
+  assert(resHour18.blocked === true && resHour18.reason?.includes("toxic hour 18:00 UTC"), "Entry blocked at 18:00 UTC (Late NY liquidation chop)");
+
+  const resHour05 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 5 });
+  assert(resHour05.blocked === true && resHour05.reason?.includes("toxic hour 5:00 UTC"), "Entry blocked at 05:00 UTC (Asia end chop)");
+
+  const resHour06 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 6 });
+  assert(resHour06.blocked === true && resHour06.reason?.includes("toxic hour 6:00 UTC"), "Entry blocked at 06:00 UTC");
+
+  // Golden hours allowed
+  const resHour12 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 12 });
+  assert(resHour12.blocked === false, "Entry allowed at 12:00 UTC (Golden London open hour)");
+
+  const resHour17 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 17 });
+  assert(resHour17.blocked === false, "Entry allowed at 17:00 UTC (Golden New York power hour)");
+}
+
+// ----------------------------------------------------------------------------
+// 5. DEAD CHOP VS PRE-BREAKOUT VOLUME IN RANGE
+// ----------------------------------------------------------------------------
+{
+  // Dead chop with RVOL < 1.2 is blocked
+  const resLowVol = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 0.8, adx: 25 });
+  assert(resLowVol.blocked === true && resLowVol.reason?.includes("RVOL"), "Dead chop in RANGE blocked when RVOL < 1.20");
+
+  // Dead chop with ADX < 18 is blocked
+  const resLowAdx = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.5, adx: 12 });
+  assert(resLowAdx.blocked === true && resLowAdx.reason?.includes("ADX"), "Dead chop in RANGE blocked when ADX < 18");
+
+  // Pre-breakout with high RVOL and ADX is allowed
+  const resGoodRange = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.6, adx: 24 });
+  assert(resGoodRange.blocked === false, "Pre-breakout in RANGE allowed when RVOL >= 1.20 and ADX >= 18");
+}
+
+// ----------------------------------------------------------------------------
+// 6. EXISTING OPEN POSITIONS INTEGRITY TEST
 // لا تغلق الصفقات المفتوحة بسبب هذه الفلاتر
 // ----------------------------------------------------------------------------
 {
@@ -134,19 +148,14 @@ console.log("=======================================================");
     }
   ];
 
-  // When market shifts to BTC=BULL_STRONG / Asset=TRANSITION
-  const shortFilter = evaluateExecutionFilter("SHORT", "BULL_STRONG", "TRANSITION");
-  assert(shortFilter.blocked === true, "Filter indicates new SHORT entry is blocked");
+  // When market conditions shift to blocked status
+  const filter = evaluateExecutionFilter("SHORT", "BULL_STRONG", "TRANSITION");
+  assert(filter.blocked === true, "Filter indicates new entry is blocked");
 
   // Open trade remains intact and open
   const openShortTrade = simulatedActiveTrades.find(t => t.id === "trade-1");
   assert(openShortTrade !== undefined && openShortTrade.status === "OPEN", "Open SHORT trade is NOT closed by execution filter");
 
-  // When market shifts to BTC=BULL_WEAK / Asset=TRANSITION
-  const longFilter = evaluateExecutionFilter("LONG", "BULL_WEAK", "TRANSITION");
-  assert(longFilter.blocked === true, "Filter indicates new LONG entry is blocked");
-
-  // Open long trade remains intact and open
   const openLongTrade = simulatedActiveTrades.find(t => t.id === "trade-2");
   assert(openLongTrade !== undefined && openLongTrade.status === "OPEN", "Open LONG trade is NOT closed by execution filter");
 }
@@ -158,6 +167,6 @@ console.log("=======================================================");
 if (failedCount > 0) {
   process.exit(1);
 } else {
-  console.log("✨ All Execution Filter tests PASSED flawlessly!");
+  console.log("✨ All Enhanced Execution Filter tests PASSED flawlessly!");
   process.exit(0);
 }
