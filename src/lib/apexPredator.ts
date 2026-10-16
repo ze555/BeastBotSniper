@@ -44,102 +44,6 @@ let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
 let maxOpenTradesConfig = 3;
 
-// ============================================================================
-// EXECUTION FILTER (BeastBotSniper Execution Rules)
-// ============================================================================
-export interface ExecutionFilterOptions {
-   hourUtc?: number;
-   rvol?: number;
-   adx?: number;
-}
-
-export interface ExecutionFilterResult {
-   blocked: boolean;
-   reason?: string;
-}
-
-export function evaluateExecutionFilter(
-   direction: "LONG" | "SHORT",
-   btcRegime: string,
-   assetState: string,
-   options?: ExecutionFilterOptions
-): ExecutionFilterResult {
-   // 1. فلتر الساعات السامة عالية التذبذب والخسائر (05:00-06:59 UTC, 13:00-13:59 UTC, 18:00-18:59 UTC)
-   const TOXIC_HOURS_UTC = [5, 6, 13, 18];
-   if (options?.hourUtc !== undefined && TOXIC_HOURS_UTC.includes(options.hourUtc)) {
-      return {
-         blocked: true,
-         reason: `Execution Filter: Blocked entry during toxic hour ${options.hourUtc}:00 UTC (high chop / fakeout liquidation window).`
-      };
-   }
-
-   // 2. حظر SHORT: عندما يكون "BTC Regime = BULL_STRONG" وحالة الأصل "TRANSITION" أو "TREND_UP"
-   if (
-      direction === "SHORT" &&
-      btcRegime === "BULL_STRONG" &&
-      (assetState === "TRANSITION" || assetState === "TREND_UP")
-   ) {
-      return {
-         blocked: true,
-         reason: `Execution Filter: Blocked SHORT because BTC Regime is BULL_STRONG and Asset State is ${assetState}.`
-      };
-   }
-
-   // 3. حظر LONG: عندما يكون "BTC Regime = BULL_WEAK" وحالة الأصل "TRANSITION" أو "TREND_DOWN"
-   if (
-      direction === "LONG" &&
-      btcRegime === "BULL_WEAK" &&
-      (assetState === "TRANSITION" || assetState === "TREND_DOWN")
-   ) {
-      return {
-         blocked: true,
-         reason: `Execution Filter: Blocked LONG because BTC Regime is BULL_WEAK and Asset State is ${assetState}.`
-      };
-   }
-
-   // 4. حظر صفقات الشراء (LONG) في نظام RANGE أثناء صعود البيتكوين (BULL_STRONG أو BULL_WEAK)
-   // لمنع فخاخ سحب السيولة نحو البيتكوين والتذبذب الراكد
-   if (
-      direction === "LONG" &&
-      assetState === "RANGE" &&
-      (btcRegime === "BULL_STRONG" || btcRegime === "BULL_WEAK")
-   ) {
-      return {
-         blocked: true,
-         reason: `Execution Filter: Blocked LONG in RANGE during BTC ${btcRegime} (liquidity trap & stagnant chop).`
-      };
-   }
-
-   // 5. تصفية صفقات الـ RANGE الراكدة عديمة الزخم والفوليوم (Dead Chop)
-   // اشتراط RVOL >= 1.20 و ADX >= 18 لصفقات النطاق العرضي لضمان وجود فوليوم انفجاري Pre-Breakout
-   if (assetState === "RANGE") {
-      if (options?.rvol !== undefined && options.rvol < 1.2) {
-         return {
-            blocked: true,
-            reason: `Execution Filter: Blocked RANGE trade due to low volume (RVOL ${options.rvol.toFixed(2)} < 1.20 required for range expansion).`
-         };
-      }
-      if (options?.adx !== undefined && options.adx < 18) {
-         return {
-            blocked: true,
-            reason: `Execution Filter: Blocked RANGE trade due to weak trend momentum (ADX ${options.adx.toFixed(1)} < 18 required for range breakout).`
-         };
-      }
-   }
-
-   // الحالات الأخرى تترك وفق النظام الأصلي
-   return {
-      blocked: false
-   };
-}
-
-// ============================================================================
-// EXIT ENGINE FEATURE FLAGS (Controlled Experimentation Baseline)
-// ============================================================================
-export const ENABLE_PRE_TP1_GIVEBACK_EXIT = false;
-export const ENABLE_MFE_MILESTONE_STOPS = false;
-export const ENABLE_POST_TP1_GIVEBACK_EXIT = false;
-
 // New Config
 let haltProfitEnabled = false;
 let haltProfitTarget = 150;
@@ -856,26 +760,61 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
-         // EXECUTION FILTER: Enhanced multi-rule check (Toxic hours, BTC regimes, RANGE longs, Dead Chop)
-         const filterResult = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, {
-            hourUtc: new Date().getUTCHours(),
-            rvol: p.rvol,
-            adx: p.adx
-         });
-         if (filterResult.blocked) {
-            addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة LONG على ${symbol}: ${filterResult.reason}`, "warn");
+         // SAFETY GATE 2: مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف
+         // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
+         if (ctx.regime === "BULL_WEAK" && (reasoning.regime === "TREND_DOWN" || reasoning.regime === "TRANSITION")) {
+            addLog(`🛡️ [SAFETY GATE] تم منع صفقة LONG على ${symbol} لأن البيتكوين في صعود ضعيف (BTC BULL_WEAK) وحالة الأصل (${reasoning.regime}).`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "LONG",
                signal_score: sl,
-               rejection_reason: filterResult.reason || "Execution Filter: Blocked LONG trade",
+               rejection_reason: `Safety Gate: BTC BULL_WEAK with Asset ${reasoning.regime}. Buying weak assets prohibited.`,
                p,
                w,
                ctx,
                reasoning
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
+         // SAFETY GATE 3: مانع الشراء في النطاق العرضي (فخ السيولة - RANGE Long Trap)
+         // الشرط: حظر صفقات الـ LONG نهائياً إذا كانت العملة في نطاق عرضي (Asset = RANGE) أثناء أي صعود للبيتكوين (BULL_STRONG أو BULL_WEAK).
+         if (reasoning.regime === "RANGE" && (ctx.regime === "BULL_STRONG" || ctx.regime === "BULL_WEAK")) {
+            addLog(`🛡️ [LIQUIDITY TRAP] تم منع صفقة LONG على ${symbol} لأن الأصل في نطاق عرضي (RANGE) أثناء صعود البيتكوين (${ctx.regime}).`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "LONG",
+               signal_score: sl,
+               rejection_reason: `Liquidity Trap Gate: RANGE Long prohibited during BTC ${ctx.regime} (altcoin liquidity drain).`,
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
+         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
+         if (reasoning.regime === "RANGE") {
+            const hasExplosiveRvol = p.rvol >= 2.0;
+            const hasDirectionalMomentum = p.adx >= 22 && p.di_plus > p.di_minus;
+            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
+               addLog(`🛡️ [DEAD CHOP] تم منع صفقة LONG على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية صاعدة (ADX >= 22 مع DI+ > DI-).`, "warn");
+               logRejectedSignal({
+                  symbol,
+                  timeframe: "15m",
+                  direction: "LONG",
+                  signal_score: sl,
+                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
+                  p,
+                  w,
+                  ctx,
+                  reasoning
+               });
+               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            }
          }
 
          apexPredatorStats.acceptedLongs++;
@@ -902,26 +841,43 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // EXECUTION FILTER: Enhanced multi-rule check (Toxic hours, BTC regimes, Dead Chop)
-         const filterResult = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, {
-            hourUtc: new Date().getUTCHours(),
-            rvol: p.rvol,
-            adx: p.adx
-         });
-         if (filterResult.blocked) {
-            addLog(`🛡️ [EXECUTION FILTER] تم منع صفقة SHORT على ${symbol}: ${filterResult.reason}`, "warn");
+         // SAFETY GATE 1: مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي
+         // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
+         if (ctx.regime === "BULL_STRONG" && (reasoning.regime === "TREND_UP" || reasoning.regime === "TRANSITION")) {
+            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG) والأصل في حالة (${reasoning.regime}).`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "SHORT",
                signal_score: ss,
-               rejection_reason: filterResult.reason || "Execution Filter: Blocked SHORT trade",
+               rejection_reason: `Safety Gate: BTC Regime is BULL_STRONG and Asset is ${reasoning.regime}. Counter-trend shorting prohibited.`,
                p,
                w,
                ctx,
                reasoning
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
+         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
+         if (reasoning.regime === "RANGE") {
+            const hasExplosiveRvol = p.rvol >= 2.0;
+            const hasDirectionalMomentum = p.adx >= 22 && p.di_minus > p.di_plus;
+            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
+               addLog(`🛡️ [DEAD CHOP] تم منع صفقة SHORT على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية هابطة (ADX >= 22 مع DI- > DI+).`, "warn");
+               logRejectedSignal({
+                  symbol,
+                  timeframe: "15m",
+                  direction: "SHORT",
+                  signal_score: ss,
+                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
+                  p,
+                  w,
+                  ctx,
+                  reasoning
+               });
+               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            }
          }
 
          apexPredatorStats.acceptedShorts++;
@@ -979,20 +935,6 @@ async function scoreEntry(symbol: string, ctx: any) {
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
-
-   // Execution Filter Guard: applies to all entry and re-entry paths
-   if (decision.signal === "LONG" || decision.signal === "SHORT") {
-      const execFilter = evaluateExecutionFilter(decision.signal, ctx?.regime, reasoning?.regime, {
-         hourUtc: new Date().getUTCHours(),
-         rvol: p?.rvol,
-         adx: p?.adx
-      });
-      if (execFilter.blocked) {
-         addLog(`🛡️ [EXECUTION FILTER GUARD] تم رفض تنفيذ صفقة ${decision.signal} على ${symbol}: ${execFilter.reason}`, "warn");
-         return;
-      }
-   }
-
    const isPullback = setupType === "PULLBACK_SNIPER";
    const riskAmt = virtualBalance * grade.risk * grade.mult;
 
@@ -1180,87 +1122,31 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
-   const peakMfe = t.peak_r || profitR;
-
-   // --- TIER-1 GIVEBACK PROTECTION (Works before and after TP1) ---
-   // FEATURE FLAG: Disabled in production to allow trades like RAYSOL to breathe. Telemetry preserved.
-   if (ENABLE_PRE_TP1_GIVEBACK_EXIT && peakMfe >= 0.55 && (peakMfe - profitR) >= 0.25) {
-      closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-      return;
-   }
-   // -------------------------------------------------------------
-
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
       if (profitR >= TP1_R) {
          closePart(t, "A", t.part_a);
-         // Move SL to Entry + 0.30R (Base Profit Floor: secures +0.30R floor on remaining 60%)
-         const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-         t.sl = baseFloorSl;
+         // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لقاع حماية الأرباح +0.30R (حماية الـ 60% المتبقية)`, 'success');
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
+         closePart(t, "A", t.part_a);
+         t.sl = t.entry;
+         t.a_closed = true;
+         t.be_done = true;
+         addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
       }
-      // Note: Pre-TP1 profit protection / breakeven moves before +0.75R (e.g. at +0.35R) are DISABLED.
-      // Pre-TP1 allows only Initial Stop + Early Structural Invalidation.
    }
 
-   // 2. PROFIT EXPANSION (TP2: +1.80R) & CONSERVATIVE HYBRID PROTECTIONS
+   // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      const peakMfe = t.peak_r || profitR;
-
-      // Base Profit Floor Guarantee: Ensure stop is NEVER worse than +0.30R
-      const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-      if (t.direction === "LONG") {
-         t.sl = Math.max(t.sl, baseFloorSl);
-      } else {
-         t.sl = Math.min(t.sl, baseFloorSl);
-      }
-
-      // Feature Flag: MFE Milestones (+1.00R -> +0.50R, +1.50R -> +0.90R)
-      // Isolated behind feature flag (default false) to test separately against Base +0.30R floor
-      if (ENABLE_MFE_MILESTONE_STOPS) {
-         // Milestone 1: At +1.00R MFE -> Advance SL to +0.50R
-         const targetSl50 = t.direction === "LONG" ? t.entry + (slDist * 0.50) : t.entry - (slDist * 0.50);
-         if (peakMfe >= 1.00 && !t.milestone_1r_locked) {
-            if (t.direction === "LONG" ? t.sl < targetSl50 : t.sl > targetSl50) {
-               t.sl = targetSl50;
-               t.milestone_1r_locked = true;
-               addLog(`🛡️ [MILESTONE 1] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.50R رابحة`, 'info');
-            }
-         }
-
-         // Milestone 2: At +1.50R MFE -> Advance SL to +0.90R
-         const targetSl90 = t.direction === "LONG" ? t.entry + (slDist * 0.90) : t.entry - (slDist * 0.90);
-         if (peakMfe >= 1.50 && !t.milestone_1_5r_locked) {
-            if (t.direction === "LONG" ? t.sl < targetSl90 : t.sl > targetSl90) {
-               t.sl = targetSl90;
-               t.milestone_1_5r_locked = true;
-               addLog(`🛡️ [MILESTONE 2] ${t.symbol}: وصول MFE إلى +${peakMfe.toFixed(2)}R | تم رفع الوقف وتأمين +0.90R رابحة`, 'info');
-            }
-         }
-      }
-
-      // Feature Flag: Dynamic Giveback Protection (MFE >= +1.15R && giveback >= 0.35R)
-      // Isolated behind feature flag (default false) to prevent choking runners like RAVE
-      if (ENABLE_POST_TP1_GIVEBACK_EXIT && peakMfe >= 1.15) {
-         const givebackDecay = peakMfe - profitR;
-         const givebackThreshold = 0.35;
-         if (givebackDecay >= givebackThreshold) {
-            addLog(`🛡️ [GIVEBACK PROTECT] ${t.symbol}: تراجع ${givebackDecay.toFixed(2)}R من قمة +${peakMfe.toFixed(2)}R | إغلاق وتأمين الأرباح المتبقية عند +${profitR.toFixed(2)}R`, 'warn');
-            closeTradeFull(t, `Giveback Protected Exit (+${profitR.toFixed(2)}R)`);
-            return;
-         }
-      }
-
       if (profitR >= TP2_R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
-         // Lock in TP1 level as floor profit (+0.75R)
-         const targetSlTp1 = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         if (t.direction === "LONG" ? t.sl < targetSlTp1 : t.sl > targetSlTp1) {
-            t.sl = targetSlTp1;
-         }
+         // Lock in TP1 level as floor profit
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
          addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
@@ -1268,25 +1154,10 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // --- MOMENTUM STAGNATION CUT ---
-   const entryMs = typeof t.entryTime === "number" ? t.entryTime : new Date(t.entryTime).getTime();
-   const nowMs = p.time ? (typeof p.time === "number" ? p.time : new Date(p.time).getTime()) : Date.now();
-   const tradeAgeMinutes = (nowMs - entryMs) / 60000;
-   const isUnderEma = t.direction === "LONG" ? price < p.ema21 : price > p.ema21;
-   if (tradeAgeMinutes >= 35 && (t.peak_r || profitR) <= 0.15 && isUnderEma && profitR <= 0.0) {
-       closeTradeFull(t, "Momentum Stagnation Cut");
-       return;
-   }
-   // -------------------------------
-
    // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
    if (t.b_closed && !t.c_closed) {
-      const baseFloorSl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-      if (t.direction === "LONG") { 
-         t.sl = Math.max(t.sl, price - trailDist, baseFloorSl); 
-      } else { 
-         t.sl = Math.min(t.sl, price + trailDist, baseFloorSl); 
-      }
+      if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
+      else { t.sl = Math.min(t.sl, price + trailDist); }
 
       if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
@@ -1299,14 +1170,14 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 4. SMART EARLY LOSS MITIGATION
    // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
-   if (!t.a_closed && profitR <= -0.40) {
+   if (!t.a_closed && profitR < -0.40) {
       const c = p.klines;
       const recentCloses = c.slice(-2).map((k: any) => k.close);
       const isBreakingEMA = t.direction === "LONG" 
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      if (isBreakingEMA) {
+      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
          addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
          closeTradeFull(t, "Early Invalidation");
          return;

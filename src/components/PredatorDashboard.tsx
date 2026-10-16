@@ -491,7 +491,7 @@ export const PredatorDashboard: React.FC = () => {
                         <div>
                            <span className="text-sm text-blue-400 font-bold block mb-1">🤖 وضع العبقرية (Genius Mode)</span>
                            <span className="text-[11px] text-slate-400 block leading-relaxed">
-                               يحد من الصفقات الخاسرة برفع معايير الدخول (فقط 🥈 أو 💎)، يسرّع تأمين الصفقة (Breakeven) عند 0.6R بدلاً من 1R، ويفلتر الأسواق المتقلبة.
+                               يحد من الصفقات الخاسرة برفع معايير الدخول (فقط 🥈 أو 💎)، مع تأمين الصفقة وقاع الأرباح عند +0.30R بعد تحقيق الهدف الأول (+0.75R)، وفلترة الأسواق المتقلبة.
                            </span>
                         </div>
                     </label>

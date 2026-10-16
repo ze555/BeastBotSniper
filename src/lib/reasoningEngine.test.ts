@@ -351,6 +351,94 @@ console.log("=======================================================\n");
    assert("Test 12: Liquidity data is strictly 'unavailable'", loc.liquidityData === "unavailable");
 }
 
+// ----------------------------------------------------------------------------
+// Test 13: BTC Strong Bull Short Blocker
+// ----------------------------------------------------------------------------
+{
+   const mockPrice = { price: 100, atr14: 1.0, rvol: 1.8, taker: 0.44, rsi: 40, adx: 25, di_plus: 15, di_minus: 30, klines: [{ open: 101, high: 101, low: 99, close: 99.5 }] };
+   const mockWhale = { p_chg: -0.005, oi_chg: 0.010, slope15: -210, slope5: -70, slope4h: -500, cvd_mixed: false };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const flow = interpretFlow(mockPrice, mockWhale);
+   const timing = evaluateTimingGate("SHORT", mockPrice, mockWhale, loc, flow);
+   const scenario = { primary: { type: "BREAKOUT_SHORT" as const, state: "WAITING" as const, bias: "SHORT" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
+   
+   // BTC is BULL_STRONG and Asset is TREND_UP
+   const conf1 = checkConfirmation("TREND_UP", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_STRONG" });
+   assert("Test 13a: SHORT blocked when BTC is BULL_STRONG and Asset is TREND_UP", conf1.isConfirmed === false);
+   assert("Test 13b: Reason mentions BTC Strong Bull Blocker", conf1.reason.includes("BTC Strong Bull Blocker"));
+
+   // BTC is BULL_STRONG and Asset is TRANSITION
+   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_STRONG" });
+   assert("Test 13c: SHORT blocked when BTC is BULL_STRONG and Asset is TRANSITION", conf2.isConfirmed === false);
+}
+
+// ----------------------------------------------------------------------------
+// Test 14: BTC Weak Bull Long Blocker
+// ----------------------------------------------------------------------------
+{
+   const mockPrice = { price: 100, atr14: 1.0, rvol: 1.8, taker: 0.58, rsi: 55, adx: 25, di_plus: 30, di_minus: 15, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 99, high: 101, low: 99, close: 100.5 }] };
+   const mockWhale = { p_chg: 0.005, oi_chg: 0.010, slope15: 210, slope5: 70, slope4h: 500, cvd_mixed: false };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const flow = interpretFlow(mockPrice, mockWhale);
+   const timing = evaluateTimingGate("LONG", mockPrice, mockWhale, loc, flow);
+   const scenario = { primary: { type: "BREAKOUT_LONG" as const, state: "WAITING" as const, bias: "LONG" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
+
+   // BTC is BULL_WEAK and Asset is TREND_DOWN
+   const conf1 = checkConfirmation("TREND_DOWN", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BULL_WEAK" });
+   assert("Test 14a: LONG blocked when BTC is BULL_WEAK and Asset is TREND_DOWN", conf1.isConfirmed === false);
+   assert("Test 14b: Reason mentions BTC Weak Bull Blocker", conf1.reason.includes("BTC Weak Bull Blocker"));
+
+   // BTC is BULL_WEAK and Asset is TRANSITION
+   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BULL_WEAK" });
+   assert("Test 14c: LONG blocked when BTC is BULL_WEAK and Asset is TRANSITION", conf2.isConfirmed === false);
+}
+
+// ----------------------------------------------------------------------------
+// Test 15: RANGE Long Trap Blocker
+// ----------------------------------------------------------------------------
+{
+   const mockPrice = { price: 100, atr14: 1.0, rvol: 2.5, taker: 0.60, rsi: 56, adx: 28, di_plus: 32, di_minus: 12, ema50: 98, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 99, high: 101, low: 99, close: 100.5 }] };
+   const mockWhale = { p_chg: 0.005, oi_chg: 0.010, slope15: 210, slope5: 70, slope4h: 500, cvd_mixed: false };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const flow = interpretFlow(mockPrice, mockWhale);
+   const timing = evaluateTimingGate("LONG", mockPrice, mockWhale, loc, flow);
+   const scenario = { primary: { type: "BREAKOUT_LONG" as const, state: "WAITING" as const, bias: "LONG" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
+
+   // Asset is RANGE while BTC is BULL_STRONG
+   const conf1 = checkConfirmation("RANGE", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BULL_STRONG" });
+   assert("Test 15a: LONG in RANGE blocked when BTC is BULL_STRONG", conf1.isConfirmed === false);
+   assert("Test 15b: Reason mentions RANGE Long Trap Blocker", conf1.reason.includes("RANGE Long Trap Blocker"));
+
+   // Asset is RANGE while BTC is BULL_WEAK
+   const conf2 = checkConfirmation("RANGE", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BULL_WEAK" });
+   assert("Test 15c: LONG in RANGE blocked when BTC is BULL_WEAK", conf2.isConfirmed === false);
+}
+
+// ----------------------------------------------------------------------------
+// Test 16: Dead Chop Filter in RANGE
+// ----------------------------------------------------------------------------
+{
+   const mockWhale = { p_chg: 0.005, oi_chg: 0.010, slope15: 210, slope5: 70, slope4h: 500, cvd_mixed: false };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const scenario = { primary: { type: "BREAKOUT_LONG" as const, state: "WAITING" as const, bias: "LONG" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
+
+   // In RANGE with weak RVOL (1.2 < 2.0)
+   const weakRvolPrice = { price: 100, atr14: 1.0, rvol: 1.2, taker: 0.58, rsi: 55, adx: 25, di_plus: 30, di_minus: 12, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 99, high: 101, low: 99, close: 100.5 }] };
+   const flow1 = interpretFlow(weakRvolPrice, mockWhale);
+   const timing1 = evaluateTimingGate("LONG", weakRvolPrice, mockWhale, loc, flow1);
+   const conf1 = checkConfirmation("RANGE", flow1, loc, scenario, timing1, weakRvolPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "RANGING" });
+   assert("Test 16a: RANGE trade with weak RVOL is blocked by Dead Chop filter", conf1.isConfirmed === false);
+   assert("Test 16b: Reason mentions Dead Chop Filter and Explosive RVOL", conf1.reason.includes("Dead Chop Filter") && conf1.reason.includes("Explosive RVOL"));
+
+   // In RANGE with weak ADX (15 < 22)
+   const weakAdxPrice = { price: 100, atr14: 1.0, rvol: 2.2, taker: 0.58, rsi: 55, adx: 15, di_plus: 30, di_minus: 12, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 99, high: 101, low: 99, close: 100.5 }] };
+   const flow2 = interpretFlow(weakAdxPrice, mockWhale);
+   const timing2 = evaluateTimingGate("LONG", weakAdxPrice, mockWhale, loc, flow2);
+   const conf2 = checkConfirmation("RANGE", flow2, loc, scenario, timing2, weakAdxPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "RANGING" });
+   assert("Test 16c: RANGE trade with weak ADX is blocked by Dead Chop filter", conf2.isConfirmed === false);
+   assert("Test 16d: Reason mentions Directional strength ADX", conf2.reason.includes("Directional strength ADX"));
+}
+
 console.log("\n=======================================================");
 console.log(`📊 TIMING GATE TEST SUITE SUMMARY: ${passedCount} PASSED | ${failedCount} FAILED`);
 console.log("=======================================================\n");

@@ -168,15 +168,12 @@ export function detectMarketRegime(ctx: any, p: any): MarketRegimeType {
       return "TREND_UP";
    }
    if (assetBearAlign && p.adx > 25 && p.price < p.ema21) {
-      if (ctx?.regime === "BULL_STRONG" || ctx?.regime?.includes("BULL_STRONG")) {
-         return "TRANSITION";
-      }
       return "TREND_DOWN";
    }
 
    const structureDivergence = (p.bull_align && p.LH_LL) || (p.bear_align && p.HH_HL);
    const maCompression = Math.abs(p.ema50 - p.ema200) / (p.ema200 || 1) < 0.008;
-   if (structureDivergence || (maCompression && p.adx < 20)) {
+   if (structureDivergence || (maCompression && p.adx < 22)) {
       return "TRANSITION";
    }
 
@@ -846,7 +843,8 @@ export function checkConfirmation(
    timingGate: TimingGateResult,
    p: any,
    w: any,
-   supportingScore: { sl: number; ss: number }
+   supportingScore: { sl: number; ss: number },
+   ctx?: any
 ): ConfirmationResult {
    const evidence: string[] = [];
    const missingItems: string[] = [];
@@ -859,31 +857,6 @@ export function checkConfirmation(
          reason: "High volatility / violent market environment: New entries prohibited.",
          evidence,
          missingItems: ["Volatility stabilization"]
-      };
-   }
-
-   // 1b. Strict Gate 1b: Dead Range Filter (Pre-breakout vs Dead Range)
-   // Data proof: RANGE entries with RVOL < 1.15 and weak flow have a 93.3% loss rate.
-   if (regime === "RANGE" && ((p.rvol || 1.0) < 1.15 && flow.persistenceScore < 70)) {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Dead Range: Insufficient volume expansion (RVOL: ${(p.rvol || 1.0).toFixed(2)} < 1.15) and weak institutional flow in range environment.`,
-         evidence,
-         missingItems: ["Volume expansion (RVOL >= 1.15) or strong institutional accumulation in range"]
-      };
-   }
-
-   // 1c. Strict Gate 1c: Global Volume Participation Floor
-   // Data proof: Trades entered during volume droughts (e.g. DOGE RVOL 0.05, ETH RVOL 0.57) fail to expand and bleed.
-   // Require minimum RVOL >= 0.75 across all market regimes.
-   if ((p.rvol || 1.0) < 0.75) {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Volume Drought: Market volume is too thin (RVOL: ${(p.rvol || 1.0).toFixed(2)} < 0.75). Entries prohibited without volume participation.`,
-         evidence,
-         missingItems: ["Volume participation (RVOL >= 0.75)"]
       };
    }
 
@@ -907,6 +880,88 @@ export function checkConfirmation(
          evidence: flow.evidenceFor,
          missingItems: ["Fresh long accumulation (OI growth with rising price)"]
       };
+   }
+
+   // --- FORENSIC & BTC MARKET REGIME SAFETY GATES ---
+   const btcRegime = ctx?.regime || "";
+   const bias = scenario.primary.bias;
+
+   // 1. مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي:
+   // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
+   // السبب: حظر محاولات اصطياد القمم المعاكسة للتيار الصاعد القوي لمنع الضرب المتكرر للستوب لوس.
+   if (bias === "SHORT") {
+      if (btcRegime === "BULL_STRONG" && (regime === "TREND_UP" || regime === "TRANSITION")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `BTC Strong Bull Blocker: SHORT prohibited while BTC is BULL_STRONG and Asset is in ${regime} (Counter-trend top hunting trap).`,
+            evidence,
+            missingItems: ["BTC regime cooling down or confirmed structural asset breakdown"]
+         };
+      }
+   }
+
+   // 2. مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف:
+   // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
+   // السبب: حظر الشراء عندما يكون البيتكوين غير قادر على دعم السوق والعملة نفسها تظهر ضعفاً هيكلياً.
+   if (bias === "LONG") {
+      if (btcRegime === "BULL_WEAK" && (regime === "TREND_DOWN" || regime === "TRANSITION")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `BTC Weak Bull Blocker: LONG prohibited while BTC is BULL_WEAK and Asset is in ${regime} (Structural weakness with weak BTC).`,
+            evidence,
+            missingItems: ["BTC strong expansion or asset structure reversal to TREND_UP"]
+         };
+      }
+   }
+
+   // 3. مانع الشراء في النطاق العرضي (فخ السيولة - RANGE Long Trap):
+   // الشرط: حظر صفقات الـ LONG نهائياً إذا كانت العملة في نطاق عرضي (Asset = RANGE) أثناء أي صعود للبيتكوين (BULL_STRONG أو BULL_WEAK).
+   // السبب: أظهرت الدراسة الجنائية أن صفقات الشراء العرضية في هذه الحالة تسحب السيولة نحو البيتكوين وتفشل في الاختراق بنسبة خسارة فادحة.
+   if (bias === "LONG") {
+      if (regime === "RANGE" && (btcRegime === "BULL_STRONG" || btcRegime === "BULL_WEAK")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `RANGE Long Trap Blocker: LONG prohibited in RANGE while BTC is ${btcRegime} (Forensic liquidity drain into BTC fails breakouts).`,
+            evidence,
+            missingItems: ["Asset breakout out of RANGE into TREND_UP"]
+         };
+      }
+   }
+
+   // 4. مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE):
+   // الشرط: لمنع الصفقات العرضية الراكدة، يُشترط للدخول في أي صفقة بنظام النطاق العرضي توفر شرطين معاً:
+   // 1. حجم تداول نسبي انفجاري: p?.rvol >= 2.0
+   // 2. قوة اتجاهية صاعدة (للـ LONG) أو هابطة (للـ SHORT): ADX >= 22 مع توافق DI+ > DI- للشراء أو DI- > DI+ للبيع.
+   if (regime === "RANGE") {
+      const rvol = p?.rvol ?? 1.0;
+      const adx = p?.adx ?? 0;
+      const diPlus = p?.di_plus ?? 0;
+      const diMinus = p?.di_minus ?? 0;
+
+      const hasExplosiveRvol = rvol >= 2.0;
+      const hasDirectionalMomentum = bias === "LONG"
+         ? (adx >= 22 && diPlus > diMinus)
+         : bias === "SHORT"
+            ? (adx >= 22 && diMinus > diPlus)
+            : false;
+
+      if (!hasExplosiveRvol || !hasDirectionalMomentum) {
+         const missingChopConditions: string[] = [];
+         if (!hasExplosiveRvol) missingChopConditions.push(`Explosive RVOL >= 2.0 (current: ${rvol.toFixed(2)})`);
+         if (!hasDirectionalMomentum) {
+            missingChopConditions.push(`Directional strength ADX >= 22 with ${bias === "LONG" ? "DI+ > DI-" : "DI- > DI+"} (current: ADX ${adx.toFixed(1)}, DI+ ${diPlus.toFixed(1)}, DI- ${diMinus.toFixed(1)})`);
+         }
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Dead Chop Filter: RANGE trade prohibited without explosive volume AND directional momentum. Missing: ${missingChopConditions.join(", ")}`,
+            evidence,
+            missingItems: missingChopConditions
+         };
+      }
    }
 
    // 4. Strict Gate 4: Timing Gate verification
@@ -1056,7 +1111,7 @@ export function evaluateSymbolReasoning(
    const timingGate = evaluateTimingGate(preferredBias, p, w, location, flow);
 
    // 6. Confirmation
-   const confirmation = checkConfirmation(regime, flow, location, scenario, timingGate, p, w, supportingScore);
+   const confirmation = checkConfirmation(regime, flow, location, scenario, timingGate, p, w, supportingScore, ctx);
 
    // 7. State Machine Lifecycle
    let lifecycleState: LifecycleState = "OBSERVING";
