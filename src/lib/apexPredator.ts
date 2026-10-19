@@ -715,11 +715,11 @@ async function scoreEntry(symbol: string, ctx: any) {
    // High win-rate filters for 3:1 Genius Mode
    if (geniusMode) {
       // 1. Strict Market Regime filter:
-      if (ctx.regime.includes("BEAR") && !w.asset_strong) {
-         sl = 0; // Don't buy in bear regime unless asset is extremely strong against BTC
+      if (ctx.regime.includes("BEAR")) {
+         sl = 0; // Strict: Don't buy in bear regime
       }
-      if (ctx.regime.includes("BULL") && !w.asset_strong) {
-         ss = 0; // Don't short in bull regime unless asset is clearly collapsing
+      if (ctx.regime.includes("BULL")) {
+         ss = 0; // Strict: Don't short in bull regime
       }
 
       // 2. High-probability RSI Momentum Corridor:
@@ -760,6 +760,23 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
+         // REGIME LOCK: مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market)
+         if (ctx.regime.includes("BEAR")) {
+            addLog(`🛡️ [REGIME LOCK] تم منع صفقة LONG على ${symbol} لأن نظام البيتكوين هابط (${ctx.regime}).`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "LONG",
+               signal_score: sl,
+               rejection_reason: `Strict Bear Regime: All LONG trades prohibited during BTC ${ctx.regime} market.`,
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          // SAFETY GATE 2: مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف
          // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
          if (ctx.regime === "BULL_WEAK" && (reasoning.regime === "TREND_DOWN" || reasoning.regime === "TRANSITION")) {
@@ -841,6 +858,23 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
+         // REGIME LOCK: مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market)
+         if (ctx.regime.includes("BULL")) {
+            addLog(`🛡️ [REGIME LOCK] تم منع صفقة SHORT على ${symbol} لأن نظام البيتكوين صاعد (${ctx.regime}).`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "SHORT",
+               signal_score: ss,
+               rejection_reason: `Strict Bull Regime: All SHORT trades prohibited during BTC ${ctx.regime} market.`,
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          // SAFETY GATE 1: مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي
          // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
          if (ctx.regime === "BULL_STRONG" && (reasoning.regime === "TREND_UP" || reasoning.regime === "TRANSITION")) {

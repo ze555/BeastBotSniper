@@ -352,7 +352,7 @@ console.log("=======================================================\n");
 }
 
 // ----------------------------------------------------------------------------
-// Test 13: BTC Strong Bull Short Blocker
+// Test 13: Strict Bull Regime - All SHORT Trades Prohibited
 // ----------------------------------------------------------------------------
 {
    const mockPrice = { price: 100, atr14: 1.0, rvol: 1.8, taker: 0.44, rsi: 40, adx: 25, di_plus: 15, di_minus: 30, klines: [{ open: 101, high: 101, low: 99, close: 99.5 }] };
@@ -362,18 +362,19 @@ console.log("=======================================================\n");
    const timing = evaluateTimingGate("SHORT", mockPrice, mockWhale, loc, flow);
    const scenario = { primary: { type: "BREAKOUT_SHORT" as const, state: "WAITING" as const, bias: "SHORT" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
    
-   // BTC is BULL_STRONG and Asset is TREND_UP
+   // BTC is BULL_STRONG
    const conf1 = checkConfirmation("TREND_UP", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_STRONG" });
-   assert("Test 13a: SHORT blocked when BTC is BULL_STRONG and Asset is TREND_UP", conf1.isConfirmed === false);
-   assert("Test 13b: Reason mentions BTC Strong Bull Blocker", conf1.reason.includes("BTC Strong Bull Blocker"));
+   assert("Test 13a: SHORT blocked when BTC is BULL_STRONG", conf1.isConfirmed === false);
+   assert("Test 13b: Reason mentions Strict Bull Regime", conf1.reason.includes("Strict Bull Regime"));
 
-   // BTC is BULL_STRONG and Asset is TRANSITION
-   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_STRONG" });
-   assert("Test 13c: SHORT blocked when BTC is BULL_STRONG and Asset is TRANSITION", conf2.isConfirmed === false);
+   // BTC is BULL_WEAK
+   const conf2 = checkConfirmation("TREND_DOWN", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_WEAK" });
+   assert("Test 13c: SHORT blocked when BTC is BULL_WEAK", conf2.isConfirmed === false);
+   assert("Test 13d: Reason mentions Strict Bull Regime", conf2.reason.includes("Strict Bull Regime"));
 }
 
 // ----------------------------------------------------------------------------
-// Test 14: BTC Weak Bull Long Blocker
+// Test 14: Strict Bear Regime - All LONG Trades Prohibited
 // ----------------------------------------------------------------------------
 {
    const mockPrice = { price: 100, atr14: 1.0, rvol: 1.8, taker: 0.58, rsi: 55, adx: 25, di_plus: 30, di_minus: 15, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 99, high: 101, low: 99, close: 100.5 }] };
@@ -383,14 +384,15 @@ console.log("=======================================================\n");
    const timing = evaluateTimingGate("LONG", mockPrice, mockWhale, loc, flow);
    const scenario = { primary: { type: "BREAKOUT_LONG" as const, state: "WAITING" as const, bias: "LONG" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
 
-   // BTC is BULL_WEAK and Asset is TREND_DOWN
-   const conf1 = checkConfirmation("TREND_DOWN", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BULL_WEAK" });
-   assert("Test 14a: LONG blocked when BTC is BULL_WEAK and Asset is TREND_DOWN", conf1.isConfirmed === false);
-   assert("Test 14b: Reason mentions BTC Weak Bull Blocker", conf1.reason.includes("BTC Weak Bull Blocker"));
+   // BTC is BEAR_STRONG
+   const conf1 = checkConfirmation("TREND_UP", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_STRONG" });
+   assert("Test 14a: LONG blocked when BTC is BEAR_STRONG", conf1.isConfirmed === false);
+   assert("Test 14b: Reason mentions Strict Bear Regime", conf1.reason.includes("Strict Bear Regime"));
 
-   // BTC is BULL_WEAK and Asset is TRANSITION
-   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BULL_WEAK" });
-   assert("Test 14c: LONG blocked when BTC is BULL_WEAK and Asset is TRANSITION", conf2.isConfirmed === false);
+   // BTC is BEAR_WEAK
+   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
+   assert("Test 14c: LONG blocked when BTC is BEAR_WEAK", conf2.isConfirmed === false);
+   assert("Test 14d: Reason mentions Strict Bear Regime", conf2.reason.includes("Strict Bear Regime"));
 }
 
 // ----------------------------------------------------------------------------

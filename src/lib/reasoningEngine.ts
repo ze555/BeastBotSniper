@@ -886,25 +886,32 @@ export function checkConfirmation(
    const btcRegime = ctx?.regime || "";
    const bias = scenario.primary.bias;
 
-   // 1. مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي:
-   // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
-   // السبب: حظر محاولات اصطياد القمم المعاكسة للتيار الصاعد القوي لمنع الضرب المتكرر للستوب لوس.
+   // 1. مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market - BULL_STRONG أو BULL_WEAK):
+   // حظر محاولات السباحة ضد التيار الصاعد للبيتكوين لمنع الضرب المتكرر للستوب لوس.
    if (bias === "SHORT") {
-      if (btcRegime === "BULL_STRONG" && (regime === "TREND_UP" || regime === "TRANSITION")) {
+      if (btcRegime.includes("BULL")) {
          return {
             isConfirmed: false,
             confirmedSignal: "WAIT",
-            reason: `BTC Strong Bull Blocker: SHORT prohibited while BTC is BULL_STRONG and Asset is in ${regime} (Counter-trend top hunting trap).`,
+            reason: `Strict Bull Regime: All SHORT trades are strictly prohibited during BTC ${btcRegime} market.`,
             evidence,
-            missingItems: ["BTC regime cooling down or confirmed structural asset breakdown"]
+            missingItems: ["BTC transition into neutral or bear market"]
          };
       }
    }
 
-   // 2. مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف:
-   // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
-   // السبب: حظر الشراء عندما يكون البيتكوين غير قادر على دعم السوق والعملة نفسها تظهر ضعفاً هيكلياً.
+   // 2. مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market - BEAR_STRONG أو BEAR_WEAK):
+   // حظر الشراء عندما يكون البيتكوين هابطاً لتفادي السقوط في فخاخ الهبوط المستمر.
    if (bias === "LONG") {
+      if (btcRegime.includes("BEAR")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Strict Bear Regime: All LONG trades are strictly prohibited during BTC ${btcRegime} market.`,
+            evidence,
+            missingItems: ["BTC transition into neutral or bull market"]
+         };
+      }
       if (btcRegime === "BULL_WEAK" && (regime === "TREND_DOWN" || regime === "TRANSITION")) {
          return {
             isConfirmed: false,
