@@ -4,6 +4,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:safety": "node scripts/run-safety-tests.mjs",
+    "test:historical": "node scripts/historical-comparison.cjs --self-test",
+    "replay:allocation": "node scripts/historical-comparison.cjs",
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --target=node18 --outfile=dist/server.cjs --format=cjs --packages=external",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",

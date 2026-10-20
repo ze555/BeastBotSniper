@@ -123,34 +123,77 @@ console.log("=======================================================\n");
 // Test 3: Breakout Waiting for Retest / Successful Retest
 // ----------------------------------------------------------------------------
 {
-   // Price broke 100.0, pulled back to 100.2 with lower rejection wick
+   // A prior candle closed above 100.0; the current candle touched 100.0
+   // and closed back above it.
    const mockPrice = {
-      price: 100.2,
-      atr14: 1.0,
-      rvol: 1.1,
-      taker: 0.53,
-      rsi: 54,
-      klines: [{ open: 100.4, high: 100.5, low: 99.9, close: 100.2 }] // lower wick = 0.3, body = 0.2
+      price: 100.2, atr14: 1.0, rvol: 1.1, taker: 0.53, rsi: 54,
+      klines: [
+         { open: 99.5, high: 100.0, low: 99.2, close: 99.8 },
+         { open: 99.8, high: 101.5, low: 99.7, close: 101.0 },
+         { open: 100.4, high: 100.8, low: 100.0, close: 100.2 }
+      ]
    };
-   const mockWhale = { slope15: 80, slope5: 30, slope4h: 200, p_chg: 0.001, oi_chg: 0.002, cvd_mixed: false };
-   const loc = {
-      nearestResistance: 100.0,
-      nearestSupport: 96.0,
-      rangeHigh: 104.0,
-      rangeLow: 95.0,
-      nearResistance: false,
-      nearSupport: false,
-      distanceToResistancePct: -0.002,
-      distanceToSupportPct: 0.042,
-      upperLiquidityTarget: 104.2,
-      lowerLiquidityTarget: 94.8,
-      liquidityData: "unavailable" as const
-   };
+   const mockWhale = { slope15: 80, slope5: 30, slope4h: 200, p_chg: 0.003, oi_chg: 0.004, cvd_mixed: false };
+   const loc = evaluateLocation(mockPrice);
    const flow = interpretFlow(mockPrice, mockWhale);
    const timing = evaluateTimingGate("LONG", mockPrice, mockWhale, loc, flow);
-
    assert("Test 3: Retest holding above former resistance passes", timing.passed === true);
    assert("Test 3b: isRetestCandidate is marked true", timing.isRetestCandidate === true);
+}
+
+// Mirrored short retest: historical close below support, later touch, close below.
+{
+   const mockPrice = { price: 99.8, atr14: 1.0, rvol: 1.1, taker: 0.47, rsi: 46, klines: [
+      { open: 100.5, high: 101.0, low: 100.0, close: 100.2 },
+      { open: 100.2, high: 100.3, low: 98.5, close: 99.0 },
+      { open: 99.6, high: 100.0, low: 99.2, close: 99.8 }
+   ] };
+   const whale = { slope15: -80, slope5: -30, slope4h: -200, p_chg: -0.003, oi_chg: 0.004, cvd_mixed: false };
+   const loc = evaluateLocation(mockPrice);
+   const flow = interpretFlow(mockPrice, whale);
+   const timing = evaluateTimingGate("SHORT", mockPrice, whale, loc, flow);
+   assert("Test 3c: Mirrored short retest requires and accepts historical touch/close", timing.passed === true && timing.state === "CONFIRMED");
+}
+
+// Retest regressions: proximity alone, missing touch, wrong-side close, and
+// a previously invalidated breakout must all be rejected in both directions.
+for (const direction of ["LONG", "SHORT"] as const) {
+   const sign = direction === "LONG" ? 1 : -1;
+   const baseCandles = [
+      { open: 99.5, high: 100, low: 99.2, close: 99.8 },
+      { open: 99.8, high: 101.5, low: 99.7, close: 101 },
+      { open: 100.4, high: 100.8, low: 100, close: 100.2 }
+   ];
+   const mirror = (candles: typeof baseCandles) => sign === 1 ? candles : candles.map(c => ({
+      open: 200 - c.open, close: 200 - c.close, high: 200 - c.low, low: 200 - c.high
+   }));
+   const evaluate = (candles: typeof baseCandles) => {
+      const klines = mirror(candles);
+      const p = { price: klines[klines.length - 1].close, atr14: 1, rvol: 1.1,
+         taker: sign === 1 ? 0.53 : 0.47, rsi: 50, klines };
+      const w = { slope15: sign * 80, slope5: sign * 30, slope4h: sign * 200,
+         p_chg: sign * 0.003, oi_chg: 0.004, cvd_mixed: false };
+      return evaluateTimingGate(direction, p, w, evaluateLocation(p), interpretFlow(p, w));
+   };
+   assert(`${direction}: no historical breakout cannot confirm a wick retest`,
+      !evaluate([baseCandles[0], baseCandles[0], baseCandles[2]]).passed);
+   assert(`${direction}: proximity without an actual touch is rejected`,
+      !evaluate([baseCandles[0], baseCandles[1], { ...baseCandles[2], low: 100.1 }]).passed);
+   assert(`${direction}: retest close on wrong side is rejected`,
+      !evaluate([baseCandles[0], baseCandles[1], { ...baseCandles[2], close: 99.9 }]).passed);
+   assert(`${direction}: intervening invalidation cancels retest eligibility`,
+      !evaluate([baseCandles[0], baseCandles[1], { open: 100.2, high: 100.3, low: 99, close: 99.5 }, baseCandles[2]]).passed);
+   assert(`${direction}: historical indices remain correct beyond the 30-candle window`,
+      evaluate([...Array.from({ length: 40 }, () => ({ ...baseCandles[0] })), ...baseCandles]).passed);
+}
+
+// ATR spike uses an independent prior baseline and fails safe when absent.
+{
+   const base = { regime: "NEUTRAL", tradeable: true };
+   const p = { price: 100, ema50: 99, ema200: 95, ema21: 99, HH_HL: true, LH_LL: false, adx: 30, rvol: 3, atr14: 2, atr20: 1, atrBaseline: 1, bull_align: true, bear_align: false };
+   assert("Test 3d: ATR spike uses independent baseline", detectMarketRegime(base, p) === "HIGH_VOLATILITY");
+   const { atrBaseline, ...withoutBaseline } = p;
+   assert("Test 3e: Missing ATR baseline fails safe", detectMarketRegime(base, withoutBaseline) !== "HIGH_VOLATILITY");
 }
 
 // ----------------------------------------------------------------------------

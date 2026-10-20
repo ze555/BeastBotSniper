@@ -89,6 +89,9 @@ export interface LocationAnalysis {
    upperLiquidityTarget: number;
    lowerLiquidityTarget: number;
    liquidityData: "unavailable"; // Strict rule: No fake liquidation data
+   /** Latest historical candle that closed beyond the level, excluding the current candle. */
+   historicalResistanceBreakout?: { index: number; level: number };
+   historicalSupportBreakdown?: { index: number; level: number };
 }
 
 export interface TimingGateResult {
@@ -147,7 +150,8 @@ export interface ReasoningResult {
 // Contextual environment classifier. Does NOT give buy/sell signals.
 // ----------------------------------------------------------------------------
 export function detectMarketRegime(ctx: any, p: any): MarketRegimeType {
-   if (ctx.regime === "VIOLENT" || ctx.tradeable === false || (p.rvol > 2.8 && p.atr14 > p.atr20 * 1.6)) {
+   const hasVolatilitySpike = Number.isFinite(p.atr14) && Number.isFinite(p.atrBaseline) && p.atrBaseline > 0 && p.atr14 > p.atrBaseline * 1.6;
+   if (ctx.regime === "VIOLENT" || ctx.tradeable === false || (p.rvol > 2.8 && hasVolatilitySpike)) {
       return "HIGH_VOLATILITY";
    }
 
@@ -404,6 +408,29 @@ export function evaluateLocation(p: any): LocationAnalysis {
    const nearestResistance = Math.max(...priorHighs);
    const nearestSupport = Math.min(...priorLows);
 
+   // A retest must reference the level that was broken, not the breakout
+   // candle's new high/low. Only closed candles before the current candle can
+   // establish a historical breakout/breakdown.
+   let historicalResistanceBreakout: { index: number; level: number } | undefined;
+   let historicalSupportBreakdown: { index: number; level: number } | undefined;
+   const recentOffset = c.length - lookback;
+   for (let i = 1; i < recentSlice.length - 1; i += 1) {
+      const priorHigh = Math.max(...highs.slice(0, i));
+      const priorLow = Math.min(...lows.slice(0, i));
+      if (recentSlice[i].close > priorHigh) {
+         historicalResistanceBreakout = { index: recentOffset + i, level: priorHigh };
+      } else if (historicalResistanceBreakout && recentSlice[i].close < historicalResistanceBreakout.level) {
+         // The former breakout failed before the current candle; do not revive it as a retest.
+         historicalResistanceBreakout = undefined;
+      }
+      if (recentSlice[i].close < priorLow) {
+         historicalSupportBreakdown = { index: recentOffset + i, level: priorLow };
+      } else if (historicalSupportBreakdown && recentSlice[i].close > historicalSupportBreakdown.level) {
+         // The former breakdown failed before the current candle; do not revive it as a retest.
+         historicalSupportBreakdown = undefined;
+      }
+   }
+
    const distanceToResistancePct = (nearestResistance - price) / (price || 1);
    const distanceToSupportPct = (price - nearestSupport) / (price || 1);
 
@@ -424,7 +451,9 @@ export function evaluateLocation(p: any): LocationAnalysis {
       nearSupport,
       upperLiquidityTarget: rangeHigh * 1.002,
       lowerLiquidityTarget: rangeLow * 0.998,
-      liquidityData: "unavailable"
+      liquidityData: "unavailable",
+      historicalResistanceBreakout,
+      historicalSupportBreakdown
    };
 }
 
@@ -504,10 +533,19 @@ export function evaluateTimingGate(
          };
       }
 
-      // 3. Waiting for Retest
-      // If price previously broke out and is now pulling back within 0.35% of level with holding action
-      if (Math.abs(price - level) / level <= 0.0035 && lowerWick > body * 0.5 && p.rsi <= 65) {
-         evidence.push("Orderflow holding above former resistance (retest in progress)");
+      // 3. Waiting for Retest. A valid retest requires a historical candle
+      // that CLOSED above resistance, then a later candle that actually touched
+      // that level and CLOSED back on the long side. Proximity or a wick alone
+      // is not confirmation.
+      const historicalBreakout = loc.historicalResistanceBreakout;
+      const retestLevel = historicalBreakout?.level ?? level;
+      const retestTouch = historicalBreakout && lastCandle &&
+         lastCandle.low <= retestLevel && lastCandle.high >= retestLevel &&
+         lastCandle.close >= retestLevel && c.length - 1 > historicalBreakout.index;
+      const bullishRetestFlow = ["LONG_BUILDUP", "BUYING_PRESSURE"].includes(flow.state) && flow.persistenceState !== "CONFLICTED";
+      if (retestTouch && p.rsi <= 65 && bullishRetestFlow) {
+         evidence.push("Historical breakout level was touched and defended by a closing candle");
+         evidence.push(`Directional flow confirmed: ${flow.state}`);
          return {
             state: "CONFIRMED",
             passed: true,
@@ -606,8 +644,15 @@ export function evaluateTimingGate(
       };
    }
 
-   if (Math.abs(price - level) / level <= 0.0035 && upperWick > body * 0.5 && p.rsi >= 35) {
-      evidence.push("Orderflow holding below former support (retest in progress)");
+   const historicalBreakdown = loc.historicalSupportBreakdown;
+   const retestLevel = historicalBreakdown?.level ?? level;
+   const retestTouch = historicalBreakdown && lastCandle &&
+      lastCandle.high >= retestLevel && lastCandle.low <= retestLevel &&
+      lastCandle.close <= retestLevel && c.length - 1 > historicalBreakdown.index;
+   const bearishRetestFlow = ["SHORT_BUILDUP", "SELLING_PRESSURE"].includes(flow.state) && flow.persistenceState !== "CONFLICTED";
+   if (retestTouch && p.rsi >= 35 && bearishRetestFlow) {
+      evidence.push("Historical breakdown level was touched and rejected by a closing candle");
+      evidence.push(`Directional flow confirmed: ${flow.state}`);
       return {
          state: "CONFIRMED",
          passed: true,
@@ -742,7 +787,7 @@ export function generateScenarios(
       };
    }
 
-   if (regime === "TREND_DOWN" || (flow.state === "SHORT_BUILDUP" && regime !== "TREND_UP")) {
+   if (regime === "TREND_DOWN" || (flow.state === "SHORT_BUILDUP" && (regime as MarketRegimeType) !== "TREND_UP")) {
       if (loc.nearSupport) {
          missingConfirmation.push("Clean 15m candle close clearly below " + loc.nearestSupport.toFixed(4));
          missingConfirmation.push("RVOL > 1.2 confirming breakdown volume");
@@ -971,7 +1016,17 @@ export function checkConfirmation(
       }
    }
 
-   // 4. Strict Gate 4: Timing Gate verification
+   // 4. Strict Gate 4: clearance must be evaluated before timing returns.
+   // A confirmation cannot buy just below resistance or sell just above support,
+   // even when another timing path has already returned WAIT.
+   if (scenario.primary.bias === "LONG" && loc.distanceToResistancePct >= 0 && loc.distanceToResistancePct < 0.0025) {
+      return { isConfirmed: false, confirmedSignal: "WAIT", reason: `Price is within ${(loc.distanceToResistancePct * 100).toFixed(2)}% of major resistance. Insufficient clearance for profitable trade.`, evidence, missingItems: ["Clearance / structural breakout above resistance"] };
+   }
+   if (scenario.primary.bias === "SHORT" && loc.distanceToSupportPct >= 0 && loc.distanceToSupportPct < 0.0025) {
+      return { isConfirmed: false, confirmedSignal: "WAIT", reason: `Price is within ${(loc.distanceToSupportPct * 100).toFixed(2)}% of major support. Insufficient clearance for profitable trade.`, evidence, missingItems: ["Clearance / structural breakdown below support"] };
+   }
+
+   // 5. Strict Gate 5: Timing Gate verification
    if (!timingGate.passed) {
       return {
          isConfirmed: false,
@@ -979,26 +1034,6 @@ export function checkConfirmation(
          reason: `Timing Gate [${timingGate.state}]: ${timingGate.reason}`,
          evidence: timingGate.evidence,
          missingItems: timingGate.missingItems
-      };
-   }
-
-   // 5. Strict Gate 5: Location Awareness & Obstacle Distance
-   if (scenario.primary.bias === "LONG" && loc.distanceToResistancePct < 0.0025 && !timingGate.passed) {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Price is within ${(loc.distanceToResistancePct * 100).toFixed(2)}% of major resistance. Insufficient clearance for profitable trade.`,
-         evidence,
-         missingItems: ["Clearance / structural breakout above resistance"]
-      };
-   }
-   if (scenario.primary.bias === "SHORT" && loc.distanceToSupportPct < 0.0025 && !timingGate.passed) {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Price is within ${(loc.distanceToSupportPct * 100).toFixed(2)}% of major support. Insufficient clearance for profitable trade.`,
-         evidence,
-         missingItems: ["Clearance / structural breakdown below support"]
       };
    }
 
