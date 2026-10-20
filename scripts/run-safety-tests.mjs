@@ -9,6 +9,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'beastbot-tests-'));
 const tests = [
   'src/lib/tradeSafety.test.ts',
   'src/lib/apexPredator.safety.test.ts',
+  'src/lib/executionFilter.test.ts',
   'src/lib/reasoningEngine.test.ts',
   'src/lib/directionDecoupling.test.ts',
   'src/lib/directionStateEngine.test.ts',

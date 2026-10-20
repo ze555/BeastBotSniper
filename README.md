@@ -16,7 +16,7 @@ npm run dev
 
 ## Safety regression checks
 
-Run `npm run test:safety` for the targeted safety tests and compatible reasoning,
+Run `npm run test:safety` for the safety, execution-filter, reasoning,
 direction, and research-logger suites. The integration tests mock market requests;
 the runner isolates research output in a temporary directory. It does not start
 the application or connect to a trading account. `npm run build` only builds assets.
@@ -34,6 +34,8 @@ This is a planning filter, not a promise of realized returns; partial exits and
 stops can realize less. Profit/loss entry halts remain latched until explicit
 reactivation while open positions continue to be managed.
 
-The older `executionFilter.test.ts` is not included in `test:safety`: it imports a
-missing export from `apexPredator` and expects an obsolete interface. This baseline
-issue also prevents a clean full-project `tsc --noEmit`; it is not a passing check.
+Run `npx tsc --noEmit` for the full-project TypeScript check. The execution-filter
+tests import the actual `executionFilter` module and check its documented API,
+including an exhaustive contextual decision matrix. Volume, schedule, and RANGE
+rules remain in their owning entry/reasoning engines rather than being invented
+as arguments to the contextual filter.
