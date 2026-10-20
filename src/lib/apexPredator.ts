@@ -970,7 +970,14 @@ async function scoreEntry(symbol: string, ctx: any) {
 function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
-   const riskAmt = virtualBalance * grade.risk * grade.mult;
+   // Dynamic Risk Sizing based on Market Regime:
+   // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
+   const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
+   const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
+   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   if (regimeRiskMult < 1.0) {
+      addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
+   }
 
    const entryTiming = extractEntryTiming();
    const marketRegimeContext = extractMarketRegimeContext(p, ctx, reasoning);
@@ -1202,18 +1209,44 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 4. SMART EARLY LOSS MITIGATION
-   // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
-   if (!t.a_closed && profitR < -0.40) {
-      const c = p.klines;
+   // 4. SMART CVD & OI EXHAUSTION EXIT (حجز الأرباح عند القمم برصد تراجع CVD و OI)
+   if (profitR >= 0.70) {
+      if (t.direction === "LONG") {
+         const cvdExhaustion = w.slope15 < -100 && w.slope5 < -80;
+         const oiDropping = w.oi_chg < -0.005;
+         if (cvdExhaustion && oiDropping) {
+            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي وتصريف مؤسساتي في CVD/OI.`, 'success');
+            closeTradeFull(t, "CVD/OI Exhaustion Peak");
+            return;
+         }
+      } else if (t.direction === "SHORT") {
+         const cvdExhaustion = w.slope15 > 100 && w.slope5 > 80;
+         const oiDropping = w.oi_chg < -0.005;
+         if (cvdExhaustion && oiDropping) {
+            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانتهاء تغطية الشورتات وانعكاس CVD صعوداً.`, 'success');
+            closeTradeFull(t, "CVD/OI Short Squeeze Peak");
+            return;
+         }
+      }
+   }
+
+   // 5. SMART EARLY LOSS MITIGATION (-0.30R to -0.35R)
+   // إذا تراجعت الصفقة إلى ما دون -0.30R وكُسر الهيكل أو انقلب تدفق الحيتان/CVD، نخرج وقائياً ونوفر 65% إلى 70% من الستوب لوس!
+   if (!t.a_closed && profitR < -0.30) {
+      const c = p.klines || [];
       const recentCloses = c.slice(-2).map((k: any) => k.close);
       const isBreakingEMA = t.direction === "LONG" 
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
-         addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
-         closeTradeFull(t, "Early Invalidation");
+      const orderflowFlipped = t.direction === "LONG"
+         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -150 || (p.taker < 0.46 && p.rsi < 44))
+         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 150 || (p.taker > 0.54 && p.rsi > 56));
+
+      if (isBreakingEMA || orderflowFlipped) {
+         const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
+         addLog(`🛡️ [قص الخسارة المبكر] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
+         closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);
          return;
       }
    }
