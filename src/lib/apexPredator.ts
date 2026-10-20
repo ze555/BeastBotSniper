@@ -1,4 +1,5 @@
 import axios from "axios";
+import { closedCandles, planTargets, TARGET_R, TARGET_WEIGHTS, adverseFlow, exhaustionScore } from "./tradeSafety.js";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
 import {
@@ -19,6 +20,7 @@ let activeTrades: any[] = [];
 let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
+let entryHaltReason: string | null = null;
 let isLoopRunning = false;
 
 // ═══ CONFIGURATION ═══
@@ -31,10 +33,7 @@ let currentBatchIndex = 0;
 let lastWatchlistUpdate = 0;
 
 
-const MIN_RR_REQUIRED = 2.5;
-const TP1_R = 0.75;
-const TP2_R = 1.80;
-const TP3_R = 3.50;
+const [TP1_R, TP2_R, TP3_R] = TARGET_R;
 const MAX_OPEN_TRADES = 3;
 const MAX_DAILY_LOSS = 0.040;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -159,6 +158,7 @@ export function getStats() {
     balance: virtualBalance,
     initialBalance: initialVirtualBalance,
     maxOpenTrades: maxOpenTradesConfig,
+    entryHaltReason,
     haltProfitEnabled,
     haltProfitTarget,
     haltLossEnabled,
@@ -232,7 +232,11 @@ export function setConfig(config: any) {
   if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
   if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
-export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
+export function setActive(val: boolean) {
+   botActive = val;
+   if (val) entryHaltReason = null;
+   addLog(`BOT ACTIVE: ${val}`);
+}
 export function isActive() { return botActive; }
 
 // --- DATA FETCHING ---
@@ -297,10 +301,10 @@ function setCached(cache: Map<string, CacheEntry>, key: string, data: any, ttlMs
    cache.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
-async function fetchKl(symbol: string, interval: string, limit: number) {
+export async function fetchKl(symbol: string, interval: string, limit: number) {
    const cacheKey = `${symbol}:${interval}:${limit}`;
    const cached = getCached<any[]>(klineCache, cacheKey);
-   if (cached) return cached;
+   if (cached) return closedCandles(cached).slice(-limit);
 
    // TTL based on timeframe: 4h cached for 60s, 15m for 20s, 5m for 10s
    let ttl = 10000;
@@ -308,8 +312,9 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
    else if (interval === "15m") ttl = 20000;
    else if (interval === "5m") ttl = 10000;
 
+   const requestedAt = Date.now();
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines`, {
-      params: { symbol, interval, limit },
+      params: { symbol, interval, limit: limit + 1 },
       timeout: 5000
    });
    const parsed = res.data.map((k: any) => ({
@@ -324,8 +329,10 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
       takerSell: parseFloat(k[5]) - parseFloat(k[9]) // volume - taker buy = taker sell
    }));
 
-   setCached(klineCache, cacheKey, parsed, ttl);
-   return parsed;
+   // Never let a cached, still-forming snapshot become "closed" merely as time passes.
+   const confirmed = closedCandles(parsed, requestedAt).slice(-limit);
+   setCached(klineCache, cacheKey, confirmed, ttl);
+   return confirmed;
 }
 
 async function fetchFunding(symbol: string) {
@@ -480,12 +487,14 @@ async function readWhale(symbol: string, btc_chg: number) {
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15
+      asset_strong, c15, c5, slope5, slope15, slope4h
    };
 }
 
 // --- SEC 3: PRICE READER ---
-async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
+export async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
+   kl = closedCandles(kl || []);
+   kl5 = closedCandles(kl5 || []);
    if (!kl || kl.length < 50) {
       throw new Error("Insufficient klines for price reader");
    }
@@ -502,6 +511,8 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
    const atr14 = calcATR(hi, lo, cl, 14).pop() || 0;
    const atr5 = calcATR(hi, lo, cl, 5).pop() || 0;
    const atr20 = calcATR(hi, lo, cl, 20).pop() || 0;
+   // Independent baseline excludes the recent 14-bar volatility window.
+   const atrBaseline = calcATR(hi.slice(0, -14), lo.slice(0, -14), cl.slice(0, -14), 20).pop() || 0;
 
    const HH_HL = hi[hi.length-1] > hi[hi.length-4] && lo[lo.length-1] > lo[lo.length-4];
    const LH_LL = hi[hi.length-1] < hi[hi.length-4] && lo[lo.length-1] < lo[lo.length-4];
@@ -580,7 +591,7 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
                           rvol < 3.2;
 
    return {
-      price, ema21, ema50, ema200, atr14, atr20,
+      price, ema21, ema50, ema200, atr14, atr20, atrBaseline,
       bull_align, bear_align,
       HH_HL, LH_LL, compressed, rvol, avg_vol,
       strong_bull_c, strong_bear_c, cpos, bpct,
@@ -967,7 +978,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 }
 
 // --- SEC 5: EXECUTION ---
-function executeTrade(symbol: string, decision: any) {
+export function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
    const riskAmt = virtualBalance * grade.risk * grade.mult;
@@ -987,22 +998,20 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
-      const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
-      const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
-
-      const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+      const plan = planTargets("LONG", p, entry, sl, feeRate, slippageRate);
+      if (!plan) {
+         addLog(`Rejected LONG ${symbol}: insufficient observed structure or net weighted reward.`, "warn");
          return;
       }
+      const [tp1, tp2, tp3] = plan.targets;
 
       let pos = riskAmt / realSlDist;
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: TARGET_WEIGHTS[0], part_b: TARGET_WEIGHTS[1], part_c: TARGET_WEIGHTS[2],
+         plannedNetRR: plan.netRR, structuralRR: plan.structuralR, targetObstacle: plan.obstacle,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
          setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
@@ -1040,22 +1049,20 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry - (initialSlDist * TP1_R);
-      const tp2 = entry - (initialSlDist * TP2_R);
-      const tp3 = entry - (initialSlDist * TP3_R);
-
-      const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+      const plan = planTargets("SHORT", p, entry, sl, feeRate, slippageRate);
+      if (!plan) {
+         addLog(`Rejected SHORT ${symbol}: insufficient observed structure or net weighted reward.`, "warn");
          return;
       }
+      const [tp1, tp2, tp3] = plan.targets;
 
       let pos = riskAmt / realSlDist;
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: TARGET_WEIGHTS[0], part_b: TARGET_WEIGHTS[1], part_c: TARGET_WEIGHTS[2],
+         plannedNetRR: plan.netRR, structuralRR: plan.structuralR, targetObstacle: plan.obstacle,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
          setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
@@ -1085,12 +1092,15 @@ function executeTrade(symbol: string, decision: any) {
 }
 
 // --- SEC 6: EXIT BRAIN ---
-async function exitBrain(trade: any, ctx: any) {
+export async function exitBrain(trade: any, ctx: any) {
    const t = trade;
-   const w = await readWhale(t.symbol, 0); // Fast check
-   const p = await readPrice(t.symbol, w.c15);
    
-   const price = p.price;
+   // Stops/targets must still use a fresh mark, not the last closed signal candle.
+   const quote = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/price`, {
+      params: { symbol: t.symbol }, timeout: 5000
+   });
+   const price = Number(quote.data.price);
+   if (!Number.isFinite(price) || price <= 0) throw new Error("Invalid management price");
    t.currentPrice = price;
 
    const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
@@ -1113,6 +1123,14 @@ async function exitBrain(trade: any, ctx: any) {
    // Record trade journey periodic snapshot (MFE/MAE tracking)
    logTradeJourneySnapshot(t, price, t.pnl);
 
+   // A data/indicator failure must never skip an already-triggered hard stop.
+   if ((t.direction === "LONG" && price <= t.sl) || (t.direction === "SHORT" && price >= t.sl)) {
+      closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
+      return;
+   }
+   const w = await readWhale(t.symbol, 0);
+   const p = await readPrice(t.symbol, w.c15);
+
    let emergency = false;
    let emReason = "";
 
@@ -1130,8 +1148,10 @@ async function exitBrain(trade: any, ctx: any) {
    if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
    
    if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
-   const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
-   if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
+   if (t.direction === "SHORT" && w.hidden_buy && profitR < 0.5) { emergency = true; emReason = "Hidden Buy"; }
+   const structuralBreak = p.klines.length >= 3 && p.klines.slice(-3).every((c: any) =>
+      t.direction === "LONG" ? c.close < p.ema21 : c.close > p.ema21);
+   if (structuralBreak && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
@@ -1139,33 +1159,25 @@ async function exitBrain(trade: any, ctx: any) {
       return;
    }
 
-   let exhaust = 0;
-   let peak = 0;
-   
-   if (t.direction === "LONG") {
-      const c = p.klines;
-      if (price > Math.max(...c.slice(-10,-3).map((k: any) => k.high)) && p.hist[p.hist.length-1] < p.hist[p.hist.length-4]) exhaust += 3;
-      if (w.fund > 0.06/100) exhaust += 1;
-      
-      const bodySize = (klines: any[]) => { const last = klines[klines.length-1]; return Math.abs(last.open - last.close); };
-      const ss_cand = p.u_wick > bodySize(c)*2.5 && p.price > p.res10 * 0.998;
-      if (ss_cand) peak += 3;
-   } else {
-      if (w.fund < -0.07/100) peak += 2;
-   }
+   const exhaust = exhaustionScore(t.direction, p, w);
+   const targetR = (target: number, fallback: number) => Number.isFinite(target)
+      ? Math.abs(target - t.entry) / slDist : fallback;
+   const tp1R = targetR(t.tp1, TP1_R);
+   const tp2R = targetR(t.tp2, TP2_R);
+   const tp3R = targetR(t.tp3, TP3_R);
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
-      if (profitR >= TP1_R) {
+      if (profitR >= tp1R) {
          closePart(t, "A", t.part_a);
-         // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
+         // Move SL to Entry + 0.30R to protect the position's remaining allocation.
          t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
-      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
+         addLog(`🎯 هدف أول (${(t.part_a * 100).toFixed(0)}%) ${t.symbol} | +${tp1R.toFixed(2)}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+      } else if ((exhaust >= 2) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry;
          t.a_closed = true;
@@ -1176,13 +1188,13 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      if (profitR >= TP2_R) {
+      if (profitR >= tp2R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
          // Lock in TP1 level as floor profit
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
-      } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * tp1R) : t.entry - (slDist * tp1R);
+         addLog(`🎯 هدف ثانٍ (${(t.part_b * 100).toFixed(0)}%) ${t.symbol} | +${tp2R.toFixed(2)}R | تم حجز الأرباح ورفع الوقف لمستوى +${tp1R.toFixed(2)}R`, 'success');
+      } else if ((exhaust >= 4) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
       }
@@ -1193,10 +1205,10 @@ async function exitBrain(trade: any, ctx: any) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
-      if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
+      if (profitR >= tp3R || exhaust >= 5) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
+         addLog(`🏁 هدف ثالث نهائي (${(t.part_c * 100).toFixed(0)}%) ${t.symbol} | +${tp3R.toFixed(2)}R صيد الاتجاه بالكامل 🏆`, 'success');
          closeTradeFull(t, "TP3 Full Target Hit");
          return;
       }
@@ -1211,7 +1223,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
+      if (isBreakingEMA && adverseFlow(t.direction, p, w)) {
          addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
          closeTradeFull(t, "Early Invalidation");
          return;
@@ -1288,18 +1300,22 @@ function closeTradeFull(t: any, reason: string = "") {
 
 // --- SEC 9: MAIN LOOP ---
 export async function runApexLoop() {
-   if (!botActive || isLoopRunning) return;
+   if ((!botActive && activeTrades.length === 0) || isLoopRunning) return;
 
    isLoopRunning = true;
    try {
       resetDailyStatsIfNeeded();
-      await updateDynamicWatchlist();
-      const ctx = await getContext();
+      // Context or one symbol failing must not prevent management of other positions.
+      let ctx: any;
+      try { ctx = await getContext(); }
+      catch { ctx = { regime: "UNKNOWN", tradeable: false, btc_chg: 0 }; }
       
       // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)
-      for (const t of activeTrades) {
-         await exitBrain(t, ctx);
+      for (const t of [...activeTrades]) {
+         try { await exitBrain(t, ctx); }
+         catch (e: any) { addLog(`Management error ${t.symbol}: ${e.message}`, "error"); }
       }
+      if (!botActive || entryHaltReason) return;
 
       // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
       let totalFloatingPnl = 0;
@@ -1310,16 +1326,13 @@ export async function runApexLoop() {
       let currentNetPnl = totalRealizedPnl + totalFloatingPnl;
       
       if (haltProfitEnabled && currentNetPnl >= haltProfitTarget) {
-         botActive = false;
-         isLoopRunning = false;
-         addLog(`🛑 تحقيق هدف الربح ($${haltProfitTarget})، تم إيقاف الروبوت.`, "success");
+         entryHaltReason = "PROFIT_TARGET";
+         addLog(`Profit target reached ($${haltProfitTarget}); new entries halted, open positions remain managed.`, "success");
          return;
       }
-      
       if (haltLossEnabled && currentNetPnl <= -haltLossTarget) {
-         botActive = false;
-         isLoopRunning = false;
-         addLog(`🛑 الوصول لحد الخسارة المحدد ($${haltLossTarget})، تم إيقاف الروبوت.`, "error");
+         entryHaltReason = "LOSS_LIMIT";
+         addLog(`Loss limit reached ($${haltLossTarget}); new entries halted, open positions remain managed.`, "error");
          return;
       }
 
@@ -1360,6 +1373,8 @@ export async function runApexLoop() {
          isLoopRunning = false;
          return;
       }
+
+      await updateDynamicWatchlist();
 
       // Ensure index is valid
       if (currentBatchIndex >= WATCHLIST.length) {

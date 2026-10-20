@@ -12,7 +12,8 @@ export function calcEMA(data: number[], period: number): number[] {
 }
 
 export function calcATR(high: number[], low: number[], close: number[], period: number): number[] {
-  if (high.length < period) return [];
+  if (!Number.isInteger(period) || period <= 0 || high.length <= period ||
+      high.length !== low.length || high.length !== close.length) return [];
   const tr = [];
   for (let i = 1; i < high.length; i++) {
     const hl = high[i] - low[i];
