@@ -715,11 +715,11 @@ async function scoreEntry(symbol: string, ctx: any) {
    // High win-rate filters for 3:1 Genius Mode
    if (geniusMode) {
       // 1. Strict Market Regime filter:
-      if (ctx.regime.includes("BEAR")) {
-         sl = 0; // Strict: Don't buy in bear regime
+      if (ctx.regime.includes("BEAR") && !w.asset_strong) {
+         sl = 0; // Don't buy in bear regime unless asset is extremely strong against BTC
       }
-      if (ctx.regime.includes("BULL")) {
-         ss = 0; // Strict: Don't short in bull regime
+      if (ctx.regime.includes("BULL") && !w.asset_strong) {
+         ss = 0; // Don't short in bull regime unless asset is clearly collapsing
       }
 
       // 2. High-probability RSI Momentum Corridor:
@@ -760,80 +760,6 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
-         // REGIME LOCK: مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market)
-         if (ctx.regime.includes("BEAR")) {
-            addLog(`🛡️ [REGIME LOCK] تم منع صفقة LONG على ${symbol} لأن نظام البيتكوين هابط (${ctx.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Strict Bear Regime: All LONG trades prohibited during BTC ${ctx.regime} market.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 2: مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف
-         // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
-         if (ctx.regime === "BULL_WEAK" && (reasoning.regime === "TREND_DOWN" || reasoning.regime === "TRANSITION")) {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة LONG على ${symbol} لأن البيتكوين في صعود ضعيف (BTC BULL_WEAK) وحالة الأصل (${reasoning.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Safety Gate: BTC BULL_WEAK with Asset ${reasoning.regime}. Buying weak assets prohibited.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 3: مانع الشراء في النطاق العرضي (فخ السيولة - RANGE Long Trap)
-         // الشرط: حظر صفقات الـ LONG نهائياً إذا كانت العملة في نطاق عرضي (Asset = RANGE) أثناء أي صعود للبيتكوين (BULL_STRONG أو BULL_WEAK).
-         if (reasoning.regime === "RANGE" && (ctx.regime === "BULL_STRONG" || ctx.regime === "BULL_WEAK")) {
-            addLog(`🛡️ [LIQUIDITY TRAP] تم منع صفقة LONG على ${symbol} لأن الأصل في نطاق عرضي (RANGE) أثناء صعود البيتكوين (${ctx.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Liquidity Trap Gate: RANGE Long prohibited during BTC ${ctx.regime} (altcoin liquidity drain).`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
-         if (reasoning.regime === "RANGE") {
-            const hasExplosiveRvol = p.rvol >= 2.0;
-            const hasDirectionalMomentum = p.adx >= 22 && p.di_plus > p.di_minus;
-            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
-               addLog(`🛡️ [DEAD CHOP] تم منع صفقة LONG على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية صاعدة (ADX >= 22 مع DI+ > DI-).`, "warn");
-               logRejectedSignal({
-                  symbol,
-                  timeframe: "15m",
-                  direction: "LONG",
-                  signal_score: sl,
-                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
-                  p,
-                  w,
-                  ctx,
-                  reasoning
-               });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-            }
-         }
-
          apexPredatorStats.acceptedLongs++;
          if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
          else apexPredatorStats.breakoutSetups++;
@@ -858,60 +784,21 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // REGIME LOCK: مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market)
-         if (ctx.regime.includes("BULL")) {
-            addLog(`🛡️ [REGIME LOCK] تم منع صفقة SHORT على ${symbol} لأن نظام البيتكوين صاعد (${ctx.regime}).`, "warn");
+         // SAFETY GATE: Strictly prohibit SHORT trades when BTC Regime is BULL_STRONG
+         if (ctx.regime === "BULL_STRONG") {
+            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG).`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "SHORT",
                signal_score: ss,
-               rejection_reason: `Strict Bull Regime: All SHORT trades prohibited during BTC ${ctx.regime} market.`,
+               rejection_reason: "Safety Gate: BTC Regime is BULL_STRONG. Shorting strictly prohibited.",
                p,
                w,
                ctx,
                reasoning
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 1: مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي
-         // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
-         if (ctx.regime === "BULL_STRONG" && (reasoning.regime === "TREND_UP" || reasoning.regime === "TRANSITION")) {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG) والأصل في حالة (${reasoning.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "SHORT",
-               signal_score: ss,
-               rejection_reason: `Safety Gate: BTC Regime is BULL_STRONG and Asset is ${reasoning.regime}. Counter-trend shorting prohibited.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
-         if (reasoning.regime === "RANGE") {
-            const hasExplosiveRvol = p.rvol >= 2.0;
-            const hasDirectionalMomentum = p.adx >= 22 && p.di_minus > p.di_plus;
-            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
-               addLog(`🛡️ [DEAD CHOP] تم منع صفقة SHORT على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية هابطة (ADX >= 22 مع DI- > DI+).`, "warn");
-               logRejectedSignal({
-                  symbol,
-                  timeframe: "15m",
-                  direction: "SHORT",
-                  signal_score: ss,
-                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
-                  p,
-                  w,
-                  ctx,
-                  reasoning
-               });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-            }
          }
 
          apexPredatorStats.acceptedShorts++;
@@ -970,14 +857,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
-   // Dynamic Risk Sizing based on Market Regime:
-   // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
-   const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
-   const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
-   if (regimeRiskMult < 1.0) {
-      addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
-   }
+   const riskAmt = virtualBalance * grade.risk * grade.mult;
 
    const entryTiming = extractEntryTiming();
    const marketRegimeContext = extractMarketRegimeContext(p, ctx, reasoning);
@@ -1209,44 +1089,18 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 4. SMART CVD & OI EXHAUSTION EXIT (حجز الأرباح عند القمم برصد تراجع CVD و OI)
-   if (profitR >= 0.70) {
-      if (t.direction === "LONG") {
-         const cvdExhaustion = w.slope15 < -100 && w.slope5 < -80;
-         const oiDropping = w.oi_chg < -0.005;
-         if (cvdExhaustion && oiDropping) {
-            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي وتصريف مؤسساتي في CVD/OI.`, 'success');
-            closeTradeFull(t, "CVD/OI Exhaustion Peak");
-            return;
-         }
-      } else if (t.direction === "SHORT") {
-         const cvdExhaustion = w.slope15 > 100 && w.slope5 > 80;
-         const oiDropping = w.oi_chg < -0.005;
-         if (cvdExhaustion && oiDropping) {
-            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانتهاء تغطية الشورتات وانعكاس CVD صعوداً.`, 'success');
-            closeTradeFull(t, "CVD/OI Short Squeeze Peak");
-            return;
-         }
-      }
-   }
-
-   // 5. SMART EARLY LOSS MITIGATION (-0.30R to -0.35R)
-   // إذا تراجعت الصفقة إلى ما دون -0.30R وكُسر الهيكل أو انقلب تدفق الحيتان/CVD، نخرج وقائياً ونوفر 65% إلى 70% من الستوب لوس!
-   if (!t.a_closed && profitR < -0.30) {
-      const c = p.klines || [];
+   // 4. SMART EARLY LOSS MITIGATION
+   // If trade immediately fails structurally and drops below -0.4R with bearish breakdown, cut early to save 60% of SL!
+   if (!t.a_closed && profitR < -0.40) {
+      const c = p.klines;
       const recentCloses = c.slice(-2).map((k: any) => k.close);
       const isBreakingEMA = t.direction === "LONG" 
          ? recentCloses.every((cl: number) => cl < p.ema21) 
          : recentCloses.every((cl: number) => cl > p.ema21);
       
-      const orderflowFlipped = t.direction === "LONG"
-         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -150 || (p.taker < 0.46 && p.rsi < 44))
-         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 150 || (p.taker > 0.54 && p.rsi > 56));
-
-      if (isBreakingEMA || orderflowFlipped) {
-         const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
-         addLog(`🛡️ [قص الخسارة المبكر] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
-         closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);
+      if (isBreakingEMA && (w.hidden_sell || w.scenario === "INST_SHORT" || p.adx > 25)) {
+         addLog(`🛡️ إغلاق وقائي ذكي ${t.symbol}: كسر هيكلي مبكر عند ${profitR.toFixed(2)}R | تم توفير ${(1 + profitR).toFixed(2)}R من الخسارة`, 'warn');
+         closeTradeFull(t, "Early Invalidation");
          return;
       }
    }
