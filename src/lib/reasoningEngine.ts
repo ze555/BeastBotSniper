@@ -843,7 +843,8 @@ export function checkConfirmation(
    timingGate: TimingGateResult,
    p: any,
    w: any,
-   supportingScore: { sl: number; ss: number }
+   supportingScore: { sl: number; ss: number },
+   ctx?: any
 ): ConfirmationResult {
    const evidence: string[] = [];
    const missingItems: string[] = [];
@@ -879,6 +880,95 @@ export function checkConfirmation(
          evidence: flow.evidenceFor,
          missingItems: ["Fresh long accumulation (OI growth with rising price)"]
       };
+   }
+
+   // --- FORENSIC & BTC MARKET REGIME SAFETY GATES ---
+   const btcRegime = ctx?.regime || "";
+   const bias = scenario.primary.bias;
+
+   // 1. مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market - BULL_STRONG أو BULL_WEAK):
+   // حظر محاولات السباحة ضد التيار الصاعد للبيتكوين لمنع الضرب المتكرر للستوب لوس.
+   if (bias === "SHORT") {
+      if (btcRegime.includes("BULL")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Strict Bull Regime: All SHORT trades are strictly prohibited during BTC ${btcRegime} market.`,
+            evidence,
+            missingItems: ["BTC transition into neutral or bear market"]
+         };
+      }
+   }
+
+   // 2. مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market - BEAR_STRONG أو BEAR_WEAK):
+   // حظر الشراء عندما يكون البيتكوين هابطاً لتفادي السقوط في فخاخ الهبوط المستمر.
+   if (bias === "LONG") {
+      if (btcRegime.includes("BEAR")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Strict Bear Regime: All LONG trades are strictly prohibited during BTC ${btcRegime} market.`,
+            evidence,
+            missingItems: ["BTC transition into neutral or bull market"]
+         };
+      }
+      if (btcRegime === "BULL_WEAK" && (regime === "TREND_DOWN" || regime === "TRANSITION")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `BTC Weak Bull Blocker: LONG prohibited while BTC is BULL_WEAK and Asset is in ${regime} (Structural weakness with weak BTC).`,
+            evidence,
+            missingItems: ["BTC strong expansion or asset structure reversal to TREND_UP"]
+         };
+      }
+   }
+
+   // 3. مانع الشراء في النطاق العرضي (فخ السيولة - RANGE Long Trap):
+   // الشرط: حظر صفقات الـ LONG نهائياً إذا كانت العملة في نطاق عرضي (Asset = RANGE) أثناء أي صعود للبيتكوين (BULL_STRONG أو BULL_WEAK).
+   // السبب: أظهرت الدراسة الجنائية أن صفقات الشراء العرضية في هذه الحالة تسحب السيولة نحو البيتكوين وتفشل في الاختراق بنسبة خسارة فادحة.
+   if (bias === "LONG") {
+      if (regime === "RANGE" && (btcRegime === "BULL_STRONG" || btcRegime === "BULL_WEAK")) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `RANGE Long Trap Blocker: LONG prohibited in RANGE while BTC is ${btcRegime} (Forensic liquidity drain into BTC fails breakouts).`,
+            evidence,
+            missingItems: ["Asset breakout out of RANGE into TREND_UP"]
+         };
+      }
+   }
+
+   // 4. مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE):
+   // الشرط: لمنع الصفقات العرضية الراكدة، يُشترط للدخول في أي صفقة بنظام النطاق العرضي توفر شرطين معاً:
+   // 1. حجم تداول نسبي انفجاري: p?.rvol >= 2.0
+   // 2. قوة اتجاهية صاعدة (للـ LONG) أو هابطة (للـ SHORT): ADX >= 22 مع توافق DI+ > DI- للشراء أو DI- > DI+ للبيع.
+   if (regime === "RANGE") {
+      const rvol = p?.rvol ?? 1.0;
+      const adx = p?.adx ?? 0;
+      const diPlus = p?.di_plus ?? 0;
+      const diMinus = p?.di_minus ?? 0;
+
+      const hasExplosiveRvol = rvol >= 2.0;
+      const hasDirectionalMomentum = bias === "LONG"
+         ? (adx >= 22 && diPlus > diMinus)
+         : bias === "SHORT"
+            ? (adx >= 22 && diMinus > diPlus)
+            : false;
+
+      if (!hasExplosiveRvol || !hasDirectionalMomentum) {
+         const missingChopConditions: string[] = [];
+         if (!hasExplosiveRvol) missingChopConditions.push(`Explosive RVOL >= 2.0 (current: ${rvol.toFixed(2)})`);
+         if (!hasDirectionalMomentum) {
+            missingChopConditions.push(`Directional strength ADX >= 22 with ${bias === "LONG" ? "DI+ > DI-" : "DI- > DI+"} (current: ADX ${adx.toFixed(1)}, DI+ ${diPlus.toFixed(1)}, DI- ${diMinus.toFixed(1)})`);
+         }
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Dead Chop Filter: RANGE trade prohibited without explosive volume AND directional momentum. Missing: ${missingChopConditions.join(", ")}`,
+            evidence,
+            missingItems: missingChopConditions
+         };
+      }
    }
 
    // 4. Strict Gate 4: Timing Gate verification
@@ -1028,7 +1118,7 @@ export function evaluateSymbolReasoning(
    const timingGate = evaluateTimingGate(preferredBias, p, w, location, flow);
 
    // 6. Confirmation
-   const confirmation = checkConfirmation(regime, flow, location, scenario, timingGate, p, w, supportingScore);
+   const confirmation = checkConfirmation(regime, flow, location, scenario, timingGate, p, w, supportingScore, ctx);
 
    // 7. State Machine Lifecycle
    let lifecycleState: LifecycleState = "OBSERVING";

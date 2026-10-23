@@ -1,0 +1,2870 @@
+{
+  "currentB": {
+    "model": "CURRENT_B",
+    "trades": 78,
+    "winRate": 52.6,
+    "netR": 6.1,
+    "pf": 1.33,
+    "avgR": 0.08,
+    "avgWin": 0.6,
+    "avgLoss": 0.55,
+    "maxDD": 2.61,
+    "mfeCapturePct": 9.4,
+    "avgGiveback": 0.76,
+    "perTradeResults": [
+      {
+        "tradeId": "1000PEPEUSDT_1790849132245",
+        "symbol": "1000PEPEUSDT",
+        "side": "SHORT",
+        "entry": 0.0042669,
+        "mfe": 0.11,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "MUUSDT_1790859365793",
+        "symbol": "MUUSDT",
+        "side": "SHORT",
+        "entry": 1055.44,
+        "mfe": 0.83,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "MUUUSDT_1790859398137",
+        "symbol": "MUUUSDT",
+        "side": "SHORT",
+        "entry": 35.9,
+        "mfe": 0.86,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790860203592",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6691,
+        "mfe": 0.52,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "CBRSUSDT_1790860362092",
+        "symbol": "CBRSUSDT",
+        "side": "SHORT",
+        "entry": 179.46,
+        "mfe": 0.16,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAPLUSDT_1790860713443",
+        "symbol": "AAPLUSDT",
+        "side": "SHORT",
+        "entry": 331.39,
+        "mfe": 1.07,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790895964970",
+        "symbol": "AAVEUSDT",
+        "side": "LONG",
+        "entry": 172.12,
+        "mfe": 0.08,
+        "realizedR": -0.26,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790896149499",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 61.97,
+        "mfe": 0.52,
+        "realizedR": 0.39,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790900288024",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.071,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "LTCUSDT_1790900318562",
+        "symbol": "LTCUSDT",
+        "side": "LONG",
+        "entry": 68.74,
+        "mfe": 1.64,
+        "realizedR": 0.81,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "MVLLUSDT_1790900712531",
+        "symbol": "MVLLUSDT",
+        "side": "LONG",
+        "entry": 37.52,
+        "mfe": 0,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ARUSDT_1790907069406",
+        "symbol": "ARUSDT",
+        "side": "LONG",
+        "entry": 4.331,
+        "mfe": 0.12,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "WIFUSDT_1790907429107",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2541,
+        "mfe": 0.3,
+        "realizedR": 0.07,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790907488642",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.068,
+        "mfe": 0.88,
+        "realizedR": 0.72,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790907702615",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 270.5,
+        "mfe": 0.44,
+        "realizedR": -0.09,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "WIFUSDT_1790909768838",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2556,
+        "mfe": 0.1,
+        "realizedR": 0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BTCUSDT_1790909799408",
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entry": 85135.9,
+        "mfe": 3.14,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "ETHUSDT_1790910698705",
+        "symbol": "ETHUSDT",
+        "side": "LONG",
+        "entry": 2718.26,
+        "mfe": 1.45,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1790910970589",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09758,
+        "mfe": 0.77,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "LITEUSDT_1790911093836",
+        "symbol": "LITEUSDT",
+        "side": "LONG",
+        "entry": 1053.52,
+        "mfe": 0.39,
+        "realizedR": -0.63,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "XRPUSDT_1790913227239",
+        "symbol": "XRPUSDT",
+        "side": "LONG",
+        "entry": 1.5061,
+        "mfe": 1.96,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "BNBUSDT_1790913249256",
+        "symbol": "BNBUSDT",
+        "side": "LONG",
+        "entry": 776.37,
+        "mfe": 1.62,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "NVDAUSDT_1790917332996",
+        "symbol": "NVDAUSDT",
+        "side": "LONG",
+        "entry": 232.32,
+        "mfe": 0.09,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "DASHUSDT_1790918834809",
+        "symbol": "DASHUSDT",
+        "side": "LONG",
+        "entry": 60.07,
+        "mfe": 0.35,
+        "realizedR": -0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790922918191",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 204.25,
+        "mfe": 0.71,
+        "realizedR": 0.04,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PENDLEUSDT_1790923216156",
+        "symbol": "PENDLEUSDT",
+        "side": "LONG",
+        "entry": 2.4549,
+        "mfe": 0.35,
+        "realizedR": 0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZROUSDT_1790924204676",
+        "symbol": "ZROUSDT",
+        "side": "LONG",
+        "entry": 1.9388,
+        "mfe": 0,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PUMPUSDT_1790926145798",
+        "symbol": "PUMPUSDT",
+        "side": "LONG",
+        "entry": 0.006021,
+        "mfe": 0.52,
+        "realizedR": -0.6,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "INTCUSDT_1790927953435",
+        "symbol": "INTCUSDT",
+        "side": "LONG",
+        "entry": 121.57,
+        "mfe": 1.25,
+        "realizedR": 0.64,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "MUUSDT_1790928103048",
+        "symbol": "MUUSDT",
+        "side": "LONG",
+        "entry": 1096.4,
+        "mfe": 1.9,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MUUUSDT_1790928136133",
+        "symbol": "MUUUSDT",
+        "side": "LONG",
+        "entry": 38.67,
+        "mfe": 2.05,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790933980212",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.118,
+        "mfe": 2.37,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790938664042",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 272.74,
+        "mfe": 0.81,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "COINUSDT_1790942859435",
+        "symbol": "COINUSDT",
+        "side": "LONG",
+        "entry": 195.11,
+        "mfe": 1.02,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "NATGASUSDT_1790943040305",
+        "symbol": "NATGASUSDT",
+        "side": "LONG",
+        "entry": 2.937,
+        "mfe": 3,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MONUSDT_1790944065305",
+        "symbol": "MONUSDT",
+        "side": "LONG",
+        "entry": 0.03438,
+        "mfe": 1.15,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "ADAUSDT_1790944213397",
+        "symbol": "ADAUSDT",
+        "side": "LONG",
+        "entry": 0.2574,
+        "mfe": 0.31,
+        "realizedR": -0.44,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "TQQQUSDT_1790944271402",
+        "symbol": "TQQQUSDT",
+        "side": "LONG",
+        "entry": 80.86,
+        "mfe": 0.97,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790945146703",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 205.92,
+        "mfe": 0.72,
+        "realizedR": 0.46,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NBISUSDT_1790945204572",
+        "symbol": "NBISUSDT",
+        "side": "LONG",
+        "entry": 236.81,
+        "mfe": 2.11,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790946230803",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 62.84,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "HYPEUSDT_1790947099617",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 91.215,
+        "mfe": 0.19,
+        "realizedR": -0.5,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "FILUSDT_1790948240548",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0491,
+        "mfe": 0.51,
+        "realizedR": -0.37,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "AXTIUSDT_1790949921811",
+        "symbol": "AXTIUSDT",
+        "side": "LONG",
+        "entry": 84.13,
+        "mfe": 0.68,
+        "realizedR": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BZUSDT_1790956275316",
+        "symbol": "BZUSDT",
+        "side": "LONG",
+        "entry": 101.29,
+        "mfe": 0.9,
+        "realizedR": 0.63,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SUPERUSDT_1790958945030",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.23315,
+        "mfe": 0.13,
+        "realizedR": -0.57,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZECUSDT_1790961312237",
+        "symbol": "ZECUSDT",
+        "side": "SHORT",
+        "entry": 1354.85,
+        "mfe": 2.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "STXUSDT_1790961467598",
+        "symbol": "STXUSDT",
+        "side": "SHORT",
+        "entry": 0.3617,
+        "mfe": 1.53,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "SUIUSDT_1790962221000",
+        "symbol": "SUIUSDT",
+        "side": "SHORT",
+        "entry": 1.1627,
+        "mfe": 2.31,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790966328697",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6763,
+        "mfe": 0.64,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790966386303",
+        "symbol": "AAVEUSDT",
+        "side": "SHORT",
+        "entry": 178.64,
+        "mfe": 0.31,
+        "realizedR": -0.25,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NIGHTUSDT_1790984215150",
+        "symbol": "NIGHTUSDT",
+        "side": "LONG",
+        "entry": 0.04904,
+        "mfe": 1.27,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "AKEUSDT_1791006622845",
+        "symbol": "AKEUSDT",
+        "side": "LONG",
+        "entry": 0.034373,
+        "mfe": 1.47,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "LYNUSDT_1791006803780",
+        "symbol": "LYNUSDT",
+        "side": "LONG",
+        "entry": 0.02699,
+        "mfe": 0.27,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791007412707",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.92,
+        "mfe": 0.08,
+        "realizedR": -0.57,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "AAOIUSDT_1791017724394",
+        "symbol": "AAOIUSDT",
+        "side": "LONG",
+        "entry": 114.96,
+        "mfe": 2.01,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "LDOUSDT_1791020459705",
+        "symbol": "LDOUSDT",
+        "side": "LONG",
+        "entry": 0.4509,
+        "mfe": 1.3,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "LITUSDT_1791022021923",
+        "symbol": "LITUSDT",
+        "side": "LONG",
+        "entry": 3.5453,
+        "mfe": 0.17,
+        "realizedR": -0.32,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "1000BONKUSDT_1791024960126",
+        "symbol": "1000BONKUSDT",
+        "side": "LONG",
+        "entry": 0.003671,
+        "mfe": 0.33,
+        "realizedR": -0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "FILUSDT_1791027598437",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0706,
+        "mfe": 0.06,
+        "realizedR": -0.61,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791031533540",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.89,
+        "mfe": 0,
+        "realizedR": -0.87,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "1000SHIBUSDT_1791035193850",
+        "symbol": "1000SHIBUSDT",
+        "side": "LONG",
+        "entry": 0.005694,
+        "mfe": 0.24,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SUPERUSDT_1791038459813",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.2636,
+        "mfe": 1.3,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "TRXUSDT_1791038971791",
+        "symbol": "TRXUSDT",
+        "side": "LONG",
+        "entry": 0.33668,
+        "mfe": 0.46,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HBARUSDT_1791039485696",
+        "symbol": "HBARUSDT",
+        "side": "LONG",
+        "entry": 0.10238,
+        "mfe": 0.03,
+        "realizedR": -0.64,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "STRKUSDT_1791039938584",
+        "symbol": "STRKUSDT",
+        "side": "LONG",
+        "entry": 0.04453,
+        "mfe": 3.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "VELVETUSDT_1791050252600",
+        "symbol": "VELVETUSDT",
+        "side": "LONG",
+        "entry": 0.08542,
+        "mfe": 0.49,
+        "realizedR": -0.15,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "LINKUSDT_1791054751226",
+        "symbol": "LINKUSDT",
+        "side": "LONG",
+        "entry": 13.91,
+        "mfe": 2.14,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791062825310",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.396,
+        "mfe": 0.56,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ENAUSDT_1791065174163",
+        "symbol": "ENAUSDT",
+        "side": "LONG",
+        "entry": 0.23866,
+        "mfe": 0.12,
+        "realizedR": -0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "KORUUSDT_1791067985497",
+        "symbol": "KORUUSDT",
+        "side": "LONG",
+        "entry": 22.7,
+        "mfe": 0.56,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "NEARUSDT_1791074350306",
+        "symbol": "NEARUSDT",
+        "side": "LONG",
+        "entry": 4.885,
+        "mfe": 0.08,
+        "realizedR": -0.54,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "MSTRUSDT_1791081252740",
+        "symbol": "MSTRUSDT",
+        "side": "LONG",
+        "entry": 163.88,
+        "mfe": 0.76,
+        "realizedR": 0.64,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SYNUSDT_1791085478876",
+        "symbol": "SYNUSDT",
+        "side": "LONG",
+        "entry": 0.18875,
+        "mfe": 0.07,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "GALAUSDT_1791087549654",
+        "symbol": "GALAUSDT",
+        "side": "LONG",
+        "entry": 0.002562,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1791088303197",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09635,
+        "mfe": 0.13,
+        "realizedR": -0.76,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791088575708",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.914,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "JUPUSDT_1791092303397",
+        "symbol": "JUPUSDT",
+        "side": "LONG",
+        "entry": 0.3312,
+        "mfe": 0.11,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      }
+    ]
+  },
+  "oldHybrid": {
+    "model": "OLD_HYBRID",
+    "trades": 78,
+    "winRate": 46.2,
+    "netR": 8.33,
+    "pf": 1.54,
+    "avgR": 0.11,
+    "avgWin": 0.66,
+    "avgLoss": 0.42,
+    "maxDD": 2.92,
+    "mfeCapturePct": 15.2,
+    "avgGiveback": 0.59,
+    "perTradeResults": [
+      {
+        "tradeId": "1000PEPEUSDT_1790849132245",
+        "symbol": "1000PEPEUSDT",
+        "side": "SHORT",
+        "entry": 0.0042669,
+        "mfe": 0.11,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "MUUSDT_1790859365793",
+        "symbol": "MUUSDT",
+        "side": "SHORT",
+        "entry": 1055.44,
+        "mfe": 0.83,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "MUUUSDT_1790859398137",
+        "symbol": "MUUUSDT",
+        "side": "SHORT",
+        "entry": 35.9,
+        "mfe": 0.86,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790860203592",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6691,
+        "mfe": 0.52,
+        "realizedR": -0.03,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "CBRSUSDT_1790860362092",
+        "symbol": "CBRSUSDT",
+        "side": "SHORT",
+        "entry": 179.46,
+        "mfe": 0.16,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAPLUSDT_1790860713443",
+        "symbol": "AAPLUSDT",
+        "side": "SHORT",
+        "entry": 331.39,
+        "mfe": 1.07,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790895964970",
+        "symbol": "AAVEUSDT",
+        "side": "LONG",
+        "entry": 172.12,
+        "mfe": 0.08,
+        "realizedR": -0.26,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790896149499",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 61.97,
+        "mfe": 0.44,
+        "realizedR": -0.14,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790900288024",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.071,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "LTCUSDT_1790900318562",
+        "symbol": "LTCUSDT",
+        "side": "LONG",
+        "entry": 68.74,
+        "mfe": 0.5,
+        "realizedR": -0.06,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "MVLLUSDT_1790900712531",
+        "symbol": "MVLLUSDT",
+        "side": "LONG",
+        "entry": 37.52,
+        "mfe": 0,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ARUSDT_1790907069406",
+        "symbol": "ARUSDT",
+        "side": "LONG",
+        "entry": 4.331,
+        "mfe": 0.12,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "WIFUSDT_1790907429107",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2541,
+        "mfe": 0.3,
+        "realizedR": 0.07,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790907488642",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.068,
+        "mfe": 0.88,
+        "realizedR": 0.72,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790907702615",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 270.5,
+        "mfe": 0.44,
+        "realizedR": -0.04,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "WIFUSDT_1790909768838",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2556,
+        "mfe": 0.1,
+        "realizedR": 0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BTCUSDT_1790909799408",
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entry": 85135.9,
+        "mfe": 1.53,
+        "realizedR": 0.84,
+        "exitReason": "SL Lock Hit (+0.90R)"
+      },
+      {
+        "tradeId": "ETHUSDT_1790910698705",
+        "symbol": "ETHUSDT",
+        "side": "LONG",
+        "entry": 2718.26,
+        "mfe": 1.45,
+        "realizedR": 0.94,
+        "exitReason": "Giveback Lock (0.35R decay from 1.45R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1790910970589",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09758,
+        "mfe": 0.77,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "LITEUSDT_1790911093836",
+        "symbol": "LITEUSDT",
+        "side": "LONG",
+        "entry": 1053.52,
+        "mfe": 0.39,
+        "realizedR": -0.63,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "XRPUSDT_1790913227239",
+        "symbol": "XRPUSDT",
+        "side": "LONG",
+        "entry": 1.5061,
+        "mfe": 0.4,
+        "realizedR": -0.05,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "BNBUSDT_1790913249256",
+        "symbol": "BNBUSDT",
+        "side": "LONG",
+        "entry": 776.37,
+        "mfe": 1.44,
+        "realizedR": 0.93,
+        "exitReason": "Giveback Lock (0.35R decay from 1.44R)"
+      },
+      {
+        "tradeId": "NVDAUSDT_1790917332996",
+        "symbol": "NVDAUSDT",
+        "side": "LONG",
+        "entry": 232.32,
+        "mfe": 0.09,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "DASHUSDT_1790918834809",
+        "symbol": "DASHUSDT",
+        "side": "LONG",
+        "entry": 60.07,
+        "mfe": 0.35,
+        "realizedR": -0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790922918191",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 204.25,
+        "mfe": 0.71,
+        "realizedR": -0.1,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "PENDLEUSDT_1790923216156",
+        "symbol": "PENDLEUSDT",
+        "side": "LONG",
+        "entry": 2.4549,
+        "mfe": 0.35,
+        "realizedR": 0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZROUSDT_1790924204676",
+        "symbol": "ZROUSDT",
+        "side": "LONG",
+        "entry": 1.9388,
+        "mfe": 0,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PUMPUSDT_1790926145798",
+        "symbol": "PUMPUSDT",
+        "side": "LONG",
+        "entry": 0.006021,
+        "mfe": 0.52,
+        "realizedR": -0.05,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "INTCUSDT_1790927953435",
+        "symbol": "INTCUSDT",
+        "side": "LONG",
+        "entry": 121.57,
+        "mfe": 1.25,
+        "realizedR": 0.83,
+        "exitReason": "Giveback Lock (0.35R decay from 1.25R)"
+      },
+      {
+        "tradeId": "MUUSDT_1790928103048",
+        "symbol": "MUUSDT",
+        "side": "LONG",
+        "entry": 1096.4,
+        "mfe": 1.9,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MUUUSDT_1790928136133",
+        "symbol": "MUUUSDT",
+        "side": "LONG",
+        "entry": 38.67,
+        "mfe": 1.7,
+        "realizedR": 1.07,
+        "exitReason": "Giveback Lock (0.35R decay from 1.70R)"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790933980212",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.118,
+        "mfe": 2.37,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790938664042",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 272.74,
+        "mfe": 0.81,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "COINUSDT_1790942859435",
+        "symbol": "COINUSDT",
+        "side": "LONG",
+        "entry": 195.11,
+        "mfe": 1.02,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "NATGASUSDT_1790943040305",
+        "symbol": "NATGASUSDT",
+        "side": "LONG",
+        "entry": 2.937,
+        "mfe": 1.29,
+        "realizedR": 0.83,
+        "exitReason": "Giveback Lock (0.35R decay from 1.29R)"
+      },
+      {
+        "tradeId": "MONUSDT_1790944065305",
+        "symbol": "MONUSDT",
+        "side": "LONG",
+        "entry": 0.03438,
+        "mfe": 1.15,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "ADAUSDT_1790944213397",
+        "symbol": "ADAUSDT",
+        "side": "LONG",
+        "entry": 0.2574,
+        "mfe": 0.31,
+        "realizedR": -0.44,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "TQQQUSDT_1790944271402",
+        "symbol": "TQQQUSDT",
+        "side": "LONG",
+        "entry": 80.86,
+        "mfe": 0.97,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790945146703",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 205.92,
+        "mfe": 0.61,
+        "realizedR": -0.09,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "NBISUSDT_1790945204572",
+        "symbol": "NBISUSDT",
+        "side": "LONG",
+        "entry": 236.81,
+        "mfe": 1.41,
+        "realizedR": 0.92,
+        "exitReason": "Giveback Lock (0.35R decay from 1.41R)"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790946230803",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 62.84,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "HYPEUSDT_1790947099617",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 91.215,
+        "mfe": 0.19,
+        "realizedR": -0.5,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "FILUSDT_1790948240548",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0491,
+        "mfe": 0.51,
+        "realizedR": -0.06,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "AXTIUSDT_1790949921811",
+        "symbol": "AXTIUSDT",
+        "side": "LONG",
+        "entry": 84.13,
+        "mfe": 0.68,
+        "realizedR": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BZUSDT_1790956275316",
+        "symbol": "BZUSDT",
+        "side": "LONG",
+        "entry": 101.29,
+        "mfe": 0.9,
+        "realizedR": 0.63,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SUPERUSDT_1790958945030",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.23315,
+        "mfe": 0.13,
+        "realizedR": -0.57,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZECUSDT_1790961312237",
+        "symbol": "ZECUSDT",
+        "side": "SHORT",
+        "entry": 1354.85,
+        "mfe": 2.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "STXUSDT_1790961467598",
+        "symbol": "STXUSDT",
+        "side": "SHORT",
+        "entry": 0.3617,
+        "mfe": 1.38,
+        "realizedR": 0.87,
+        "exitReason": "Giveback Lock (0.35R decay from 1.38R)"
+      },
+      {
+        "tradeId": "SUIUSDT_1790962221000",
+        "symbol": "SUIUSDT",
+        "side": "SHORT",
+        "entry": 1.1627,
+        "mfe": 0.47,
+        "realizedR": -0.02,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790966328697",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6763,
+        "mfe": 0.64,
+        "realizedR": -0.1,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790966386303",
+        "symbol": "AAVEUSDT",
+        "side": "SHORT",
+        "entry": 178.64,
+        "mfe": 0.31,
+        "realizedR": -0.25,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NIGHTUSDT_1790984215150",
+        "symbol": "NIGHTUSDT",
+        "side": "LONG",
+        "entry": 0.04904,
+        "mfe": 1.27,
+        "realizedR": 0.82,
+        "exitReason": "Giveback Lock (0.35R decay from 1.27R)"
+      },
+      {
+        "tradeId": "AKEUSDT_1791006622845",
+        "symbol": "AKEUSDT",
+        "side": "LONG",
+        "entry": 0.034373,
+        "mfe": 1.47,
+        "realizedR": 0.87,
+        "exitReason": "Giveback Lock (0.35R decay from 1.47R)"
+      },
+      {
+        "tradeId": "LYNUSDT_1791006803780",
+        "symbol": "LYNUSDT",
+        "side": "LONG",
+        "entry": 0.02699,
+        "mfe": 0.27,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791007412707",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.92,
+        "mfe": 0.08,
+        "realizedR": -0.57,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "AAOIUSDT_1791017724394",
+        "symbol": "AAOIUSDT",
+        "side": "LONG",
+        "entry": 114.96,
+        "mfe": 1.14,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "LDOUSDT_1791020459705",
+        "symbol": "LDOUSDT",
+        "side": "LONG",
+        "entry": 0.4509,
+        "mfe": 1.27,
+        "realizedR": 0.78,
+        "exitReason": "Giveback Lock (0.35R decay from 1.27R)"
+      },
+      {
+        "tradeId": "LITUSDT_1791022021923",
+        "symbol": "LITUSDT",
+        "side": "LONG",
+        "entry": 3.5453,
+        "mfe": 0.17,
+        "realizedR": -0.32,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "1000BONKUSDT_1791024960126",
+        "symbol": "1000BONKUSDT",
+        "side": "LONG",
+        "entry": 0.003671,
+        "mfe": 0.33,
+        "realizedR": -0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "FILUSDT_1791027598437",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0706,
+        "mfe": 0.06,
+        "realizedR": -0.61,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791031533540",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.89,
+        "mfe": 0,
+        "realizedR": -0.87,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "1000SHIBUSDT_1791035193850",
+        "symbol": "1000SHIBUSDT",
+        "side": "LONG",
+        "entry": 0.005694,
+        "mfe": 0.24,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SUPERUSDT_1791038459813",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.2636,
+        "mfe": 1.3,
+        "realizedR": 0.75,
+        "exitReason": "Giveback Lock (0.35R decay from 1.30R)"
+      },
+      {
+        "tradeId": "TRXUSDT_1791038971791",
+        "symbol": "TRXUSDT",
+        "side": "LONG",
+        "entry": 0.33668,
+        "mfe": 0.46,
+        "realizedR": -0.07,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "HBARUSDT_1791039485696",
+        "symbol": "HBARUSDT",
+        "side": "LONG",
+        "entry": 0.10238,
+        "mfe": 0.03,
+        "realizedR": -0.64,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "STRKUSDT_1791039938584",
+        "symbol": "STRKUSDT",
+        "side": "LONG",
+        "entry": 0.04453,
+        "mfe": 3.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "VELVETUSDT_1791050252600",
+        "symbol": "VELVETUSDT",
+        "side": "LONG",
+        "entry": 0.08542,
+        "mfe": 0.49,
+        "realizedR": -0.09,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "LINKUSDT_1791054751226",
+        "symbol": "LINKUSDT",
+        "side": "LONG",
+        "entry": 13.91,
+        "mfe": 2.14,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791062825310",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.396,
+        "mfe": 0.56,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ENAUSDT_1791065174163",
+        "symbol": "ENAUSDT",
+        "side": "LONG",
+        "entry": 0.23866,
+        "mfe": 0.12,
+        "realizedR": -0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "KORUUSDT_1791067985497",
+        "symbol": "KORUUSDT",
+        "side": "LONG",
+        "entry": 22.7,
+        "mfe": 0.56,
+        "realizedR": -0.14,
+        "exitReason": "Old Early Failure"
+      },
+      {
+        "tradeId": "NEARUSDT_1791074350306",
+        "symbol": "NEARUSDT",
+        "side": "LONG",
+        "entry": 4.885,
+        "mfe": 0.08,
+        "realizedR": -0.54,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "MSTRUSDT_1791081252740",
+        "symbol": "MSTRUSDT",
+        "side": "LONG",
+        "entry": 163.88,
+        "mfe": 0.76,
+        "realizedR": 0.64,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SYNUSDT_1791085478876",
+        "symbol": "SYNUSDT",
+        "side": "LONG",
+        "entry": 0.18875,
+        "mfe": 0.07,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "GALAUSDT_1791087549654",
+        "symbol": "GALAUSDT",
+        "side": "LONG",
+        "entry": 0.002562,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1791088303197",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09635,
+        "mfe": 0.13,
+        "realizedR": -0.76,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791088575708",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.914,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "JUPUSDT_1791092303397",
+        "symbol": "JUPUSDT",
+        "side": "LONG",
+        "entry": 0.3312,
+        "mfe": 0.11,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      }
+    ]
+  },
+  "consHybrid_30": {
+    "model": "CONS_HYBRID_0.30R",
+    "trades": 78,
+    "winRate": 52.6,
+    "netR": 9.38,
+    "pf": 1.5,
+    "avgR": 0.12,
+    "avgWin": 0.68,
+    "avgLoss": 0.55,
+    "maxDD": 2.46,
+    "mfeCapturePct": 16,
+    "avgGiveback": 0.63,
+    "perTradeResults": [
+      {
+        "tradeId": "1000PEPEUSDT_1790849132245",
+        "symbol": "1000PEPEUSDT",
+        "side": "SHORT",
+        "entry": 0.0042669,
+        "mfe": 0.11,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "MUUSDT_1790859365793",
+        "symbol": "MUUSDT",
+        "side": "SHORT",
+        "entry": 1055.44,
+        "mfe": 0.83,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "MUUUSDT_1790859398137",
+        "symbol": "MUUUSDT",
+        "side": "SHORT",
+        "entry": 35.9,
+        "mfe": 0.86,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790860203592",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6691,
+        "mfe": 0.52,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "CBRSUSDT_1790860362092",
+        "symbol": "CBRSUSDT",
+        "side": "SHORT",
+        "entry": 179.46,
+        "mfe": 0.16,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAPLUSDT_1790860713443",
+        "symbol": "AAPLUSDT",
+        "side": "SHORT",
+        "entry": 331.39,
+        "mfe": 1.07,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790895964970",
+        "symbol": "AAVEUSDT",
+        "side": "LONG",
+        "entry": 172.12,
+        "mfe": 0.08,
+        "realizedR": -0.26,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790896149499",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 61.97,
+        "mfe": 0.52,
+        "realizedR": 0.39,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790900288024",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.071,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "LTCUSDT_1790900318562",
+        "symbol": "LTCUSDT",
+        "side": "LONG",
+        "entry": 68.74,
+        "mfe": 1.35,
+        "realizedR": 0.84,
+        "exitReason": "Giveback Lock (0.3R decay from 1.35R)"
+      },
+      {
+        "tradeId": "MVLLUSDT_1790900712531",
+        "symbol": "MVLLUSDT",
+        "side": "LONG",
+        "entry": 37.52,
+        "mfe": 0,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ARUSDT_1790907069406",
+        "symbol": "ARUSDT",
+        "side": "LONG",
+        "entry": 4.331,
+        "mfe": 0.12,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "WIFUSDT_1790907429107",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2541,
+        "mfe": 0.3,
+        "realizedR": 0.07,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790907488642",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.068,
+        "mfe": 0.88,
+        "realizedR": 0.72,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790907702615",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 270.5,
+        "mfe": 0.44,
+        "realizedR": -0.09,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "WIFUSDT_1790909768838",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2556,
+        "mfe": 0.1,
+        "realizedR": 0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BTCUSDT_1790909799408",
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entry": 85135.9,
+        "mfe": 1.53,
+        "realizedR": 0.84,
+        "exitReason": "SL Lock Hit (+0.90R)"
+      },
+      {
+        "tradeId": "ETHUSDT_1790910698705",
+        "symbol": "ETHUSDT",
+        "side": "LONG",
+        "entry": 2718.26,
+        "mfe": 1.45,
+        "realizedR": 0.94,
+        "exitReason": "Giveback Lock (0.3R decay from 1.45R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1790910970589",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09758,
+        "mfe": 0.77,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "LITEUSDT_1790911093836",
+        "symbol": "LITEUSDT",
+        "side": "LONG",
+        "entry": 1053.52,
+        "mfe": 0.39,
+        "realizedR": -0.63,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "XRPUSDT_1790913227239",
+        "symbol": "XRPUSDT",
+        "side": "LONG",
+        "entry": 1.5061,
+        "mfe": 1.96,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "BNBUSDT_1790913249256",
+        "symbol": "BNBUSDT",
+        "side": "LONG",
+        "entry": 776.37,
+        "mfe": 1.44,
+        "realizedR": 0.98,
+        "exitReason": "Giveback Lock (0.3R decay from 1.44R)"
+      },
+      {
+        "tradeId": "NVDAUSDT_1790917332996",
+        "symbol": "NVDAUSDT",
+        "side": "LONG",
+        "entry": 232.32,
+        "mfe": 0.09,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "DASHUSDT_1790918834809",
+        "symbol": "DASHUSDT",
+        "side": "LONG",
+        "entry": 60.07,
+        "mfe": 0.35,
+        "realizedR": -0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790922918191",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 204.25,
+        "mfe": 0.71,
+        "realizedR": 0.04,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PENDLEUSDT_1790923216156",
+        "symbol": "PENDLEUSDT",
+        "side": "LONG",
+        "entry": 2.4549,
+        "mfe": 0.35,
+        "realizedR": 0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZROUSDT_1790924204676",
+        "symbol": "ZROUSDT",
+        "side": "LONG",
+        "entry": 1.9388,
+        "mfe": 0,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PUMPUSDT_1790926145798",
+        "symbol": "PUMPUSDT",
+        "side": "LONG",
+        "entry": 0.006021,
+        "mfe": 0.52,
+        "realizedR": -0.6,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "INTCUSDT_1790927953435",
+        "symbol": "INTCUSDT",
+        "side": "LONG",
+        "entry": 121.57,
+        "mfe": 1.25,
+        "realizedR": 0.83,
+        "exitReason": "Giveback Lock (0.3R decay from 1.25R)"
+      },
+      {
+        "tradeId": "MUUSDT_1790928103048",
+        "symbol": "MUUSDT",
+        "side": "LONG",
+        "entry": 1096.4,
+        "mfe": 1.9,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MUUUSDT_1790928136133",
+        "symbol": "MUUUSDT",
+        "side": "LONG",
+        "entry": 38.67,
+        "mfe": 1.7,
+        "realizedR": 1.07,
+        "exitReason": "Giveback Lock (0.3R decay from 1.70R)"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790933980212",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.118,
+        "mfe": 2.37,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790938664042",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 272.74,
+        "mfe": 0.81,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "COINUSDT_1790942859435",
+        "symbol": "COINUSDT",
+        "side": "LONG",
+        "entry": 195.11,
+        "mfe": 1.02,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "NATGASUSDT_1790943040305",
+        "symbol": "NATGASUSDT",
+        "side": "LONG",
+        "entry": 2.937,
+        "mfe": 1.29,
+        "realizedR": 0.83,
+        "exitReason": "Giveback Lock (0.3R decay from 1.29R)"
+      },
+      {
+        "tradeId": "MONUSDT_1790944065305",
+        "symbol": "MONUSDT",
+        "side": "LONG",
+        "entry": 0.03438,
+        "mfe": 1.15,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "ADAUSDT_1790944213397",
+        "symbol": "ADAUSDT",
+        "side": "LONG",
+        "entry": 0.2574,
+        "mfe": 0.31,
+        "realizedR": -0.44,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "TQQQUSDT_1790944271402",
+        "symbol": "TQQQUSDT",
+        "side": "LONG",
+        "entry": 80.86,
+        "mfe": 0.97,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790945146703",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 205.92,
+        "mfe": 0.72,
+        "realizedR": 0.46,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NBISUSDT_1790945204572",
+        "symbol": "NBISUSDT",
+        "side": "LONG",
+        "entry": 236.81,
+        "mfe": 1.41,
+        "realizedR": 0.96,
+        "exitReason": "Giveback Lock (0.3R decay from 1.41R)"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790946230803",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 62.84,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "HYPEUSDT_1790947099617",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 91.215,
+        "mfe": 0.19,
+        "realizedR": -0.5,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "FILUSDT_1790948240548",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0491,
+        "mfe": 0.51,
+        "realizedR": -0.37,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "AXTIUSDT_1790949921811",
+        "symbol": "AXTIUSDT",
+        "side": "LONG",
+        "entry": 84.13,
+        "mfe": 0.68,
+        "realizedR": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BZUSDT_1790956275316",
+        "symbol": "BZUSDT",
+        "side": "LONG",
+        "entry": 101.29,
+        "mfe": 0.9,
+        "realizedR": 0.63,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SUPERUSDT_1790958945030",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.23315,
+        "mfe": 0.13,
+        "realizedR": -0.57,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZECUSDT_1790961312237",
+        "symbol": "ZECUSDT",
+        "side": "SHORT",
+        "entry": 1354.85,
+        "mfe": 2.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "STXUSDT_1790961467598",
+        "symbol": "STXUSDT",
+        "side": "SHORT",
+        "entry": 0.3617,
+        "mfe": 1.38,
+        "realizedR": 0.87,
+        "exitReason": "Giveback Lock (0.3R decay from 1.38R)"
+      },
+      {
+        "tradeId": "SUIUSDT_1790962221000",
+        "symbol": "SUIUSDT",
+        "side": "SHORT",
+        "entry": 1.1627,
+        "mfe": 2.31,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790966328697",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6763,
+        "mfe": 0.64,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790966386303",
+        "symbol": "AAVEUSDT",
+        "side": "SHORT",
+        "entry": 178.64,
+        "mfe": 0.31,
+        "realizedR": -0.25,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NIGHTUSDT_1790984215150",
+        "symbol": "NIGHTUSDT",
+        "side": "LONG",
+        "entry": 0.04904,
+        "mfe": 1.27,
+        "realizedR": 0.88,
+        "exitReason": "Giveback Lock (0.3R decay from 1.27R)"
+      },
+      {
+        "tradeId": "AKEUSDT_1791006622845",
+        "symbol": "AKEUSDT",
+        "side": "LONG",
+        "entry": 0.034373,
+        "mfe": 1.47,
+        "realizedR": 0.98,
+        "exitReason": "Giveback Lock (0.3R decay from 1.47R)"
+      },
+      {
+        "tradeId": "LYNUSDT_1791006803780",
+        "symbol": "LYNUSDT",
+        "side": "LONG",
+        "entry": 0.02699,
+        "mfe": 0.27,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791007412707",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.92,
+        "mfe": 0.08,
+        "realizedR": -0.57,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "AAOIUSDT_1791017724394",
+        "symbol": "AAOIUSDT",
+        "side": "LONG",
+        "entry": 114.96,
+        "mfe": 1.14,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "LDOUSDT_1791020459705",
+        "symbol": "LDOUSDT",
+        "side": "LONG",
+        "entry": 0.4509,
+        "mfe": 1.27,
+        "realizedR": 0.86,
+        "exitReason": "Giveback Lock (0.3R decay from 1.27R)"
+      },
+      {
+        "tradeId": "LITUSDT_1791022021923",
+        "symbol": "LITUSDT",
+        "side": "LONG",
+        "entry": 3.5453,
+        "mfe": 0.17,
+        "realizedR": -0.32,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "1000BONKUSDT_1791024960126",
+        "symbol": "1000BONKUSDT",
+        "side": "LONG",
+        "entry": 0.003671,
+        "mfe": 0.33,
+        "realizedR": -0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "FILUSDT_1791027598437",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0706,
+        "mfe": 0.06,
+        "realizedR": -0.61,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791031533540",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.89,
+        "mfe": 0,
+        "realizedR": -0.87,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "1000SHIBUSDT_1791035193850",
+        "symbol": "1000SHIBUSDT",
+        "side": "LONG",
+        "entry": 0.005694,
+        "mfe": 0.24,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SUPERUSDT_1791038459813",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.2636,
+        "mfe": 1.3,
+        "realizedR": 0.75,
+        "exitReason": "Giveback Lock (0.3R decay from 1.30R)"
+      },
+      {
+        "tradeId": "TRXUSDT_1791038971791",
+        "symbol": "TRXUSDT",
+        "side": "LONG",
+        "entry": 0.33668,
+        "mfe": 0.46,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HBARUSDT_1791039485696",
+        "symbol": "HBARUSDT",
+        "side": "LONG",
+        "entry": 0.10238,
+        "mfe": 0.03,
+        "realizedR": -0.64,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "STRKUSDT_1791039938584",
+        "symbol": "STRKUSDT",
+        "side": "LONG",
+        "entry": 0.04453,
+        "mfe": 3.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "VELVETUSDT_1791050252600",
+        "symbol": "VELVETUSDT",
+        "side": "LONG",
+        "entry": 0.08542,
+        "mfe": 0.49,
+        "realizedR": -0.15,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "LINKUSDT_1791054751226",
+        "symbol": "LINKUSDT",
+        "side": "LONG",
+        "entry": 13.91,
+        "mfe": 1.62,
+        "realizedR": 1.06,
+        "exitReason": "Giveback Lock (0.3R decay from 1.62R)"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791062825310",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.396,
+        "mfe": 0.56,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ENAUSDT_1791065174163",
+        "symbol": "ENAUSDT",
+        "side": "LONG",
+        "entry": 0.23866,
+        "mfe": 0.12,
+        "realizedR": -0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "KORUUSDT_1791067985497",
+        "symbol": "KORUUSDT",
+        "side": "LONG",
+        "entry": 22.7,
+        "mfe": 0.56,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "NEARUSDT_1791074350306",
+        "symbol": "NEARUSDT",
+        "side": "LONG",
+        "entry": 4.885,
+        "mfe": 0.08,
+        "realizedR": -0.54,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "MSTRUSDT_1791081252740",
+        "symbol": "MSTRUSDT",
+        "side": "LONG",
+        "entry": 163.88,
+        "mfe": 0.76,
+        "realizedR": 0.64,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SYNUSDT_1791085478876",
+        "symbol": "SYNUSDT",
+        "side": "LONG",
+        "entry": 0.18875,
+        "mfe": 0.07,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "GALAUSDT_1791087549654",
+        "symbol": "GALAUSDT",
+        "side": "LONG",
+        "entry": 0.002562,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1791088303197",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09635,
+        "mfe": 0.13,
+        "realizedR": -0.76,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791088575708",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.914,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "JUPUSDT_1791092303397",
+        "symbol": "JUPUSDT",
+        "side": "LONG",
+        "entry": 0.3312,
+        "mfe": 0.11,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      }
+    ]
+  },
+  "consHybrid_35": {
+    "model": "CONS_HYBRID_0.35R",
+    "trades": 78,
+    "winRate": 52.6,
+    "netR": 8.91,
+    "pf": 1.48,
+    "avgR": 0.11,
+    "avgWin": 0.67,
+    "avgLoss": 0.55,
+    "maxDD": 2.46,
+    "mfeCapturePct": 15.1,
+    "avgGiveback": 0.64,
+    "perTradeResults": [
+      {
+        "tradeId": "1000PEPEUSDT_1790849132245",
+        "symbol": "1000PEPEUSDT",
+        "side": "SHORT",
+        "entry": 0.0042669,
+        "mfe": 0.11,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "MUUSDT_1790859365793",
+        "symbol": "MUUSDT",
+        "side": "SHORT",
+        "entry": 1055.44,
+        "mfe": 0.83,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "MUUUSDT_1790859398137",
+        "symbol": "MUUUSDT",
+        "side": "SHORT",
+        "entry": 35.9,
+        "mfe": 0.86,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790860203592",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6691,
+        "mfe": 0.52,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "CBRSUSDT_1790860362092",
+        "symbol": "CBRSUSDT",
+        "side": "SHORT",
+        "entry": 179.46,
+        "mfe": 0.16,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAPLUSDT_1790860713443",
+        "symbol": "AAPLUSDT",
+        "side": "SHORT",
+        "entry": 331.39,
+        "mfe": 1.07,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790895964970",
+        "symbol": "AAVEUSDT",
+        "side": "LONG",
+        "entry": 172.12,
+        "mfe": 0.08,
+        "realizedR": -0.26,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790896149499",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 61.97,
+        "mfe": 0.52,
+        "realizedR": 0.39,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790900288024",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.071,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "LTCUSDT_1790900318562",
+        "symbol": "LTCUSDT",
+        "side": "LONG",
+        "entry": 68.74,
+        "mfe": 1.35,
+        "realizedR": 0.84,
+        "exitReason": "Giveback Lock (0.35R decay from 1.35R)"
+      },
+      {
+        "tradeId": "MVLLUSDT_1790900712531",
+        "symbol": "MVLLUSDT",
+        "side": "LONG",
+        "entry": 37.52,
+        "mfe": 0,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ARUSDT_1790907069406",
+        "symbol": "ARUSDT",
+        "side": "LONG",
+        "entry": 4.331,
+        "mfe": 0.12,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "WIFUSDT_1790907429107",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2541,
+        "mfe": 0.3,
+        "realizedR": 0.07,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790907488642",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.068,
+        "mfe": 0.88,
+        "realizedR": 0.72,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790907702615",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 270.5,
+        "mfe": 0.44,
+        "realizedR": -0.09,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "WIFUSDT_1790909768838",
+        "symbol": "WIFUSDT",
+        "side": "LONG",
+        "entry": 0.2556,
+        "mfe": 0.1,
+        "realizedR": 0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BTCUSDT_1790909799408",
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entry": 85135.9,
+        "mfe": 1.53,
+        "realizedR": 0.84,
+        "exitReason": "SL Lock Hit (+0.90R)"
+      },
+      {
+        "tradeId": "ETHUSDT_1790910698705",
+        "symbol": "ETHUSDT",
+        "side": "LONG",
+        "entry": 2718.26,
+        "mfe": 1.45,
+        "realizedR": 0.94,
+        "exitReason": "Giveback Lock (0.35R decay from 1.45R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1790910970589",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09758,
+        "mfe": 0.77,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "LITEUSDT_1790911093836",
+        "symbol": "LITEUSDT",
+        "side": "LONG",
+        "entry": 1053.52,
+        "mfe": 0.39,
+        "realizedR": -0.63,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "XRPUSDT_1790913227239",
+        "symbol": "XRPUSDT",
+        "side": "LONG",
+        "entry": 1.5061,
+        "mfe": 1.96,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "BNBUSDT_1790913249256",
+        "symbol": "BNBUSDT",
+        "side": "LONG",
+        "entry": 776.37,
+        "mfe": 1.44,
+        "realizedR": 0.93,
+        "exitReason": "Giveback Lock (0.35R decay from 1.44R)"
+      },
+      {
+        "tradeId": "NVDAUSDT_1790917332996",
+        "symbol": "NVDAUSDT",
+        "side": "LONG",
+        "entry": 232.32,
+        "mfe": 0.09,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "DASHUSDT_1790918834809",
+        "symbol": "DASHUSDT",
+        "side": "LONG",
+        "entry": 60.07,
+        "mfe": 0.35,
+        "realizedR": -0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790922918191",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 204.25,
+        "mfe": 0.71,
+        "realizedR": 0.04,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PENDLEUSDT_1790923216156",
+        "symbol": "PENDLEUSDT",
+        "side": "LONG",
+        "entry": 2.4549,
+        "mfe": 0.35,
+        "realizedR": 0.16,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZROUSDT_1790924204676",
+        "symbol": "ZROUSDT",
+        "side": "LONG",
+        "entry": 1.9388,
+        "mfe": 0,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "PUMPUSDT_1790926145798",
+        "symbol": "PUMPUSDT",
+        "side": "LONG",
+        "entry": 0.006021,
+        "mfe": 0.52,
+        "realizedR": -0.6,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "INTCUSDT_1790927953435",
+        "symbol": "INTCUSDT",
+        "side": "LONG",
+        "entry": 121.57,
+        "mfe": 1.25,
+        "realizedR": 0.83,
+        "exitReason": "Giveback Lock (0.35R decay from 1.25R)"
+      },
+      {
+        "tradeId": "MUUSDT_1790928103048",
+        "symbol": "MUUSDT",
+        "side": "LONG",
+        "entry": 1096.4,
+        "mfe": 1.9,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MUUUSDT_1790928136133",
+        "symbol": "MUUUSDT",
+        "side": "LONG",
+        "entry": 38.67,
+        "mfe": 1.7,
+        "realizedR": 1.07,
+        "exitReason": "Giveback Lock (0.35R decay from 1.70R)"
+      },
+      {
+        "tradeId": "TRUMPUSDT_1790933980212",
+        "symbol": "TRUMPUSDT",
+        "side": "LONG",
+        "entry": 2.118,
+        "mfe": 2.37,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "MRVLUSDT_1790938664042",
+        "symbol": "MRVLUSDT",
+        "side": "LONG",
+        "entry": 272.74,
+        "mfe": 0.81,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "COINUSDT_1790942859435",
+        "symbol": "COINUSDT",
+        "side": "LONG",
+        "entry": 195.11,
+        "mfe": 1.02,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "NATGASUSDT_1790943040305",
+        "symbol": "NATGASUSDT",
+        "side": "LONG",
+        "entry": 2.937,
+        "mfe": 1.29,
+        "realizedR": 0.83,
+        "exitReason": "Giveback Lock (0.35R decay from 1.29R)"
+      },
+      {
+        "tradeId": "MONUSDT_1790944065305",
+        "symbol": "MONUSDT",
+        "side": "LONG",
+        "entry": 0.03438,
+        "mfe": 1.15,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "ADAUSDT_1790944213397",
+        "symbol": "ADAUSDT",
+        "side": "LONG",
+        "entry": 0.2574,
+        "mfe": 0.31,
+        "realizedR": -0.44,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "TQQQUSDT_1790944271402",
+        "symbol": "TQQQUSDT",
+        "side": "LONG",
+        "entry": 80.86,
+        "mfe": 0.97,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "SAMSUNGUSDT_1790945146703",
+        "symbol": "SAMSUNGUSDT",
+        "side": "LONG",
+        "entry": 205.92,
+        "mfe": 0.72,
+        "realizedR": 0.46,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NBISUSDT_1790945204572",
+        "symbol": "NBISUSDT",
+        "side": "LONG",
+        "entry": 236.81,
+        "mfe": 1.41,
+        "realizedR": 0.92,
+        "exitReason": "Giveback Lock (0.35R decay from 1.41R)"
+      },
+      {
+        "tradeId": "DRAMUSDT_1790946230803",
+        "symbol": "DRAMUSDT",
+        "side": "LONG",
+        "entry": 62.84,
+        "mfe": 0.03,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "HYPEUSDT_1790947099617",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 91.215,
+        "mfe": 0.19,
+        "realizedR": -0.5,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "FILUSDT_1790948240548",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0491,
+        "mfe": 0.51,
+        "realizedR": -0.37,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "AXTIUSDT_1790949921811",
+        "symbol": "AXTIUSDT",
+        "side": "LONG",
+        "entry": 84.13,
+        "mfe": 0.68,
+        "realizedR": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "BZUSDT_1790956275316",
+        "symbol": "BZUSDT",
+        "side": "LONG",
+        "entry": 101.29,
+        "mfe": 0.9,
+        "realizedR": 0.63,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SUPERUSDT_1790958945030",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.23315,
+        "mfe": 0.13,
+        "realizedR": -0.57,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ZECUSDT_1790961312237",
+        "symbol": "ZECUSDT",
+        "side": "SHORT",
+        "entry": 1354.85,
+        "mfe": 2.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "STXUSDT_1790961467598",
+        "symbol": "STXUSDT",
+        "side": "SHORT",
+        "entry": 0.3617,
+        "mfe": 1.38,
+        "realizedR": 0.87,
+        "exitReason": "Giveback Lock (0.35R decay from 1.38R)"
+      },
+      {
+        "tradeId": "SUIUSDT_1790962221000",
+        "symbol": "SUIUSDT",
+        "side": "SHORT",
+        "entry": 1.1627,
+        "mfe": 2.31,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "GRASSUSDT_1790966328697",
+        "symbol": "GRASSUSDT",
+        "side": "SHORT",
+        "entry": 0.6763,
+        "mfe": 0.64,
+        "realizedR": -1,
+        "exitReason": "SL Hit"
+      },
+      {
+        "tradeId": "AAVEUSDT_1790966386303",
+        "symbol": "AAVEUSDT",
+        "side": "SHORT",
+        "entry": 178.64,
+        "mfe": 0.31,
+        "realizedR": -0.25,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "NIGHTUSDT_1790984215150",
+        "symbol": "NIGHTUSDT",
+        "side": "LONG",
+        "entry": 0.04904,
+        "mfe": 1.27,
+        "realizedR": 0.82,
+        "exitReason": "Giveback Lock (0.35R decay from 1.27R)"
+      },
+      {
+        "tradeId": "AKEUSDT_1791006622845",
+        "symbol": "AKEUSDT",
+        "side": "LONG",
+        "entry": 0.034373,
+        "mfe": 1.47,
+        "realizedR": 0.87,
+        "exitReason": "Giveback Lock (0.35R decay from 1.47R)"
+      },
+      {
+        "tradeId": "LYNUSDT_1791006803780",
+        "symbol": "LYNUSDT",
+        "side": "LONG",
+        "entry": 0.02699,
+        "mfe": 0.27,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791007412707",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.92,
+        "mfe": 0.08,
+        "realizedR": -0.57,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "AAOIUSDT_1791017724394",
+        "symbol": "AAOIUSDT",
+        "side": "LONG",
+        "entry": 114.96,
+        "mfe": 1.14,
+        "realizedR": 0.6,
+        "exitReason": "SL Lock Hit (+0.50R)"
+      },
+      {
+        "tradeId": "LDOUSDT_1791020459705",
+        "symbol": "LDOUSDT",
+        "side": "LONG",
+        "entry": 0.4509,
+        "mfe": 1.27,
+        "realizedR": 0.78,
+        "exitReason": "Giveback Lock (0.35R decay from 1.27R)"
+      },
+      {
+        "tradeId": "LITUSDT_1791022021923",
+        "symbol": "LITUSDT",
+        "side": "LONG",
+        "entry": 3.5453,
+        "mfe": 0.17,
+        "realizedR": -0.32,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "1000BONKUSDT_1791024960126",
+        "symbol": "1000BONKUSDT",
+        "side": "LONG",
+        "entry": 0.003671,
+        "mfe": 0.33,
+        "realizedR": -0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "FILUSDT_1791027598437",
+        "symbol": "FILUSDT",
+        "side": "LONG",
+        "entry": 1.0706,
+        "mfe": 0.06,
+        "realizedR": -0.61,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SOXSUSDT_1791031533540",
+        "symbol": "SOXSUSDT",
+        "side": "LONG",
+        "entry": 29.89,
+        "mfe": 0,
+        "realizedR": -0.87,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "1000SHIBUSDT_1791035193850",
+        "symbol": "1000SHIBUSDT",
+        "side": "LONG",
+        "entry": 0.005694,
+        "mfe": 0.24,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "SUPERUSDT_1791038459813",
+        "symbol": "SUPERUSDT",
+        "side": "LONG",
+        "entry": 0.2636,
+        "mfe": 1.3,
+        "realizedR": 0.75,
+        "exitReason": "Giveback Lock (0.35R decay from 1.30R)"
+      },
+      {
+        "tradeId": "TRXUSDT_1791038971791",
+        "symbol": "TRXUSDT",
+        "side": "LONG",
+        "entry": 0.33668,
+        "mfe": 0.46,
+        "realizedR": -0.43,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HBARUSDT_1791039485696",
+        "symbol": "HBARUSDT",
+        "side": "LONG",
+        "entry": 0.10238,
+        "mfe": 0.03,
+        "realizedR": -0.64,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "STRKUSDT_1791039938584",
+        "symbol": "STRKUSDT",
+        "side": "LONG",
+        "entry": 0.04453,
+        "mfe": 3.2,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "VELVETUSDT_1791050252600",
+        "symbol": "VELVETUSDT",
+        "side": "LONG",
+        "entry": 0.08542,
+        "mfe": 0.49,
+        "realizedR": -0.15,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "LINKUSDT_1791054751226",
+        "symbol": "LINKUSDT",
+        "side": "LONG",
+        "entry": 13.91,
+        "mfe": 2.14,
+        "realizedR": 0.93,
+        "exitReason": "Unresolved"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791062825310",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.396,
+        "mfe": 0.56,
+        "realizedR": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "ENAUSDT_1791065174163",
+        "symbol": "ENAUSDT",
+        "side": "LONG",
+        "entry": 0.23866,
+        "mfe": 0.12,
+        "realizedR": -0.02,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "KORUUSDT_1791067985497",
+        "symbol": "KORUUSDT",
+        "side": "LONG",
+        "entry": 22.7,
+        "mfe": 0.56,
+        "realizedR": -0.42,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "NEARUSDT_1791074350306",
+        "symbol": "NEARUSDT",
+        "side": "LONG",
+        "entry": 4.885,
+        "mfe": 0.08,
+        "realizedR": -0.54,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "MSTRUSDT_1791081252740",
+        "symbol": "MSTRUSDT",
+        "side": "LONG",
+        "entry": 163.88,
+        "mfe": 0.76,
+        "realizedR": 0.64,
+        "exitReason": "End of Log"
+      },
+      {
+        "tradeId": "SYNUSDT_1791085478876",
+        "symbol": "SYNUSDT",
+        "side": "LONG",
+        "entry": 0.18875,
+        "mfe": 0.07,
+        "realizedR": -0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "tradeId": "GALAUSDT_1791087549654",
+        "symbol": "GALAUSDT",
+        "side": "LONG",
+        "entry": 0.002562,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "XPLUSDT_1791088303197",
+        "symbol": "XPLUSDT",
+        "side": "LONG",
+        "entry": 0.09635,
+        "mfe": 0.13,
+        "realizedR": -0.76,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "tradeId": "HYPEUSDT_1791088575708",
+        "symbol": "HYPEUSDT",
+        "side": "LONG",
+        "entry": 89.914,
+        "mfe": 0.85,
+        "realizedR": 0.48,
+        "exitReason": "SL Lock Hit (+0.30R)"
+      },
+      {
+        "tradeId": "JUPUSDT_1791092303397",
+        "symbol": "JUPUSDT",
+        "side": "LONG",
+        "entry": 0.3312,
+        "mfe": 0.11,
+        "realizedR": -0.38,
+        "exitReason": "Manual/Emergency Exit"
+      }
+    ]
+  }
+}
