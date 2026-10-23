@@ -1,6 +1,18 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
+import { evaluateExecutionFilter } from "./executionFilter.js";
+import {
+   normalizeCvdSlope, updateTakerRatio, updateFunding,
+   getLiquidationSnapshot, recordLiqBaseline,
+   pruneFlowStores, SESSION_RISK_MULT, TOXIC_HOURS_UTC
+} from "./flowMetrics.js";
+import { liveFeed } from "./liveDataFeed.js";
+import { evaluateRangeReversion, RangeReversionSignal } from "./rangeReversion.js";
+import {
+   updateSymbolDirection, shouldTighten, isInvalidated,
+   pruneRegistry, getEntryConvictionBonus
+} from "./directionRegistry.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -12,6 +24,10 @@ import {
    registerTradeForDirectionTracking,
    updateDirectionTracking
 } from "./researchLogger.js";
+
+// Re-export so the Enhanced Execution Filter test suite (and any tooling) can
+// import evaluateExecutionFilter from apexPredator as the original spec intended.
+export { evaluateExecutionFilter };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
 let watcherInterval: NodeJS.Timeout | null = null;
@@ -58,6 +74,17 @@ let freeTradeSlotEnabled = true;
 let scanBatchSize = 25;
 let feeRate = 0.0004; // 0.04% default Binance VIP0 taker fee
 let slippageRate = 0.0002; // 0.02% estimated market slippage
+
+// ═══ v3.1 SMART FLOW CONFIGURATION ═══
+let graduatedRegime = true;        // BULL_WEAK/BEAR_WEAK counter-trend trades allowed at 0.5x risk with elite flow
+let rangeReversionEnabled = true;  // RANGE-edge mean reversion with exhaustion evidence
+let liveFeedEnabled = true;        // WebSocket live microstructure (tick CVD, spread, real liquidations)
+let toxicHoursEnabled = true;      // Hard block new entries at 05/06/13/18 UTC (measured chop windows)
+let sessionRiskEnabled = true;     // Session-based risk weighting (LONDON 1.0 ... OVERLAP 0.7)
+let timeStopMinutes = 90;          // Exit stagnant trades (no TP1 after N minutes)
+let spreadMaxPct = 0.10;           // Max live spread (%) allowed for new entries
+let maxGrossExposurePct = 600;     // Max aggregate notional exposure (% of balance)
+let maxSameDirectionTrades = 2;    // Max concurrent risked trades in the same direction (correlation guard)
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -110,6 +137,16 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.libyaClose1 !== undefined) libyaClose1 = opts.libyaClose1;
       if (opts.libyaOpen2 !== undefined) libyaOpen2 = opts.libyaOpen2;
       if (opts.libyaClose2 !== undefined) libyaClose2 = opts.libyaClose2;
+      // v3.1 smart flow options
+      if (opts.graduatedRegime !== undefined) graduatedRegime = !!opts.graduatedRegime;
+      if (opts.rangeReversionEnabled !== undefined) rangeReversionEnabled = !!opts.rangeReversionEnabled;
+      if (opts.liveFeedEnabled !== undefined) liveFeedEnabled = !!opts.liveFeedEnabled;
+      if (opts.toxicHoursEnabled !== undefined) toxicHoursEnabled = !!opts.toxicHoursEnabled;
+      if (opts.sessionRiskEnabled !== undefined) sessionRiskEnabled = !!opts.sessionRiskEnabled;
+      if (opts.timeStopMinutes !== undefined) timeStopMinutes = Math.max(15, Number(opts.timeStopMinutes) || 90);
+      if (opts.spreadMaxPct !== undefined) spreadMaxPct = Math.max(0.01, Number(opts.spreadMaxPct) || 0.10);
+      if (opts.maxGrossExposurePct !== undefined) maxGrossExposurePct = Math.max(100, Number(opts.maxGrossExposurePct) || 600);
+      if (opts.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(opts.maxSameDirectionTrades) || 2);
   }
 }
 
@@ -182,6 +219,17 @@ export function getStats() {
     libyaOpen2,
     libyaClose2,
     isSleeping: !isLibyaTradingAllowed(),
+    // v3.1 smart flow state
+    graduatedRegime,
+    rangeReversionEnabled,
+    toxicHoursEnabled,
+    sessionRiskEnabled,
+    timeStopMinutes,
+    spreadMaxPct,
+    maxGrossExposurePct,
+    maxSameDirectionTrades,
+    liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
+    fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
     today: todaysStats 
   }; 
 }
@@ -206,7 +254,17 @@ export function getConfig() {
     libyaOpen1, 
     libyaClose1, 
     libyaOpen2, 
-    libyaClose2 
+    libyaClose2,
+    // v3.1 smart flow options
+    graduatedRegime,
+    rangeReversionEnabled,
+    liveFeedEnabled,
+    toxicHoursEnabled,
+    sessionRiskEnabled,
+    timeStopMinutes,
+    spreadMaxPct,
+    maxGrossExposurePct,
+    maxSameDirectionTrades
   };
 }
 export function setConfig(config: any) {
@@ -231,9 +289,59 @@ export function setConfig(config: any) {
   if (config.libyaClose1 !== undefined) libyaClose1 = config.libyaClose1;
   if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
   if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
+  // v3.1 smart flow options
+  if (config.graduatedRegime !== undefined) graduatedRegime = !!config.graduatedRegime;
+  if (config.rangeReversionEnabled !== undefined) rangeReversionEnabled = !!config.rangeReversionEnabled;
+  if (config.liveFeedEnabled !== undefined) liveFeedEnabled = !!config.liveFeedEnabled;
+  if (config.toxicHoursEnabled !== undefined) toxicHoursEnabled = !!config.toxicHoursEnabled;
+  if (config.sessionRiskEnabled !== undefined) sessionRiskEnabled = !!config.sessionRiskEnabled;
+  if (config.timeStopMinutes !== undefined) timeStopMinutes = Math.max(15, Number(config.timeStopMinutes) || 90);
+  if (config.spreadMaxPct !== undefined) spreadMaxPct = Math.max(0.01, Number(config.spreadMaxPct) || 0.10);
+  if (config.maxGrossExposurePct !== undefined) maxGrossExposurePct = Math.max(100, Number(config.maxGrossExposurePct) || 600);
+  if (config.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(config.maxSameDirectionTrades) || 2);
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
+
+// --- RESILIENT FETCH LAYER (v3.1) ---
+// Legacy code swallowed ALL fetch errors silently (`catch { return []; }`),
+// meaning rate-limits and outages corrupted signal quality invisibly.
+// safeGet tracks failures, applies exponential cooldown on 429/418, and
+// surfaces every error through the log stream.
+const fetchHealth = {
+   consecutiveErrors: 0,
+   cooldownUntil: 0,
+   totalErrors: 0,
+   lastError: "",
+   lastErrorTs: 0
+};
+
+async function safeGet(url: string, config: any) {
+   if (Date.now() < fetchHealth.cooldownUntil) {
+      throw new Error(`Fetch cooldown active (${Math.ceil((fetchHealth.cooldownUntil - Date.now()) / 1000)}s remaining)`);
+   }
+   try {
+      const res = await axios.get(url, config);
+      fetchHealth.consecutiveErrors = 0;
+      return res;
+   } catch (e: any) {
+      fetchHealth.totalErrors++;
+      fetchHealth.lastError = e?.message || String(e);
+      fetchHealth.lastErrorTs = Date.now();
+      const status = e?.response?.status;
+      if (status === 429 || status === 418) {
+         fetchHealth.consecutiveErrors++;
+         const waitMs = Math.min(5 * 60000, 10000 * Math.pow(2, fetchHealth.consecutiveErrors));
+         fetchHealth.cooldownUntil = Date.now() + waitMs;
+         addLog(`⏳ [RATE LIMIT] Binance ${status}. Cooling down REST calls for ${Math.round(waitMs / 1000)}s. Live feed continues if connected.`, "warn");
+      } else if (fetchHealth.consecutiveErrors === 0) {
+         // Surface once per error streak (avoid log spam)
+         addLog(`⚠️ [FETCH ERROR] ${url.split("?")[0]} → ${fetchHealth.lastError}`, "warn");
+         fetchHealth.consecutiveErrors = 1;
+      }
+      throw e;
+   }
+}
 
 // --- DATA FETCHING ---
 async function updateDynamicWatchlist() {
@@ -245,7 +353,7 @@ async function updateDynamicWatchlist() {
       }
 
       addLog(`🔄 جلب قائمة العملات من بينانس وتصفية الأقوى سيولة...`, "info");
-      const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
+      const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
       
       const excludedBases = ['USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT'];
       
@@ -308,7 +416,7 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
    else if (interval === "15m") ttl = 20000;
    else if (interval === "5m") ttl = 10000;
 
-   const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines`, {
+   const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/klines`, {
       params: { symbol, interval, limit },
       timeout: 5000
    });
@@ -332,7 +440,7 @@ async function fetchFunding(symbol: string) {
    const cached = getCached<number>(fundingCache, symbol);
    if (cached !== null) return cached;
 
-   const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/premiumIndex`, { params: { symbol }, timeout: 5000 });
+   const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/premiumIndex`, { params: { symbol }, timeout: 5000 });
    const rate = parseFloat(res.data.lastFundingRate);
    // Funding rates update every 8 hours, caching for 60 seconds is extremely safe
    setCached(fundingCache, symbol, rate, 60000);
@@ -345,19 +453,21 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    if (cached) return cached;
 
    try {
-       const res = await axios.get(`${BINANCE_FAPI}/futures/data/openInterestHist`, {
+       const res = await safeGet(`${BINANCE_FAPI}/futures/data/openInterestHist`, {
          params: { symbol, period, limit }, timeout: 5000
        });
        // Open interest data updates periodically; caching for 30s significantly reduces load
        setCached(oiCache, cacheKey, res.data, 30000);
        return res.data;
-   } catch { return []; }
+   } catch (e: any) {
+      if (!String(e?.message || "").includes("cooldown")) fetchHealth.totalErrors++;
+      return [];
+   }
 }
 
-async function fetchLiq(symbol: string) {
-   // Proxying liquidation calculation (mocked for this specific requirement due to Binance lacking a free direct liq map)
-   return { _up: 3000000, _down: 3000000 };
-}
+// fetchLiq REMOVED (v3.1): the old mock returned fake constants. Real
+// liquidations now stream in via liveDataFeed (!forceOrder@arr) and are
+// tracked per-symbol in flowMetrics.getLiquidationSnapshot().
 
 // --- SEC 1: MARKET CONTEXT (BTC) ---
 async function getContext() {
@@ -416,7 +526,7 @@ async function getContext() {
 }
 
 // --- SEC 2: WHALE READER ---
-async function readWhale(symbol: string, btc_chg: number) {
+async function readWhale(symbol: string, btc_chg: number): Promise<any> {
    const c15 = await fetchKl(symbol, "15m", 210);
    const c5 = await fetchKl(symbol, "5m", 30);
    const c4h = await fetchKl(symbol, "4h", 20);
@@ -470,6 +580,24 @@ async function readWhale(symbol: string, btc_chg: number) {
    const corr = Math.abs(btc_chg) > 0.001 ? p_chg / btc_chg : 0;
    const asset_strong = btc_chg < -0.003 && corr > -0.3;
 
+   // ═══ NORMALIZED CVD (v3.1) — THE CRITICAL FIX ═══
+   // Legacy code compared RAW CVD slopes to absolute constants (-100, -80, -150).
+   // CVD is in base-asset units: -100 is noise for 1000PEPE and extreme for BTC.
+   // Normalized slopes are unit-free (fraction of average bar volume) and
+   // comparable across every symbol on the watchlist.
+   const avgVol5 = c5.slice(-15).map((x: any) => x.volume).reduce((a: number, b: number) => a + b, 0) / 15;
+   const avgVol4h = c4h.slice(-10).map((x: any) => x.volume).reduce((a: number, b: number) => a + b, 0) / 10;
+   const lastDelta15 = c15[c15.length - 1].takerBuy - c15[c15.length - 1].takerSell;
+   const cvd15N = normalizeCvdSlope(slope15, avgVol, symbol, lastDelta15);
+   const cvd5N = normalizeCvdSlope(slope5, avgVol5);
+   const cvd4hN = normalizeCvdSlope(slope4h, avgVol4h);
+
+   // Taker persistence (EMA + percentile) and funding distribution stats
+   const last15 = c15[c15.length - 1];
+   const takerRatio15 = last15.volume > 0 ? last15.takerBuy / last15.volume : 0.5;
+   const takerPersist = updateTakerRatio(symbol, takerRatio15);
+   const fundingProfile = updateFunding(symbol, fund);
+
    return {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
@@ -480,7 +608,16 @@ async function readWhale(symbol: string, btc_chg: number) {
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15
+      asset_strong, c15, c5, slope5, slope15,
+      // v3.1 normalized flow fields (unit-free)
+      slope5N: cvd5N.norm,
+      slope15N: cvd15N.norm,
+      slope4hN: cvd4hN.norm,
+      cvdZ15: cvd15N.z,
+      takerEma: takerPersist.ema,
+      takerPercentile: takerPersist.percentile,
+      fundingPercentile: fundingProfile.percentile,
+      fundingMean: fundingProfile.mean
    };
 }
 
@@ -606,6 +743,46 @@ async function scoreEntry(symbol: string, ctx: any) {
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
 
+   // ═══ LIVE DATA INJECTION (v3.1) ═══
+   // Tick-level CVD from the websocket feed, normalized to per-minute volume scale.
+   const live = liveFeed.getLiveFlow(symbol);
+   if (live.available) {
+      if (live.tickCvd1m !== null) w.tickCvd1mN = live.tickCvd1m / ((p.avg_vol || 1) / 15);
+      if (live.tickCvd5m !== null) w.tickCvd5mN = live.tickCvd5m / ((p.avg_vol || 1) / 3);
+      if (live.livePrice) w.livePrice = live.livePrice;
+   }
+
+   // Feed the Direction State Machine (live orchestrator wiring — previously
+   // this excellent engine was only used in offline replay validation).
+   const lastC = p.klines[p.klines.length - 1];
+   const dirDecision = updateSymbolDirection(symbol, {
+      time: lastC.openTime, open: lastC.open, high: lastC.high, low: lastC.low,
+      close: lastC.close, volume: lastC.volume, takerBuyBase: lastC.takerBuy
+   }, { regime: ctx.regime, btc_chg: ctx.btc_chg }, { oiChg: w.oi_chg });
+   const conviction = getEntryConvictionBonus(symbol);
+
+   // ═══ LIVE MICROSTRUCTURE VETOES (v3.1) ═══
+   let vetoLong = false, vetoShort = false, vetoReason = "";
+   if (liveFeedEnabled) {
+      // Spread gate: never pay more than the configured spread budget
+      if (live.available && live.spreadPct !== null && live.spreadPct > spreadMaxPct) {
+         return { signal: "WAIT", reason: `Spread ${live.spreadPct.toFixed(3)}% exceeds max ${spreadMaxPct}%`, sl: 0, ss: 0 };
+      }
+      // Real liquidation cascades: never trade INTO the wrecking ball
+      const liq = getLiquidationSnapshot(symbol);
+      recordLiqBaseline(symbol);
+      if (liq.cascadeActive && liq.intensity >= 6) {
+         if (liq.dominantSide === "LONGS") { vetoLong = true; vetoReason = `Long liquidation cascade (${liq.intensity.toFixed(1)}x baseline, $${Math.round(liq.longsUsd/1000)}k)`; }
+         if (liq.dominantSide === "SHORTS") { vetoShort = true; vetoReason = `Short liquidation cascade (${liq.intensity.toFixed(1)}x baseline, $${Math.round(liq.shortsUsd/1000)}k)`; }
+      }
+   }
+
+   // ═══ TOXIC HOURS (v3.1) — activates the measured chop windows ═══
+   const nowUtcHour = new Date().getUTCHours();
+   if (toxicHoursEnabled && TOXIC_HOURS_UTC.includes(nowUtcHour)) {
+      return { signal: "WAIT", reason: `toxic hour ${nowUtcHour}:00 UTC (measured chop window)`, sl: 0, ss: 0 };
+   }
+
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
    else if (!isLibyaTradingAllowed()) earlyReason = "OUTSIDE_LIBYA_HOURS";
@@ -685,6 +862,13 @@ async function scoreEntry(symbol: string, ctx: any) {
    sl += layer4_sl; ss += layer4_ss;
    if (layer4_sl > 0 || layer4_ss > 0) apexPredatorStats.rules.momentum_ignition.passed++; else apexPredatorStats.rules.momentum_ignition.failed++;
 
+   // ═══ STATE MACHINE CONVICTION BONUS (v3.1) ═══
+   // CONFIRMED/EXTENDING structure from the direction lifecycle adds evidence.
+   if (conviction.bonus > 0) {
+      if (dirDecision.direction === "LONG") sl += conviction.bonus;
+      else if (dirDecision.direction === "SHORT") ss += conviction.bonus;
+   }
+
    // Multi-Timeframe 5m Confluence bonus
    if (p.conf5_bull) sl += 0.8;
    if (p.conf5_bear) ss += 0.8;
@@ -760,15 +944,19 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
-         // REGIME LOCK: مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market)
-         if (ctx.regime.includes("BEAR")) {
-            addLog(`🛡️ [REGIME LOCK] تم منع صفقة LONG على ${symbol} لأن نظام البيتكوين هابط (${ctx.regime}).`, "warn");
+         // ═══ EXECUTION LAYER (v3.1) ═══
+         // All regime/asset gates now live in reasoningEngine.checkConfirmation
+         // (graduated positioning) — this layer enforces the execution matrix
+         // and live microstructure vetoes as the final defense.
+         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx });
+         if (exFilterLong.blocked) {
+            addLog(`🛡️ [EXECUTION FILTER] LONG ${symbol} blocked: ${exFilterLong.reason}`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "LONG",
                signal_score: sl,
-               rejection_reason: `Strict Bear Regime: All LONG trades prohibited during BTC ${ctx.regime} market.`,
+               rejection_reason: exFilterLong.reason,
                p,
                w,
                ctx,
@@ -776,62 +964,20 @@ async function scoreEntry(symbol: string, ctx: any) {
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
          }
-
-         // SAFETY GATE 2: مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف
-         // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
-         if (ctx.regime === "BULL_WEAK" && (reasoning.regime === "TREND_DOWN" || reasoning.regime === "TRANSITION")) {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة LONG على ${symbol} لأن البيتكوين في صعود ضعيف (BTC BULL_WEAK) وحالة الأصل (${reasoning.regime}).`, "warn");
+         if (vetoLong) {
+            addLog(`🚨 [LIVE VETO] LONG ${symbol} blocked: ${vetoReason}`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "LONG",
                signal_score: sl,
-               rejection_reason: `Safety Gate: BTC BULL_WEAK with Asset ${reasoning.regime}. Buying weak assets prohibited.`,
+               rejection_reason: vetoReason,
                p,
                w,
                ctx,
                reasoning
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 3: مانع الشراء في النطاق العرضي (فخ السيولة - RANGE Long Trap)
-         // الشرط: حظر صفقات الـ LONG نهائياً إذا كانت العملة في نطاق عرضي (Asset = RANGE) أثناء أي صعود للبيتكوين (BULL_STRONG أو BULL_WEAK).
-         if (reasoning.regime === "RANGE" && (ctx.regime === "BULL_STRONG" || ctx.regime === "BULL_WEAK")) {
-            addLog(`🛡️ [LIQUIDITY TRAP] تم منع صفقة LONG على ${symbol} لأن الأصل في نطاق عرضي (RANGE) أثناء صعود البيتكوين (${ctx.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Liquidity Trap Gate: RANGE Long prohibited during BTC ${ctx.regime} (altcoin liquidity drain).`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
-         if (reasoning.regime === "RANGE") {
-            const hasExplosiveRvol = p.rvol >= 2.0;
-            const hasDirectionalMomentum = p.adx >= 22 && p.di_plus > p.di_minus;
-            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
-               addLog(`🛡️ [DEAD CHOP] تم منع صفقة LONG على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية صاعدة (ADX >= 22 مع DI+ > DI-).`, "warn");
-               logRejectedSignal({
-                  symbol,
-                  timeframe: "15m",
-                  direction: "LONG",
-                  signal_score: sl,
-                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
-                  p,
-                  w,
-                  ctx,
-                  reasoning
-               });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-            }
          }
 
          apexPredatorStats.acceptedLongs++;
@@ -858,15 +1004,16 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // REGIME LOCK: مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market)
-         if (ctx.regime.includes("BULL")) {
-            addLog(`🛡️ [REGIME LOCK] تم منع صفقة SHORT على ${symbol} لأن نظام البيتكوين صاعد (${ctx.regime}).`, "warn");
+         // ═══ EXECUTION LAYER (v3.1) ═══
+         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx });
+         if (exFilterShort.blocked) {
+            addLog(`🛡️ [EXECUTION FILTER] SHORT ${symbol} blocked: ${exFilterShort.reason}`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "SHORT",
                signal_score: ss,
-               rejection_reason: `Strict Bull Regime: All SHORT trades prohibited during BTC ${ctx.regime} market.`,
+               rejection_reason: exFilterShort.reason,
                p,
                w,
                ctx,
@@ -874,44 +1021,20 @@ async function scoreEntry(symbol: string, ctx: any) {
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
          }
-
-         // SAFETY GATE 1: مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي
-         // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
-         if (ctx.regime === "BULL_STRONG" && (reasoning.regime === "TREND_UP" || reasoning.regime === "TRANSITION")) {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG) والأصل في حالة (${reasoning.regime}).`, "warn");
+         if (vetoShort) {
+            addLog(`🚨 [LIVE VETO] SHORT ${symbol} blocked: ${vetoReason}`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "SHORT",
                signal_score: ss,
-               rejection_reason: `Safety Gate: BTC Regime is BULL_STRONG and Asset is ${reasoning.regime}. Counter-trend shorting prohibited.`,
+               rejection_reason: vetoReason,
                p,
                w,
                ctx,
                reasoning
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
-         if (reasoning.regime === "RANGE") {
-            const hasExplosiveRvol = p.rvol >= 2.0;
-            const hasDirectionalMomentum = p.adx >= 22 && p.di_minus > p.di_plus;
-            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
-               addLog(`🛡️ [DEAD CHOP] تم منع صفقة SHORT على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية هابطة (ADX >= 22 مع DI- > DI+).`, "warn");
-               logRejectedSignal({
-                  symbol,
-                  timeframe: "15m",
-                  direction: "SHORT",
-                  signal_score: ss,
-                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
-                  p,
-                  w,
-                  ctx,
-                  reasoning
-               });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-            }
          }
 
          apexPredatorStats.acceptedShorts++;
@@ -963,20 +1086,75 @@ async function scoreEntry(symbol: string, ctx: any) {
       });
    }
 
+   // ═══ RANGE REVERSION PATHWAY (v3.1) ═══
+   // When the market is RANGE and the trend pathways failed confirmation, the
+   // reversion engine fades range EDGES with exhaustion evidence (normalized
+   // CVD divergence, taker exhaustion, absorption, real liquidation cascades).
+   // Asymmetric by design (forensic data): range LONG blocked during BTC bull,
+   // range SHORT allowed in all regimes (the measured goldmine).
+   if (rangeReversionEnabled && reasoning.regime === "RANGE" && ctx.tradeable) {
+      const rev = evaluateRangeReversion({ symbol, p, w, loc: reasoning.location, btcRegime: ctx.regime });
+      if (rev) {
+         const exFilterRev = evaluateExecutionFilter(rev.signal, ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx });
+         const revVetoed = rev.signal === "LONG" ? vetoLong : vetoShort;
+         if (!exFilterRev.blocked && !revVetoed) {
+            addLog(
+               `🔁 [RANGE REVERSION] ${rev.signal} ${symbol} | conviction ${rev.score.toFixed(1)}/10 | RR ${rev.rr.toFixed(2)} | ${rev.evidence.join(" · ")}`,
+               "info"
+            );
+            return {
+               signal: rev.signal,
+               score: rev.score,
+               grade: { label: "🔁 RANGE REVERSION", risk: 0.004, mult: 1.0 },
+               setupType: "RANGE_REVERSION",
+               p,
+               w,
+               ctx,
+               reasoning,
+               reversion: rev
+            };
+         }
+      }
+   }
+
    return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+}
+
+// ═══ PORTFOLIO GUARDS (v3.1) ═══
+// Correlation/exposure protection the legacy bot lacked: three correlated
+// high-beta longs could vaporize the daily loss limit in one BTC wick.
+function portfolioAllows(direction: "LONG" | "SHORT", newNotional: number): { ok: boolean; reason: string } {
+   const grossNow = activeTrades.reduce((acc: number, t: any) => acc + ((t.pos || 0) * (t.entry || 0)), 0);
+   const safeBalance = Math.max(virtualBalance, 1);
+   const maxGross = virtualBalance * (maxGrossExposurePct / 100);
+   if (grossNow + newNotional > maxGross) {
+      return {
+         ok: false,
+         reason: `gross exposure ${(grossNow / safeBalance * 100).toFixed(0)}% + new ${(newNotional / safeBalance * 100).toFixed(0)}% would exceed cap ${maxGrossExposurePct}%`
+      };
+   }
+   const sameDir = activeTrades.filter((t: any) => t.direction === direction && !t.be_done).length;
+   if (sameDir >= maxSameDirectionTrades) {
+      return { ok: false, reason: `${sameDir} risked ${direction} trades already open (cap ${maxSameDirectionTrades}) — correlation guard` };
+   }
+   return { ok: true, reason: "" };
 }
 
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
-   // Dynamic Risk Sizing based on Market Regime:
+   const isReversion = setupType === "RANGE_REVERSION";
+   // Dynamic Risk Sizing (v3.1): regime × session × graduated-confirmation
    // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
    const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
    const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
-   if (regimeRiskMult < 1.0) {
-      addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
+   const timing = extractEntryTiming();
+   const sessionMult = sessionRiskEnabled ? ((SESSION_RISK_MULT as any)[timing.session] ?? 1.0) : 1.0;
+   const confirmedMult = decision.reasoning?.confirmation?.suggestedRiskMult ?? 1.0;
+   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult * sessionMult * confirmedMult;
+   if (regimeRiskMult < 1.0 || sessionMult < 1.0 || confirmedMult < 1.0) {
+      addLog(`🛡️ [DYNAMIC RISK] ${symbol}: risk ×${(regimeRiskMult * sessionMult * confirmedMult).toFixed(2)} (regime: ${reasoning?.regime || ctx?.regime}, session: ${timing.session}, graduated: ${confirmedMult.toFixed(2)}).`, 'info');
    }
 
    const entryTiming = extractEntryTiming();
@@ -985,26 +1163,50 @@ function executeTrade(symbol: string, decision: any) {
    if (decision.signal === "LONG") {
       const entry = p.price;
       const c = p.klines;
-      const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
-      const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
-      const sl = isPullback 
-         ? Math.min(realLow, p.ema21) - (p.atr14 * slMultiplier)
-         : realLow - (p.atr14 * slMultiplier);
+      const minRR = isReversion ? 1.5 : MIN_RR_REQUIRED;
+      let sl: number, tp1: number, tp2: number, tp3: number;
+
+      if (isReversion && decision.reversion) {
+         // Range reversion plan: structural stop beyond the range edge,
+         // first target at range mid, stretch targets if the range expands.
+         const rev = decision.reversion;
+         sl = rev.stop;
+         const d0 = entry - sl;
+         if (d0 <= 0) return;
+         tp1 = rev.target;
+         tp2 = rev.target + d0 * 0.5;
+         tp3 = rev.target + d0 * 1.5;
+      } else {
+         const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
+         const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
+         sl = isPullback 
+            ? Math.min(realLow, p.ema21) - (p.atr14 * slMultiplier)
+            : realLow - (p.atr14 * slMultiplier);
+         const initialSlDist0 = Math.abs(entry - sl);
+         tp1 = entry + (initialSlDist0 * TP1_R); // Quick Win TP1 (Banks 40% of trade)
+         tp2 = entry + (initialSlDist0 * TP2_R); // Major Target TP2 (Banks 35% of trade)
+         tp3 = entry + (initialSlDist0 * TP3_R); // Runner TP3 (Banks 25% of trade)
+      }
+
       const realSlDist = entry - sl;
       if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
-      const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
-      const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
-
       const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+      if (calculatedRR < minRR) {
+         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${minRR})`, "error");
          return;
       }
 
       let pos = riskAmt / realSlDist;
+
+      // ═══ PORTFOLIO GUARDS (v3.1) ═══
+      const guardLong = portfolioAllows("LONG", pos * entry);
+      if (!guardLong.ok) {
+         addLog(`🏦 [PORTFOLIO GUARD] LONG ${symbol} skipped: ${guardLong.reason}`, "warn");
+         return;
+      }
+
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
@@ -1012,8 +1214,8 @@ function executeTrade(symbol: string, decision: any) {
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
-         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
+         setupType: isReversion ? "RANGE_REVERSION" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupLabel: isReversion ? "🔁 ارتداد النطاق" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"),
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
@@ -1034,30 +1236,51 @@ function executeTrade(symbol: string, decision: any) {
       };
       activeTrades.push(newTrade);
       registerTradeForDirectionTracking(newTrade);
-      addLog(`✅ LONG ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ LONG ${symbol} [${isReversion ? '🔁 ارتداد النطاق' : (isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم')}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    } else {
       const entry = p.price;
       const c = p.klines;
-      const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
-      const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
-      const sl = isPullback 
-         ? Math.max(realHigh, p.ema21) + (p.atr14 * slMultiplier)
-         : realHigh + (p.atr14 * slMultiplier);
+      const minRR = isReversion ? 1.5 : MIN_RR_REQUIRED;
+      let sl: number, tp1: number, tp2: number, tp3: number;
+
+      if (isReversion && decision.reversion) {
+         const rev = decision.reversion;
+         sl = rev.stop;
+         const d0 = sl - entry;
+         if (d0 <= 0) return;
+         tp1 = rev.target;
+         tp2 = rev.target - d0 * 0.5;
+         tp3 = rev.target - d0 * 1.5;
+      } else {
+         const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
+         const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
+         sl = isPullback 
+            ? Math.max(realHigh, p.ema21) + (p.atr14 * slMultiplier)
+            : realHigh + (p.atr14 * slMultiplier);
+         const initialSlDist0 = Math.abs(entry - sl);
+         tp1 = entry - (initialSlDist0 * TP1_R);
+         tp2 = entry - (initialSlDist0 * TP2_R);
+         tp3 = entry - (initialSlDist0 * TP3_R);
+      }
       const realSlDist = sl - entry;
       if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry - (initialSlDist * TP1_R);
-      const tp2 = entry - (initialSlDist * TP2_R);
-      const tp3 = entry - (initialSlDist * TP3_R);
-
       const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+      if (calculatedRR < minRR) {
+         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${minRR})`, "error");
          return;
       }
 
       let pos = riskAmt / realSlDist;
+
+      // ═══ PORTFOLIO GUARDS (v3.1) ═══
+      const guardShort = portfolioAllows("SHORT", pos * entry);
+      if (!guardShort.ok) {
+         addLog(`🏦 [PORTFOLIO GUARD] SHORT ${symbol} skipped: ${guardShort.reason}`, "warn");
+         return;
+      }
+
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
@@ -1065,8 +1288,8 @@ function executeTrade(symbol: string, decision: any) {
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
-         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
+         setupType: isReversion ? "RANGE_REVERSION" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupLabel: isReversion ? "🔁 ارتداد النطاق" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"),
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
@@ -1087,7 +1310,7 @@ function executeTrade(symbol: string, decision: any) {
       };
       activeTrades.push(newTrade);
       registerTradeForDirectionTracking(newTrade);
-      addLog(`✅ SHORT ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ SHORT ${symbol} [${isReversion ? '🔁 ارتداد النطاق' : (isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم')}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    }
 }
 
@@ -1096,9 +1319,13 @@ async function exitBrain(trade: any, ctx: any) {
    const t = trade;
    const w = await readWhale(t.symbol, 0); // Fast check
    const p = await readPrice(t.symbol, w.c15);
-   
-   const price = p.price;
+
+   // v3.1: prefer the websocket mark price for fresher mark-to-market
+   const price = liveFeed.getLivePrice(t.symbol) || p.price;
    t.currentPrice = price;
+
+   // Maintain the liquidation baseline for this symbol (cascade detection)
+   recordLiqBaseline(t.symbol);
 
    const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
    const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
@@ -1122,6 +1349,31 @@ async function exitBrain(trade: any, ctx: any) {
 
    let emergency = false;
    let emReason = "";
+
+   // ═══ STATE MACHINE INVALIDATION EXIT (v3.1) ═══
+   // The DirectionStateEngine detected structural invalidation of the trade's
+   // thesis (FORMING/CONFIRMED -> INVALIDATED). The legacy bot ignored this
+   // signal entirely — the single biggest fix for the DIRECTION_ERROR bucket.
+   if (isInvalidated(t.symbol)) {
+      addLog(`🚨 EMERGENCY EXIT ${t.symbol} | Direction Invalidation (State Machine) | PnL: ${profitR.toFixed(2)}R`, 'error');
+      closeTradeFull(t, "Direction Invalidation (State Machine)");
+      return;
+   }
+
+   // ═══ REAL LIQUIDATION CASCADE PROTECTION (v3.1) ═══
+   // Never ride INTO a wrecking ball: cascades against the position with
+   // extreme intensity mean momentum is not on our side anymore.
+   const liqSnap = getLiquidationSnapshot(t.symbol);
+   if (liqSnap.cascadeActive && liqSnap.intensity >= 8) {
+      const cascadeAgainst =
+         (t.direction === "LONG" && liqSnap.dominantSide === "LONGS") ||
+         (t.direction === "SHORT" && liqSnap.dominantSide === "SHORTS");
+      if (cascadeAgainst) {
+         addLog(`🚨 EMERGENCY EXIT ${t.symbol} | Liquidation Cascade ${liqSnap.dominantSide} (${liqSnap.intensity.toFixed(1)}x baseline) | PnL: ${profitR.toFixed(2)}R`, 'error');
+         closeTradeFull(t, `Liquidation Cascade ${liqSnap.dominantSide} (${liqSnap.intensity.toFixed(1)}x)`);
+         return;
+      }
+   }
 
    if (ctx.regime === "RANGING" || !ctx.tradeable) {
       if (smartBtcHoldEnabled && t.direction === "LONG" && ctx.btc_chg > 0.0) {
@@ -1162,6 +1414,8 @@ async function exitBrain(trade: any, ctx: any) {
    }
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
+   // v3.1: state machine WEAKENING_* => tighten the trail to protect gains faster
+   if (shouldTighten(t.symbol)) trailDist *= 0.6;
 
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
@@ -1209,25 +1463,56 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 4. SMART CVD & OI EXHAUSTION EXIT (حجز الأرباح عند القمم برصد تراجع CVD و OI)
+   // 4. SMART CVD & OI EXHAUSTION EXIT (v3.1 NORMALIZED)
+   // Legacy compared RAW slopes to absolute constants (-100/-80) which meant
+   // nothing consistent across symbols. Now: unit-free normalized CVD slopes
+   // (fraction of average bar volume) — same meaning on PEPE and BTC.
    if (profitR >= 0.70) {
       if (t.direction === "LONG") {
-         const cvdExhaustion = w.slope15 < -100 && w.slope5 < -80;
+         const cvdExhaustion = (w.slope15N ?? 0) <= -1.0 && (w.slope5N ?? 0) <= -0.7;
          const oiDropping = w.oi_chg < -0.005;
          if (cvdExhaustion && oiDropping) {
-            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي وتصريف مؤسساتي في CVD/OI.`, 'success');
+            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي في CVD المُطبّع وتصريف مؤسساتي في OI.`, 'success');
             closeTradeFull(t, "CVD/OI Exhaustion Peak");
             return;
          }
       } else if (t.direction === "SHORT") {
-         const cvdExhaustion = w.slope15 > 100 && w.slope5 > 80;
+         const cvdExhaustion = (w.slope15N ?? 0) >= 1.0 && (w.slope5N ?? 0) >= 0.7;
          const oiDropping = w.oi_chg < -0.005;
          if (cvdExhaustion && oiDropping) {
-            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانتهاء تغطية الشورتات وانعكاس CVD صعوداً.`, 'success');
+            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانعكاس CVD المُطبّع صعوداً وتصريف مؤسساتي في OI.`, 'success');
             closeTradeFull(t, "CVD/OI Short Squeeze Peak");
             return;
          }
       }
+   }
+
+   // 4b. MFE GIVEBACK EXIT (v3.1): never surrender most of a good move.
+   // Research showed avg giveback of 0.42R with fixed TPs almost never hit.
+   if (t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * 0.55) {
+      addLog(`🎯 [GIVEBACK EXIT] ${t.symbol} | peak +${t.peak_r.toFixed(2)}R → now +${profitR.toFixed(2)}R. Locking remaining gains.`, 'success');
+      closeTradeFull(t, `MFE Giveback (peak ${t.peak_r.toFixed(2)}R)`);
+      return;
+   }
+   // Pre-TP1 spike fade: price tagged +0.8R between polls then collapsed back
+   if (!t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * 0.45 && profitR > 0.1) {
+      addLog(`🎯 [SPIKE FADE EXIT] ${t.symbol} | tagged +${t.peak_r.toFixed(2)}R then faded to +${profitR.toFixed(2)}R — banking the spike.`, 'success');
+      closeTradeFull(t, `Spike Fade (peak ${t.peak_r.toFixed(2)}R given back)`);
+      return;
+   }
+
+   // 4c. TIME STOP (v3.1): stagnant trades are negative-expectancy capital
+   // drains. Average hold was ~1.8h; if TP1 hasn't been banked in time, exit.
+   const ageMin = (Date.now() - new Date(t.entryTime).getTime()) / 60000;
+   if (!t.a_closed && ageMin > timeStopMinutes && profitR < 0.25) {
+      addLog(`⏱️ [TIME STOP] ${t.symbol}: no TP1 after ${Math.round(ageMin)}min (PnL ${profitR.toFixed(2)}R). Freeing capital.`, 'info');
+      closeTradeFull(t, `Time Stop (${Math.round(ageMin)}min stagnant)`);
+      return;
+   }
+   if (t.a_closed && !t.c_closed && ageMin > timeStopMinutes * 1.7 && profitR < 0.8) {
+      addLog(`⏱️ [TIME STOP EXT] ${t.symbol}: extended stagnation after TP1 (${Math.round(ageMin)}min, ${profitR.toFixed(2)}R).`, 'info');
+      closeTradeFull(t, `Time Stop Extended (${Math.round(ageMin)}min)`);
+      return;
    }
 
    // 5. SMART EARLY LOSS MITIGATION (-0.30R to -0.35R)
@@ -1240,8 +1525,8 @@ async function exitBrain(trade: any, ctx: any) {
          : recentCloses.every((cl: number) => cl > p.ema21);
       
       const orderflowFlipped = t.direction === "LONG"
-         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -150 || (p.taker < 0.46 && p.rsi < 44))
-         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 150 || (p.taker > 0.54 && p.rsi > 56));
+         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || (w.slope15N ?? 0) <= -2.0 || (p.taker < 0.46 && p.rsi < 44))
+         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || (w.slope15N ?? 0) >= 2.0 || (p.taker > 0.54 && p.rsi > 56));
 
       if (isBreakingEMA || orderflowFlipped) {
          const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
@@ -1328,10 +1613,28 @@ export async function runApexLoop() {
       resetDailyStatsIfNeeded();
       await updateDynamicWatchlist();
       const ctx = await getContext();
-      
+
+      // ═══ LIVE FEED LIFECYCLE (v3.1) ═══
+      // Subscribe the websocket to active trades + the current scan batch.
+      // start() is idempotent; resync happens internally every 60s.
+      if (liveFeedEnabled) {
+         const prioritySymbols = [
+            ...activeTrades.map((t: any) => t.symbol),
+            ...WATCHLIST.slice(currentBatchIndex, Math.min(currentBatchIndex + scanBatchSize, WATCHLIST.length)),
+            "BTCUSDT", "ETHUSDT"
+         ];
+         liveFeed.setPrioritySymbols(prioritySymbols);
+         liveFeed.start();
+      }
+
       // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)
+      // v3.1: errors are isolated per-trade so one bad fetch never skips the rest.
       for (const t of activeTrades) {
-         await exitBrain(t, ctx);
+         try {
+            await exitBrain(t, ctx);
+         } catch (eExit: any) {
+            addLog(`⚠️ Exit management error for ${t.symbol}: ${eExit?.message || eExit}`, "warn");
+         }
       }
 
       // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
@@ -1375,6 +1678,21 @@ export async function runApexLoop() {
          addLog("⚠️ BTC Violent Regime: تم حظر فتح صفقات جديدة نظراً لتذبذب بيتكوين العنيف.", "warn");
          isLoopRunning = false;
          return;
+      }
+
+      // ═══ REST COOLDOWN GUARD (v3.1) ═══
+      // After a rate-limit event, keep managing open trades but stop scanning
+      // (signal quality from stale REST data is worse than no new trades).
+      if (Date.now() < fetchHealth.cooldownUntil) {
+         addLog("⏳ REST cooldown active — managing open trades only this cycle.", "warn");
+         isLoopRunning = false;
+         return;
+      }
+
+      // ═══ STORE PRUNING (v3.1) ═══ — bounded memory as the watchlist rotates
+      if (currentBatchIndex === 0) {
+         pruneFlowStores(new Set(WATCHLIST));
+         pruneRegistry(new Set(WATCHLIST));
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities

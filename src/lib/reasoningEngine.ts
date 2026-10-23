@@ -126,6 +126,8 @@ export interface ConfirmationResult {
    reason: string;
    evidence: string[];
    missingItems: string[];
+   /** Graduated regime positioning: risk multiplier the exit/execution layer should apply (default 1.0) */
+   suggestedRiskMult?: number;
 }
 
 export interface ReasoningResult {
@@ -443,8 +445,19 @@ export function evaluateTimingGate(
    p: any,
    w: any,
    loc: LocationAnalysis,
-   flow: FlowAnalysis
+   flow: FlowAnalysis,
+   scenarioType?: string
 ): TimingGateResult {
+   // ------------------------------------------------------------------
+   // PULLBACK TIMING PATH (fixes the legacy contradiction):
+   // A pullback entry is BY DEFINITION below the 30-bar resistance — the
+   // breakout-only gate could never confirm it (94% of rejections were
+   // WAITING_FOR_CONFIRMATION). Pullbacks get their own retest logic.
+   // ------------------------------------------------------------------
+   if (scenarioType === "PULLBACK_LONG" || scenarioType === "PULLBACK_SHORT") {
+      return evaluatePullbackTimingGate(direction, p, w);
+   }
+
    const evidence: string[] = [];
    const missingItems: string[] = [];
    const price = p.price;
@@ -665,6 +678,169 @@ export function evaluateTimingGate(
 }
 
 // ----------------------------------------------------------------------------
+// 4b. PULLBACK TIMING GATE
+// Retest-based timing for pullback scenarios: price should be AT the value
+// zone (EMA21), not over-extended, with reversal evidence and live taker flow
+// turning back in the trend's direction.
+// ----------------------------------------------------------------------------
+export function evaluatePullbackTimingGate(
+   direction: "LONG" | "SHORT",
+   p: any,
+   w: any
+): TimingGateResult {
+   const price = p.price;
+   const c = p.klines || [];
+   const lastCandle = c.length > 0 ? c[c.length - 1] : null;
+   const atr14 = p.atr14 || (price * 0.01);
+   const ema21 = p.ema21 || price;
+
+   const body = lastCandle ? Math.abs(lastCandle.close - lastCandle.open) : 0;
+   const upperWick = lastCandle ? lastCandle.high - Math.max(lastCandle.open, lastCandle.close) : 0;
+   const lowerWick = lastCandle ? Math.min(lastCandle.open, lastCandle.close) - lastCandle.low : 0;
+
+   // Live micro-flow confirmation (websocket tick CVD when available, else kline CVD slope)
+   const liveTaker = p.takerEma ?? p.taker ?? 0.5;
+   const liveCvdUp = (w?.tickCvd1mN ?? 0) > 0 || (w?.slope5 ?? 0) > 0;
+   const liveCvdDown = (w?.tickCvd1mN ?? 0) < 0 || (w?.slope5 ?? 0) < 0;
+
+   if (direction === "LONG") {
+      const distFromEma = price - ema21;
+      const touchedZone = distFromEma >= -0.15 * atr14 && distFromEma <= 0.80 * atr14;
+      const touchedThisBar = lastCandle ? lastCandle.low <= ema21 * 1.001 : false;
+
+      // Over-extended: chasing a pullback that already recovered too far
+      if (distFromEma > atr14 * 1.8 || p.rsi > 72) {
+         return {
+            state: "LATE_EXPANSION",
+            passed: false,
+            reason: `Pullback already recovered ${(distFromEma / atr14).toFixed(1)}x ATR above EMA21 — await fresh dip.`,
+            breakoutDistancePct: (distFromEma / ema21) * 100,
+            distanceToNextObstaclePct: 0,
+            isLateEntry: true,
+            isRetestCandidate: true,
+            evidence: [],
+            missingItems: ["Fresh dip into EMA21 value zone"]
+         };
+      }
+
+      if (touchedZone || touchedThisBar) {
+         const hasReversalEvidence = (lowerWick >= body * 0.5 || (lastCandle && lastCandle.close > lastCandle.open)) && p.rsi >= 36;
+         const hasFlowTurn = liveTaker >= 0.50 || liveCvdUp;
+         if (hasReversalEvidence && hasFlowTurn) {
+            return {
+               state: "CONFIRMED",
+               passed: true,
+               reason: "Pullback retest confirmed: value zone held with reversal candle and taker flow turning back up.",
+               breakoutDistancePct: (distFromEma / ema21) * 100,
+               distanceToNextObstaclePct: 0,
+               isLateEntry: false,
+               isRetestCandidate: true,
+               evidence: [
+                  `Price at EMA21 value zone (${(distFromEma / atr14).toFixed(2)}x ATR)`,
+                  `Reversal evidence: lower wick ${(lowerWick / (body || 1)).toFixed(1)}x body`,
+                  `Live flow: taker ${(liveTaker * 100).toFixed(1)}% / CVD turn`
+               ],
+               missingItems: []
+            };
+         }
+         return {
+            state: "WAITING_FOR_CONFIRMATION",
+            passed: false,
+            reason: "Price is at the EMA21 value zone but reversal evidence is incomplete.",
+            breakoutDistancePct: (distFromEma / ema21) * 100,
+            distanceToNextObstaclePct: 0,
+            isLateEntry: false,
+            isRetestCandidate: true,
+            evidence: [],
+            missingItems: [
+               ...(hasReversalEvidence ? [] : ["Rejection wick / bullish close at the zone"]),
+               ...(hasFlowTurn ? [] : ["Taker flow turning back up (>= 50% or live CVD positive)"])
+            ]
+         };
+      }
+
+      return {
+         state: "WAITING_FOR_RETEST",
+         passed: false,
+         reason: `Pullback in progress but price is ${(distFromEma / atr14).toFixed(1)}x ATR above EMA21 — await value zone touch.`,
+         breakoutDistancePct: (distFromEma / ema21) * 100,
+         distanceToNextObstaclePct: 0,
+         isLateEntry: false,
+         isRetestCandidate: true,
+         evidence: [],
+         missingItems: [`Retest of EMA21 (${ema21.toFixed(4)})`]
+      };
+   }
+
+   // --- SHORT pullback ---
+   const distFromEma = ema21 - price;
+   const touchedZone = distFromEma >= -0.15 * atr14 && distFromEma <= 0.80 * atr14;
+   const touchedThisBar = lastCandle ? lastCandle.high >= ema21 * 0.999 : false;
+
+   if (distFromEma > atr14 * 1.8 || p.rsi < 28) {
+      return {
+         state: "LATE_EXPANSION",
+         passed: false,
+         reason: `Pullback already dropped ${(distFromEma / atr14).toFixed(1)}x ATR below EMA21 — await fresh bounce.`,
+         breakoutDistancePct: (distFromEma / ema21) * 100,
+         distanceToNextObstaclePct: 0,
+         isLateEntry: true,
+         isRetestCandidate: true,
+         evidence: [],
+         missingItems: ["Fresh bounce into EMA21 resistance zone"]
+      };
+   }
+
+   if (touchedZone || touchedThisBar) {
+      const hasReversalEvidence = (upperWick >= body * 0.5 || (lastCandle && lastCandle.close < lastCandle.open)) && p.rsi <= 64;
+      const hasFlowTurn = liveTaker <= 0.50 || liveCvdDown;
+      if (hasReversalEvidence && hasFlowTurn) {
+         return {
+            state: "CONFIRMED",
+            passed: true,
+            reason: "Pullback retest confirmed: EMA21 resistance held with rejection candle and taker flow turning back down.",
+            breakoutDistancePct: (distFromEma / ema21) * 100,
+            distanceToNextObstaclePct: 0,
+            isLateEntry: false,
+            isRetestCandidate: true,
+            evidence: [
+               `Price at EMA21 resistance zone (${(distFromEma / atr14).toFixed(2)}x ATR)`,
+               `Rejection evidence: upper wick ${(upperWick / (body || 1)).toFixed(1)}x body`,
+               `Live flow: taker ${(liveTaker * 100).toFixed(1)}% / CVD turn`
+            ],
+            missingItems: []
+         };
+      }
+      return {
+         state: "WAITING_FOR_CONFIRMATION",
+         passed: false,
+         reason: "Price is at the EMA21 resistance zone but rejection evidence is incomplete.",
+         breakoutDistancePct: (distFromEma / ema21) * 100,
+         distanceToNextObstaclePct: 0,
+         isLateEntry: false,
+         isRetestCandidate: true,
+         evidence: [],
+         missingItems: [
+            ...(hasReversalEvidence ? [] : ["Rejection wick / bearish close at the zone"]),
+            ...(hasFlowTurn ? [] : ["Taker flow turning back down (<= 50% or live CVD negative)"])
+         ]
+      };
+   }
+
+   return {
+      state: "WAITING_FOR_RETEST",
+      passed: false,
+      reason: `Pullback in progress but price is ${(distFromEma / atr14).toFixed(1)}x ATR below EMA21 — await resistance zone touch.`,
+      breakoutDistancePct: (distFromEma / ema21) * 100,
+      distanceToNextObstaclePct: 0,
+      isLateEntry: false,
+      isRetestCandidate: true,
+      evidence: [],
+      missingItems: [`Retest of EMA21 (${ema21.toFixed(4)})`]
+   };
+}
+
+// ----------------------------------------------------------------------------
 // 5. SCENARIO ENGINE: generateScenarios
 // ----------------------------------------------------------------------------
 export function generateScenarios(
@@ -742,7 +918,11 @@ export function generateScenarios(
       };
    }
 
-   if (regime === "TREND_DOWN" || (flow.state === "SHORT_BUILDUP" && regime !== "TREND_UP")) {
+   // NOTE: regime === "TREND_UP" always returned in the TREND_UP block above,
+   // so no extra guard is needed here (the legacy `regime !== "TREND_UP"`
+   // comparison was dead logic and broke strict typecheck).
+   const shortBuildup = flow.state === "SHORT_BUILDUP";
+   if (regime === "TREND_DOWN" || shortBuildup) {
       if (loc.nearSupport) {
          missingConfirmation.push("Clean 15m candle close clearly below " + loc.nearestSupport.toFixed(4));
          missingConfirmation.push("RVOL > 1.2 confirming breakdown volume");
@@ -848,6 +1028,7 @@ export function checkConfirmation(
 ): ConfirmationResult {
    const evidence: string[] = [];
    const missingItems: string[] = [];
+   let suggestedRiskMult = 1.0;
 
    // 1. Strict Gate 1: Regime check
    if (regime === "HIGH_VOLATILITY") {
@@ -882,14 +1063,25 @@ export function checkConfirmation(
       };
    }
 
-   // --- FORENSIC & BTC MARKET REGIME SAFETY GATES ---
+   // --- FORENSIC & BTC MARKET REGIME SAFETY GATES (GRADUATED v3.1) ---
+   // Legacy: absolute bans on ANY short in ANY bull regime / ANY long in ANY bear
+   // regime. That one-dimensional lock made the bot LONG-only in bull and
+   // SHORT-only in bear (see Oct 1 dataset: 6/6 shorts, 5 losses, PF 0.03).
+   //
+   // v3.1 GRADUATED POSITIONING:
+   //   BULL_STRONG : shorts still hard-blocked (fully one-sided market)
+   //   BEAR_STRONG : longs still hard-blocked (fully one-sided market)
+   //   BULL_WEAK   : shorts ALLOWED only with STRONG persistent bearish orderflow
+   //                 (4h CVD negative) at 0.5x risk
+   //   BEAR_WEAK   : longs  ALLOWED only with STRONG persistent bullish orderflow
+   //                 (4h CVD positive) at 0.5x risk
    const btcRegime = ctx?.regime || "";
    const bias = scenario.primary.bias;
+   const graduated = ctx?.graduatedRegime !== false; // default ON
 
-   // 1. مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market - BULL_STRONG أو BULL_WEAK):
-   // حظر محاولات السباحة ضد التيار الصاعد للبيتكوين لمنع الضرب المتكرر للستوب لوس.
    if (bias === "SHORT") {
-      if (btcRegime.includes("BULL")) {
+      const hardBlock = btcRegime === "BULL_STRONG" || (!graduated && btcRegime.includes("BULL"));
+      if (hardBlock) {
          return {
             isConfirmed: false,
             confirmedSignal: "WAIT",
@@ -898,12 +1090,25 @@ export function checkConfirmation(
             missingItems: ["BTC transition into neutral or bear market"]
          };
       }
+      if (graduated && btcRegime === "BULL_WEAK") {
+         const eliteBearFlow = flow.persistenceState === "STRONG" && (w?.slope4hN ?? w?.slope4h ?? 0) < 0;
+         if (!eliteBearFlow) {
+            return {
+               isConfirmed: false,
+               confirmedSignal: "WAIT",
+               reason: `Graduated Regime: BULL_WEAK shorts require STRONG persistent bearish orderflow with negative 4h CVD (persistence: ${flow.persistenceState}).`,
+               evidence,
+               missingItems: ["STRONG flow persistence with 4h CVD < 0"]
+            };
+         }
+         suggestedRiskMult = 0.5;
+         evidence.push("Graduated regime: elite bear flow short at 0.5x risk");
+      }
    }
 
-   // 2. مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market - BEAR_STRONG أو BEAR_WEAK):
-   // حظر الشراء عندما يكون البيتكوين هابطاً لتفادي السقوط في فخاخ الهبوط المستمر.
    if (bias === "LONG") {
-      if (btcRegime.includes("BEAR")) {
+      const hardBlock = btcRegime === "BEAR_STRONG" || (!graduated && btcRegime.includes("BEAR"));
+      if (hardBlock) {
          return {
             isConfirmed: false,
             confirmedSignal: "WAIT",
@@ -911,6 +1116,20 @@ export function checkConfirmation(
             evidence,
             missingItems: ["BTC transition into neutral or bull market"]
          };
+      }
+      if (graduated && btcRegime === "BEAR_WEAK") {
+         const eliteBullFlow = flow.persistenceState === "STRONG" && (w?.slope4hN ?? w?.slope4h ?? 0) > 0;
+         if (!eliteBullFlow) {
+            return {
+               isConfirmed: false,
+               confirmedSignal: "WAIT",
+               reason: `Graduated Regime: BEAR_WEAK longs require STRONG persistent bullish orderflow with positive 4h CVD (persistence: ${flow.persistenceState}).`,
+               evidence,
+               missingItems: ["STRONG flow persistence with 4h CVD > 0"]
+            };
+         }
+         suggestedRiskMult = 0.5;
+         evidence.push("Graduated regime: elite bull flow long at 0.5x risk");
       }
       if (btcRegime === "BULL_WEAK" && (regime === "TREND_DOWN" || regime === "TRANSITION")) {
          return {
@@ -971,7 +1190,7 @@ export function checkConfirmation(
       }
    }
 
-   // 4. Strict Gate 4: Timing Gate verification
+   // 5. Timing Gate (scenario-aware: pullback scenarios use the retest path)
    if (!timingGate.passed) {
       return {
          isConfirmed: false,
@@ -982,21 +1201,26 @@ export function checkConfirmation(
       };
    }
 
-   // 5. Strict Gate 5: Location Awareness & Obstacle Distance
-   if (scenario.primary.bias === "LONG" && loc.distanceToResistancePct < 0.0025 && !timingGate.passed) {
+   // 5. Location Awareness & Obstacle Distance (v3.1 FIXED — was dead code).
+   // Only applies to NON-breakout scenarios while price is BELOW resistance
+   // (LONG) / ABOVE support (SHORT). Breakout scenarios are validated by the
+   // Timing Gate instead (price must already be through the level).
+   if (scenario.primary.bias === "LONG" && scenario.primary.type !== "BREAKOUT_LONG" &&
+       loc.distanceToResistancePct >= 0 && loc.distanceToResistancePct < 0.0025) {
       return {
          isConfirmed: false,
          confirmedSignal: "WAIT",
-         reason: `Price is within ${(loc.distanceToResistancePct * 100).toFixed(2)}% of major resistance. Insufficient clearance for profitable trade.`,
+         reason: `Price is within ${(loc.distanceToResistancePct * 100).toFixed(2)}% of major resistance. Insufficient clearance for a non-breakout entry.`,
          evidence,
          missingItems: ["Clearance / structural breakout above resistance"]
       };
    }
-   if (scenario.primary.bias === "SHORT" && loc.distanceToSupportPct < 0.0025 && !timingGate.passed) {
+   if (scenario.primary.bias === "SHORT" && scenario.primary.type !== "BREAKOUT_SHORT" &&
+       loc.distanceToSupportPct >= 0 && loc.distanceToSupportPct < 0.0025) {
       return {
          isConfirmed: false,
          confirmedSignal: "WAIT",
-         reason: `Price is within ${(loc.distanceToSupportPct * 100).toFixed(2)}% of major support. Insufficient clearance for profitable trade.`,
+         reason: `Price is within ${(loc.distanceToSupportPct * 100).toFixed(2)}% of major support. Insufficient clearance for a non-breakdown entry.`,
          evidence,
          missingItems: ["Clearance / structural breakdown below support"]
       };
@@ -1036,7 +1260,8 @@ export function checkConfirmation(
             confirmedSignal: "LONG",
             reason: "All primary regime, persistent orderflow, timing gate, and location confirmation passed.",
             evidence,
-            missingItems: []
+            missingItems: [],
+            suggestedRiskMult
          };
       }
    }
@@ -1075,7 +1300,8 @@ export function checkConfirmation(
             confirmedSignal: "SHORT",
             reason: "All primary regime, persistent orderflow, timing gate, and location confirmation passed.",
             evidence,
-            missingItems: []
+            missingItems: [],
+            suggestedRiskMult
          };
       }
    }
@@ -1113,9 +1339,13 @@ export function evaluateSymbolReasoning(
    // 4. Scenarios
    const scenario = generateScenarios(regime, flow, location, p);
 
-   // 5. Timing Gate
+   // 5. Timing Gate — scenario-aware: pullback scenarios use the retest path,
+   //    breakout/continuation use the structural breach path.
    const preferredBias: "LONG" | "SHORT" = supportingScore.sl >= supportingScore.ss ? "LONG" : "SHORT";
-   const timingGate = evaluateTimingGate(preferredBias, p, w, location, flow);
+   const gateBias: "LONG" | "SHORT" = (scenario.primary.bias === "LONG" || scenario.primary.bias === "SHORT")
+      ? scenario.primary.bias
+      : preferredBias;
+   const timingGate = evaluateTimingGate(gateBias, p, w, location, flow, scenario.primary.type);
 
    // 6. Confirmation
    const confirmation = checkConfirmation(regime, flow, location, scenario, timingGate, p, w, supportingScore, ctx);

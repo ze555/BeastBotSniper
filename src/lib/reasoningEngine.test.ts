@@ -352,47 +352,68 @@ console.log("=======================================================\n");
 }
 
 // ----------------------------------------------------------------------------
-// Test 13: Strict Bull Regime - All SHORT Trades Prohibited
+// Test 13: Regime Gates for SHORT (v3.1 GRADUATED SPEC)
+// - BULL_STRONG: hard block (unchanged)
+// - BULL_WEAK:   graduated — blocked WITHOUT elite bear flow; allowed at 0.5x
+//                risk WITH STRONG persistence + negative NORMALIZED 4h CVD
 // ----------------------------------------------------------------------------
 {
-   const mockPrice = { price: 100, atr14: 1.0, rvol: 1.8, taker: 0.44, rsi: 40, adx: 25, di_plus: 15, di_minus: 30, klines: [{ open: 101, high: 101, low: 99, close: 99.5 }] };
+   const mockPrice = { price: 89.2, atr14: 1.0, rvol: 1.8, taker: 0.44, rsi: 40, adx: 25, di_plus: 15, di_minus: 30, klines: [{ open: 91, high: 91.5, low: 89, close: 89.2 }] };
    const mockWhale = { p_chg: -0.005, oi_chg: 0.010, slope15: -210, slope5: -70, slope4h: -500, cvd_mixed: false };
-   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.005, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
    const flow = interpretFlow(mockPrice, mockWhale);
-   const timing = evaluateTimingGate("SHORT", mockPrice, mockWhale, loc, flow);
+   const timing = evaluateTimingGate("SHORT", mockPrice, mockWhale, loc, flow, "BREAKOUT_SHORT");
    const scenario = { primary: { type: "BREAKOUT_SHORT" as const, state: "WAITING" as const, bias: "SHORT" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
    
-   // BTC is BULL_STRONG
+   // BTC is BULL_STRONG → hard block remains
    const conf1 = checkConfirmation("TREND_UP", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_STRONG" });
    assert("Test 13a: SHORT blocked when BTC is BULL_STRONG", conf1.isConfirmed === false);
    assert("Test 13b: Reason mentions Strict Bull Regime", conf1.reason.includes("Strict Bull Regime"));
 
-   // BTC is BULL_WEAK
-   const conf2 = checkConfirmation("TREND_DOWN", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_WEAK" });
-   assert("Test 13c: SHORT blocked when BTC is BULL_WEAK", conf2.isConfirmed === false);
-   assert("Test 13d: Reason mentions Strict Bull Regime", conf2.reason.includes("Strict Bull Regime"));
+   // BTC is BULL_WEAK with RAW positive 4h flow (no normalized evidence) → graduated block
+   const weakWhale = { ...mockWhale, slope4h: 500 };
+   const conf2 = checkConfirmation("TREND_DOWN", flow, loc, scenario, timing, mockPrice, weakWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_WEAK" });
+   assert("Test 13c: SHORT blocked when BTC is BULL_WEAK without elite flow", conf2.isConfirmed === false);
+   assert("Test 13d: Reason mentions Graduated Regime", conf2.reason.includes("Graduated Regime"));
+
+   // BTC is BULL_WEAK WITH elite bear flow (normalized 4h CVD negative + STRONG persistence)
+   const eliteWhale = { ...mockWhale, slope4hN: -1.2 };
+   const elitePrice = { ...mockPrice, ema50: 105, st_bear: true, bear_align: true, LH_LL: true };
+   const conf3 = checkConfirmation("TREND_DOWN", flow, loc, scenario, timing, elitePrice, eliteWhale, { sl: 3.0, ss: 8.5 }, { regime: "BULL_WEAK" });
+   assert("Test 13e: SHORT allowed at BULL_WEAK with elite bear flow (graduated)", conf3.isConfirmed === true);
+   assert("Test 13f: Elite flow short suggests 0.5x risk", conf3.suggestedRiskMult === 0.5);
 }
 
 // ----------------------------------------------------------------------------
-// Test 14: Strict Bear Regime - All LONG Trades Prohibited
+// Test 14: Regime Gates for LONG (v3.1 GRADUATED SPEC)
+// - BEAR_STRONG: hard block (unchanged)
+// - BEAR_WEAK:   graduated — blocked WITHOUT elite bull flow; allowed at 0.5x
+//                risk WITH STRONG persistence + positive NORMALIZED 4h CVD
 // ----------------------------------------------------------------------------
 {
-   const mockPrice = { price: 100, atr14: 1.0, rvol: 1.8, taker: 0.58, rsi: 55, adx: 25, di_plus: 30, di_minus: 15, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 99, high: 101, low: 99, close: 100.5 }] };
+   const mockPrice = { price: 110.5, atr14: 1.0, rvol: 1.8, taker: 0.58, rsi: 55, adx: 25, di_plus: 30, di_minus: 15, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 109, high: 111, low: 108.5, close: 110.6 }] };
    const mockWhale = { p_chg: 0.005, oi_chg: 0.010, slope15: 210, slope5: 70, slope4h: 500, cvd_mixed: false };
-   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.005, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
    const flow = interpretFlow(mockPrice, mockWhale);
-   const timing = evaluateTimingGate("LONG", mockPrice, mockWhale, loc, flow);
+   const timing = evaluateTimingGate("LONG", mockPrice, mockWhale, loc, flow, "BREAKOUT_LONG");
    const scenario = { primary: { type: "BREAKOUT_LONG" as const, state: "WAITING" as const, bias: "LONG" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
 
-   // BTC is BEAR_STRONG
+   // BTC is BEAR_STRONG → hard block remains
    const conf1 = checkConfirmation("TREND_UP", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_STRONG" });
    assert("Test 14a: LONG blocked when BTC is BEAR_STRONG", conf1.isConfirmed === false);
    assert("Test 14b: Reason mentions Strict Bear Regime", conf1.reason.includes("Strict Bear Regime"));
 
-   // BTC is BEAR_WEAK
-   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, mockWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
-   assert("Test 14c: LONG blocked when BTC is BEAR_WEAK", conf2.isConfirmed === false);
-   assert("Test 14d: Reason mentions Strict Bear Regime", conf2.reason.includes("Strict Bear Regime"));
+   // BTC is BEAR_WEAK with RAW negative 4h flow (no normalized evidence) → graduated block
+   const weakWhale = { ...mockWhale, slope4h: -500 };
+   const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, weakWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
+   assert("Test 14c: LONG blocked when BTC is BEAR_WEAK without normalized flow", conf2.isConfirmed === false);
+   assert("Test 14d: Reason mentions Graduated Regime", conf2.reason.includes("Graduated Regime"));
+
+   // BTC is BEAR_WEAK WITH elite bull flow (normalized 4h CVD positive + STRONG persistence)
+   const eliteWhale = { ...mockWhale, slope4hN: 1.2 };
+   const conf3 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, eliteWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
+   assert("Test 14e: LONG allowed at BEAR_WEAK with elite bull flow (graduated)", conf3.isConfirmed === true);
+   assert("Test 14f: Elite flow long suggests 0.5x risk", conf3.suggestedRiskMult === 0.5);
 }
 
 // ----------------------------------------------------------------------------
