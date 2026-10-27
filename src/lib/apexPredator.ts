@@ -388,18 +388,29 @@ async function getContext() {
    
    const btc_violent = Math.abs(btc_15m_chg) > (Number(btcVolThresholdStr) / 100) && rvol > 2.5;
 
-   let regime = "RANGING";
-   if (price > ema50 && ema50 > ema200 && hh_hl) regime = "BULL_STRONG";
-   else if (price > ema50 && ema50 > ema200) regime = "BULL_WEAK";
-   else if (price > ema200 && price < ema50) regime = "BULL_WEAK"; // Bouncing off 200 or in chop above 200
-   else if (price < ema50 && ema50 < ema200 && lh_ll) regime = "BEAR_STRONG";
-   else if (price < ema50 && ema50 < ema200) regime = "BEAR_WEAK";
-   else if (price < ema200 && price > ema50) regime = "BEAR_WEAK"; // Chop below 200
-   
-   // If it's still ranging but high timeframe is definitely bullish
-   if (regime === "RANGING") {
-      if (price > ema200) regime = "BULL_WEAK";
-      else if (price < ema200) regime = "BEAR_WEAK";
+   // Calculate 24h momentum for BTC to distinguish between true trends and sideways consolidation:
+   const c4h_start = btc4h[Math.max(0, btc4h.length - 6)]; // 24h ago (6 * 4h candles)
+   const btc_24h_chg = c4h_start ? (price - c4h_start.close) / c4h_start.close : 0;
+
+   let regime = "NEUTRAL_CONSOLIDATION";
+
+   // If BTC 24h change is within a tight sideways corridor [-1.0%, +1.0%], it's neutral consolidation
+   if (Math.abs(btc_24h_chg) <= 0.010 && Math.abs(btc_15m_chg) <= 0.008) {
+      regime = "NEUTRAL_CONSOLIDATION";
+   } else if (price > ema50 && ema50 > ema200 && hh_hl && btc_24h_chg > 0.012) {
+      regime = "BULL_STRONG";
+   } else if (price > ema50 && ema50 > ema200) {
+      regime = "BULL_WEAK";
+   } else if (price > ema200 && btc_24h_chg > 0.010) {
+      regime = "BULL_WEAK";
+   } else if (price < ema50 && ema50 < ema200 && lh_ll && btc_24h_chg < -0.012) {
+      regime = "BEAR_STRONG";
+   } else if (price < ema50 && ema50 < ema200 && btc_24h_chg < -0.008) {
+      regime = "BEAR_WEAK";
+   } else if (price < ema200 && btc_24h_chg < -0.012) {
+      regime = "BEAR_WEAK";
+   } else {
+      regime = "NEUTRAL_CONSOLIDATION";
    }
 
    const fundBtc = await fetchFunding("BTCUSDT");
@@ -627,6 +638,7 @@ async function scoreEntry(symbol: string, ctx: any) {
    else if (ctx.regime === "BULL_WEAK") { layer1_sl += 2.0; layer1_ss += 0.5; }
    else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 0.5; layer1_ss += 2.0; }
    else if (ctx.regime === "BEAR_STRONG") { layer1_ss += 3.0; }
+   else if (ctx.regime === "NEUTRAL_CONSOLIDATION" || ctx.regime === "RANGING") { layer1_sl += 1.5; layer1_ss += 1.5; }
    sl += layer1_sl; ss += layer1_ss;
    if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; 
    else {
@@ -914,6 +926,27 @@ async function scoreEntry(symbol: string, ctx: any) {
             }
          }
 
+         // OVERSOLD SHORT BLOCKER: مانع بيع القيعان عند التشبع البيعي
+         // الشرط: حظر فتح أي صفقة SHORT إذا كان مؤشر RSI < 42 أو السعر يبتعد أكثر من 1.8 * ATR14 تحت متوسط EMA21.
+         // الهدف: منع بيع القيعان المحلية وتفادي ضربات الارتداد العكسية الصاعدة (Short Squeeze).
+         const rsiVal = p.rsi ?? 50;
+         const isOverstretched = p.atr14 > 0 && p.price < (p.ema21 - (1.8 * p.atr14));
+         if (rsiVal < 42 || isOverstretched) {
+            addLog(`🛡️ [OVERSOLD SHORT BLOCK] تم منع صفقة SHORT على ${symbol} بسبب التشبع البيعي الحاد (RSI: ${rsiVal.toFixed(1)} < 42 أو تمدد سعري مفرط تحت EMA21). ممنوع بيع القيعان!`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "SHORT",
+               signal_score: ss,
+               rejection_reason: `Oversold Short Blocker: SHORT prohibited at local bottom (RSI: ${rsiVal.toFixed(1)} < 42 or overstretched below EMA21). Prevents selling bottoms into relief bounces.`,
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          apexPredatorStats.acceptedShorts++;
          if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
          else apexPredatorStats.breakoutSetups++;
@@ -935,6 +968,51 @@ async function scoreEntry(symbol: string, ctx: any) {
             reasoning
          };
       }
+   }
+
+   // PILLAR 3: WYCKOFF SPRING & REVERSAL SNIPER (تحويل فخاخ السيولة إلى فرص ارتداد حية بدلاً من الحظر والموت!)
+   // 1. إذا كان هناك فخ كسر عند الدعم (إشارة SHORT هابطة ولكن السعر ملاصق لأرضية الدعم مع ضعف حجم البيع RVOL < 1.3):
+   if (ss >= minScore && reasoning.location.nearSupport && p.rvol < 1.3 && (w.slope15 > -80 || w.hidden_buy || p.rsi < 42)) {
+      addLog(`🎯 [الركيزة 3: اقتناص ارتداد الدعم] رصد فخ كسر كاذب عند دعم ${symbol} (${reasoning.location.nearestSupport.toFixed(4)}) مع ضعف حجم البيع. قلب الصفقة إلى شراء ارتدادي LONG!`, 'success');
+      apexPredatorStats.acceptedLongs++;
+      apexPredatorStats.pullbackSetups++;
+      return {
+         signal: "LONG",
+         score: Math.max(ss, 7.8),
+         grade: getGrade(Math.max(ss, 7.8)),
+         setupType: "BOUNCE_SNIPER",
+         p,
+         w,
+         ctx,
+         reasoning: {
+            ...reasoning,
+            scenario: {
+               primary: { type: "BOUNCE_LONG", bias: "LONG", thesis: "Wyckoff Spring support rejection bounce" }
+            }
+         }
+      };
+   }
+
+   // 2. إذا كان هناك فخ قمة عند المقاومة (إشارة LONG صاعدة ولكن السعر ملاصق لسقف المقاومة مع ضعف حجم الشراء RVOL < 1.3):
+   if (sl >= minScore && reasoning.location.nearResistance && p.rvol < 1.3 && (w.slope15 < 80 || w.hidden_sell || p.rsi > 62)) {
+      addLog(`🎯 [الركيزة 3: اقتناص ارتداد المقاومة] رصد فخ قمة عند مقاومة ${symbol} (${reasoning.location.nearestResistance.toFixed(4)}) مع ضعف حجم الشراء. قلب الصفقة إلى بيع ارتدادي SHORT!`, 'success');
+      apexPredatorStats.acceptedShorts++;
+      apexPredatorStats.pullbackSetups++;
+      return {
+         signal: "SHORT",
+         score: Math.max(sl, 7.8),
+         grade: getGrade(Math.max(sl, 7.8)),
+         setupType: "BOUNCE_SNIPER",
+         p,
+         w,
+         ctx,
+         reasoning: {
+            ...reasoning,
+            scenario: {
+               primary: { type: "BOUNCE_SHORT", bias: "SHORT", thesis: "Resistance ceiling rejection bounce" }
+            }
+         }
+      };
    }
 
    // If indicator score was high but confirmation rejected or waiting:
@@ -986,10 +1064,12 @@ function executeTrade(symbol: string, decision: any) {
       const entry = p.price;
       const c = p.klines;
       const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
-      const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
-      const sl = isPullback 
-         ? Math.min(realLow, p.ema21) - (p.atr14 * slMultiplier)
-         : realLow - (p.atr14 * slMultiplier);
+      const isBounce = setupType === "BOUNCE_SNIPER";
+      // Pillar 5: Tight Structural Stop Loss with compressed buffer
+      const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
+      const sl = isBounce && reasoning?.location?.nearestSupport
+         ? reasoning.location.nearestSupport - structuralSlPad
+         : (isPullback ? Math.min(realLow, p.ema21) - structuralSlPad : realLow - structuralSlPad);
       const realSlDist = entry - sl;
       if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
@@ -1005,15 +1085,16 @@ function executeTrade(symbol: string, decision: any) {
       }
 
       let pos = riskAmt / realSlDist;
+      const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
-         be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
-         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
+         be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
+         setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupLabel,
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
@@ -1034,15 +1115,17 @@ function executeTrade(symbol: string, decision: any) {
       };
       activeTrades.push(newTrade);
       registerTradeForDirectionTracking(newTrade);
-      addLog(`✅ LONG ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    } else {
       const entry = p.price;
       const c = p.klines;
       const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
-      const slMultiplier = isPullback ? Math.min(slAtrMultiplier, 1.0) : slAtrMultiplier;
-      const sl = isPullback 
-         ? Math.max(realHigh, p.ema21) + (p.atr14 * slMultiplier)
-         : realHigh + (p.atr14 * slMultiplier);
+      const isBounce = setupType === "BOUNCE_SNIPER";
+      // Pillar 5: Tight Structural Stop Loss with compressed buffer
+      const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
+      const sl = isBounce && reasoning?.location?.nearestResistance
+         ? reasoning.location.nearestResistance + structuralSlPad
+         : (isPullback ? Math.max(realHigh, p.ema21) + structuralSlPad : realHigh + structuralSlPad);
       const realSlDist = sl - entry;
       if (realSlDist <= 0) return;
       const initialSlDist = Math.abs(entry - sl);
@@ -1058,15 +1141,16 @@ function executeTrade(symbol: string, decision: any) {
       }
 
       let pos = riskAmt / realSlDist;
+      const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
-         be_done: false, score, grade: grade.label, pnl: 0,
-         setupType: isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM",
-         setupLabel: isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم",
+         be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
+         setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupLabel,
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
@@ -1087,7 +1171,7 @@ function executeTrade(symbol: string, decision: any) {
       };
       activeTrades.push(newTrade);
       registerTradeForDirectionTracking(newTrade);
-      addLog(`✅ SHORT ${symbol} [${isPullback ? '🎯 قناص الارتداد' : '⚡ اختراق الزخم'}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ SHORT ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    }
 }
 
@@ -1162,6 +1246,29 @@ async function exitBrain(trade: any, ctx: any) {
    }
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
+
+   // 0. PILLAR 1: MICRO-BANK & FAST BREAKEVEN LOCK AT +0.35R
+   // حجز أرباح سريعة وسحب الوقف إلى الدخول +0.10R فور ملامسة +0.35R لمنع تحول الربح لخسارة!
+   if (!t.micro_banked && profitR >= 0.35) {
+      closePart(t, "MICRO", 0.20);
+      t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.10) : t.entry - (slDist * 0.10);
+      t.be_done = true;
+      t.micro_banked = true;
+      addLog(`🛡️ [الركيزة 1: قفل الأرباح السريع] ${t.symbol} بلغ +${profitR.toFixed(2)}R | تم حجز 20% ونقل الوقف لـ Breakeven +0.10R لحماية الصفقة من الانعكاس!`, 'success');
+   }
+
+   // PILLAR 2: TIME-DECAY STAGNATION EXIT (قاعدة الساعة الرملية لركود الزخم بعد 45 دقيقة)
+   const elapsedSeconds = (Date.now() - new Date(t.entryTime).getTime()) / 1000;
+   if (!t.a_closed && elapsedSeconds >= 2700) {
+      // 45 minutes without breaking out towards TP1
+      const isStagnant = profitR < 0.30 && profitR > -0.30;
+      const momentumDying = p.rvol < 1.1 || p.adx < 22 || Math.abs(w.slope15) < 80;
+      if (isStagnant && momentumDying) {
+         addLog(`⏳ [الركيزة 2: إغلاق الركود الزمني] إغلاق صفقة ${t.symbol} بعد ${(elapsedSeconds/60).toFixed(0)} دقيقة عند ${profitR.toFixed(2)}R لتفادي الانعكاس وتحرير السيولة.`, 'warn');
+         closeTradeFull(t, "Time-Decay Stagnation Cut");
+         return;
+      }
+   }
 
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {

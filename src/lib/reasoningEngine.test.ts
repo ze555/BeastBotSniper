@@ -441,6 +441,54 @@ console.log("=======================================================\n");
    assert("Test 16d: Reason mentions Directional strength ADX", conf2.reason.includes("Directional strength ADX"));
 }
 
+// ----------------------------------------------------------------------------
+// Test 17: Oversold Short Blocker (RSI < 42 or overstretched below EMA21)
+// ----------------------------------------------------------------------------
+{
+   const mockBearWhale = { p_chg: -0.005, oi_chg: 0.010, slope15: -210, slope5: -70, slope4h: -500, cvd_mixed: false };
+   const loc = { nearestResistance: 110, nearestSupport: 90, rangeHigh: 110, rangeLow: 90, nearResistance: false, nearSupport: false, distanceToResistancePct: 0.1, distanceToSupportPct: 0.1, upperLiquidityTarget: 111, lowerLiquidityTarget: 89, liquidityData: "unavailable" as const };
+   const shortScenario = { primary: { type: "BREAKOUT_SHORT" as const, state: "WAITING" as const, bias: "SHORT" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
+
+   // 17a: Deeply oversold Short (RSI = 35 < 42)
+   const oversoldRsiPrice = { price: 95, ema21: 96, atr14: 1.0, rvol: 1.8, taker: 0.42, rsi: 35, adx: 28, di_plus: 12, di_minus: 30, ema50: 100, st_bull: false, bear_align: true, LH_LL: true, klines: [{ open: 96, high: 96, low: 94.5, close: 95 }] };
+   const flow1 = interpretFlow(oversoldRsiPrice, mockBearWhale);
+   const timing1 = evaluateTimingGate("SHORT", oversoldRsiPrice, mockBearWhale, loc, flow1);
+   const conf1 = checkConfirmation("TREND_DOWN", flow1, loc, shortScenario, timing1, oversoldRsiPrice, mockBearWhale, { sl: 2.0, ss: 8.5 }, { regime: "NEUTRAL_CONSOLIDATION" });
+   assert("Test 17a: SHORT with RSI < 42 is blocked by Oversold Short Blocker", conf1.isConfirmed === false);
+   assert("Test 17b: Reason mentions Oversold Short Blocker", conf1.reason.includes("Oversold Short Blocker"));
+
+   // 17c: Price overstretched below EMA21 (> 1.8 * ATR)
+   const overstretchedPrice = { price: 90, ema21: 95, atr14: 1.0, rvol: 1.8, taker: 0.44, rsi: 44, adx: 28, di_plus: 12, di_minus: 30, ema50: 100, st_bull: false, bear_align: true, LH_LL: true, klines: [{ open: 92, high: 92, low: 89.5, close: 90 }] };
+   const flow2 = interpretFlow(overstretchedPrice, mockBearWhale);
+   const timing2 = evaluateTimingGate("SHORT", overstretchedPrice, mockBearWhale, loc, flow2);
+   const conf2 = checkConfirmation("TREND_DOWN", flow2, loc, shortScenario, timing2, overstretchedPrice, mockBearWhale, { sl: 2.0, ss: 8.5 }, { regime: "NEUTRAL_CONSOLIDATION" });
+   assert("Test 17c: SHORT overstretched below EMA21 is blocked", conf2.isConfirmed === false);
+
+   // 17d: Healthy pullback Short (RSI = 50, near EMA21 95)
+   const healthyShortPrice = { price: 94.5, ema21: 95, atr14: 1.0, rvol: 1.8, taker: 0.44, rsi: 50, adx: 28, di_plus: 12, di_minus: 30, ema50: 100, st_bull: false, bear_align: true, LH_LL: true, klines: [{ open: 94, high: 95, low: 94, close: 94.5 }] };
+   const flow3 = interpretFlow(healthyShortPrice, mockBearWhale);
+   const timing3 = evaluateTimingGate("SHORT", healthyShortPrice, mockBearWhale, loc, flow3);
+   const conf3 = checkConfirmation("TREND_DOWN", flow3, loc, shortScenario, timing3, healthyShortPrice, mockBearWhale, { sl: 2.0, ss: 8.5 }, { regime: "NEUTRAL_CONSOLIDATION" });
+   assert("Test 17d: Healthy Short near resistance/EMA21 passes oversold check", conf3.reason.includes("Oversold Short Blocker") === false);
+}
+
+// ----------------------------------------------------------------------------
+// Test 18: Neutral BTC Regime allows clean Altcoin LONG
+// ----------------------------------------------------------------------------
+{
+   const mockBullWhale = { p_chg: 0.005, oi_chg: 0.010, slope15: 210, slope5: 70, slope4h: 500, cvd_mixed: false };
+   const loc = { nearestResistance: 100.0, nearestSupport: 96.0, rangeHigh: 104.0, rangeLow: 95.0, nearResistance: false, nearSupport: false, distanceToResistancePct: -0.002, distanceToSupportPct: 0.042, upperLiquidityTarget: 104.2, lowerLiquidityTarget: 94.8, liquidityData: "unavailable" as const };
+   const longScenario = { primary: { type: "BREAKOUT_LONG" as const, state: "CONFIRMED" as const, bias: "LONG" as const, thesis: "" }, alternative: { type: "NONE" as const, state: "WAITING" as const, bias: "NEUTRAL" as const, thesis: "" }, missingConfirmation: [], invalidationCondition: "" };
+   const strongAltcoinPrice = { price: 100.2, ema21: 98, atr14: 1.0, rvol: 1.8, taker: 0.60, rsi: 58, adx: 28, di_plus: 32, di_minus: 12, ema50: 95, st_bull: true, bull_align: true, HH_HL: true, klines: [{ open: 100.4, high: 100.5, low: 99.9, close: 100.2 }] };
+   const flow = interpretFlow(strongAltcoinPrice, mockBullWhale);
+   const timing = evaluateTimingGate("LONG", strongAltcoinPrice, mockBullWhale, loc, flow);
+
+   // BTC is in NEUTRAL_CONSOLIDATION
+   const confNeutral = checkConfirmation("TREND_UP", flow, loc, longScenario, timing, strongAltcoinPrice, mockBullWhale, { sl: 8.5, ss: 2.0 }, { regime: "NEUTRAL_CONSOLIDATION" });
+   assert("Test 18a: LONG trade is NOT blocked by Bear Regime when BTC is NEUTRAL_CONSOLIDATION", confNeutral.reason.includes("Strict Bear Regime") === false);
+   assert("Test 18b: LONG trade passes confirmation in NEUTRAL_CONSOLIDATION", confNeutral.isConfirmed === true);
+}
+
 console.log("\n=======================================================");
 console.log(`📊 TIMING GATE TEST SUITE SUMMARY: ${passedCount} PASSED | ${failedCount} FAILED`);
 console.log("=======================================================\n");

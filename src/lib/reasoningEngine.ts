@@ -898,6 +898,24 @@ export function checkConfirmation(
             missingItems: ["BTC transition into neutral or bear market"]
          };
       }
+
+      // 1b. OVERSOLD SHORT BLOCKER: مانع بيع القيعان عند التشبع البيعي
+      // حظر فتح أي صفقة SHORT إذا كان مؤشر RSI < 42 أو السعر يبتعد أكثر من 1.8 * ATR14 تحت متوسط EMA21.
+      const rsiVal = p?.rsi ?? 50;
+      const priceVal = p?.price ?? 0;
+      const ema21Val = p?.ema21 ?? priceVal;
+      const atr14Val = p?.atr14 ?? 0;
+      const isOverstretched = atr14Val > 0 && priceVal < (ema21Val - (1.8 * atr14Val));
+
+      if (rsiVal < 42 || isOverstretched) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Oversold Short Blocker: SHORT prohibited when asset is deeply oversold (RSI ${rsiVal.toFixed(1)} < 42 or overstretched below EMA21). Prevents selling local bottoms into relief bounces.`,
+            evidence,
+            missingItems: ["Asset relief bounce back towards EMA21 / resistance (RSI >= 45)"]
+         };
+      }
    }
 
    // 2. مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market - BEAR_STRONG أو BEAR_WEAK):
