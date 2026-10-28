@@ -1248,14 +1248,13 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
-   // 0. PILLAR 1: MICRO-BANK & FAST BREAKEVEN LOCK AT +0.35R
-   // حجز أرباح سريعة وسحب الوقف إلى الدخول +0.10R فور ملامسة +0.35R لمنع تحول الربح لخسارة!
-   if (!t.micro_banked && profitR >= 0.35) {
-      closePart(t, "MICRO", 0.20);
-      t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.10) : t.entry - (slDist * 0.10);
-      t.be_done = true;
+   // 0. PILLAR 1: SOFT RISK REDUCTION AT +0.45R (BREATHING ROOM)
+   // بدلاً من خنق الصفقة وسحب الوقف لنقطة الدخول فوراً عند +0.35R (مما يخرج الصفقة بربح سنتات عند أي تذبذب طبيعي)،
+   // نقوم بتقليص المخاطرة بنسبة 75% عند +0.45R برفع الوقف إلى -0.25R فقط وترك مسافة كافية للوصول للأهداف الكبرى TP1 و TP2!
+   if (!t.micro_banked && profitR >= 0.45) {
+      t.sl = t.direction === "LONG" ? t.entry - (slDist * 0.25) : t.entry + (slDist * 0.25);
       t.micro_banked = true;
-      addLog(`🛡️ [الركيزة 1: قفل الأرباح السريع] ${t.symbol} بلغ +${profitR.toFixed(2)}R | تم حجز 20% ونقل الوقف لـ Breakeven +0.10R لحماية الصفقة من الانعكاس!`, 'success');
+      addLog(`🛡️ [تأمين تدريجي مرن] ${t.symbol} حقق +${profitR.toFixed(2)}R | تم رفع الوقف لتقليص المخاطرة إلى -0.25R مع إبقاء مساحة للتنفس حتى TP1!`, 'info');
    }
 
    // PILLAR 2: TIME-DECAY STAGNATION EXIT (قاعدة الساعة الرملية لركود الزخم بعد 45 دقيقة)
@@ -1338,8 +1337,38 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 5. SMART EARLY LOSS MITIGATION (-0.30R to -0.35R)
-   // إذا تراجعت الصفقة إلى ما دون -0.30R وكُسر الهيكل أو انقلب تدفق الحيتان/CVD، نخرج وقائياً ونوفر 65% إلى 70% من الستوب لوس!
+   // 5a. FAST FLOW LOSS CUT (-0.25R)
+   // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا:
+   if (!t.a_closed && profitR <= -0.25) {
+      const cvdReversed = t.direction === "LONG"
+         ? (w.slope15 < -60 || w.slope5 < -50 || p.taker < 0.47 || w.hidden_sell)
+         : (w.slope15 > 60 || w.slope5 > 50 || p.taker > 0.53 || w.hidden_buy);
+
+      if (cvdReversed) {
+         addLog(`🛡️ [قص الخسارة السريع] خروج مبكر وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لانعكاس تدفق السيولة وCVD. تم توفير ${(1 + profitR).toFixed(2)}R!`, 'warn');
+         closeTradeFull(t, "Early Flow Reversal Cut (-0.25R)");
+         return;
+      }
+   }
+
+   // 5b. HARD EARLY LOSS CUT (-0.38R to -0.40R)
+   // سقف حديدي صارم للخسارة: يُمنع منعاً باتاً ترك أي صفقة تنزف إلى -1.0R!
+   // إذا بلغت الصفقة -0.38R مع شمعة 15m معاكسة أو لامست -0.40R، تُغلق فوراً وتوفر 60% إلى 65% من الستوب لوس:
+   if (!t.a_closed && profitR <= -0.38) {
+      const c = p.klines || [];
+      const lastCandle = c[c.length - 1];
+      const adverseCandle = t.direction === "LONG"
+         ? (lastCandle && lastCandle.close < lastCandle.open)
+         : (lastCandle && lastCandle.close > lastCandle.open);
+
+      if (profitR <= -0.40 || adverseCandle) {
+         addLog(`🛡️ [قص الخسارة الحاسم] إغلاق وقائي فوري لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لمنع النزيف وتوفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
+         closeTradeFull(t, "Hard Early Loss Cut (-0.40R)");
+         return;
+      }
+   }
+
+   // 5c. STRUCTURAL BREAK CUT (-0.30R)
    if (!t.a_closed && profitR < -0.30) {
       const c = p.klines || [];
       const recentCloses = c.slice(-2).map((k: any) => k.close);
@@ -1348,12 +1377,12 @@ async function exitBrain(trade: any, ctx: any) {
          : recentCloses.every((cl: number) => cl > p.ema21);
       
       const orderflowFlipped = t.direction === "LONG"
-         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -150 || (p.taker < 0.46 && p.rsi < 44))
-         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 150 || (p.taker > 0.54 && p.rsi > 56));
+         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -120 || (p.taker < 0.46 && p.rsi < 44))
+         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 120 || (p.taker > 0.54 && p.rsi > 56));
 
       if (isBreakingEMA || orderflowFlipped) {
          const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
-         addLog(`🛡️ [قص الخسارة المبكر] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
+         addLog(`🛡️ [قص الخسارة الهيكلي] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);
          return;
       }

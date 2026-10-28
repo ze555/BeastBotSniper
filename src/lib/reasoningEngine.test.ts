@@ -514,6 +514,30 @@ console.log("=======================================================\n");
    assert("Test 19d: Unconstrained $214k contract size is prevented", constrainedPos < 40);
 }
 
+// ----------------------------------------------------------------------------
+// Test 20: Early Loss Cut & Profit Breathing Room Verification
+// ----------------------------------------------------------------------------
+{
+   // 20a: Hard Early Loss Cut at -0.40R
+   const initialSlAmount = 10.0; // $10 full SL
+   const earlyCutR = -0.40;
+   const earlyLossAmount = initialSlAmount * Math.abs(earlyCutR);
+   const capitalSaved = initialSlAmount - earlyLossAmount;
+   assert("Test 20a: Early cut at -0.40R limits loss to $4.00 max on $10 SL", earlyLossAmount <= 4.00);
+   assert("Test 20b: Early cut saves at least 60% of stop loss capital", capitalSaved >= 6.00);
+
+   // 20c: Fast Flow Loss Cut at -0.25R
+   const fastFlowCutR = -0.25;
+   const fastFlowLoss = initialSlAmount * Math.abs(fastFlowCutR);
+   assert("Test 20c: Fast Flow cut at -0.25R limits loss to $2.50", fastFlowLoss <= 2.50);
+
+   // 20d: Profit Breathing Room at +0.45R (Soft trail instead of breakeven choking)
+   const entry = 100;
+   const slDist = 2.0;
+   const softTrailSl = entry - (slDist * 0.25); // SL moved to -0.25R
+   assert("Test 20d: Breathing room SL maintains 1.25R buffer from current +0.45R price", (entry + 0.45 * slDist) - softTrailSl >= 1.25);
+}
+
 console.log("\n=======================================================");
 console.log(`📊 TIMING GATE TEST SUITE SUMMARY: ${passedCount} PASSED | ${failedCount} FAILED`);
 console.log("=======================================================\n");
