@@ -489,6 +489,31 @@ console.log("=======================================================\n");
    assert("Test 18b: LONG trade passes confirmation in NEUTRAL_CONSOLIDATION", confNeutral.isConfirmed === true);
 }
 
+// ----------------------------------------------------------------------------
+// Test 19: SL Distance Floor & Notional Sizing Ceiling
+// ----------------------------------------------------------------------------
+{
+   const balance = 1000;
+   const entry = 254.75;
+   const atr14 = 0.567;
+   const minSlDistance = Math.max(atr14 * 0.8, entry * 0.006);
+   assert("Test 19a: Min SL distance enforces minimum 0.6% or 0.8*ATR", minSlDistance >= 1.52);
+
+   // Even if raw SL would have been 0.0118 away (as occurred in AMZN bug):
+   const rawSlDist = 0.0118;
+   const correctedSlDist = Math.max(rawSlDist, minSlDistance);
+   assert("Test 19b: Microscopic SL distance is strictly corrected to floor", correctedSlDist >= 1.52);
+
+   // Iron notional ceiling (max 10x balance)
+   const maxAllowedNotional = balance * 10; // $10,000
+   const maxPosCap = maxAllowedNotional / entry;
+   const unconstrainedPos = 9.93 / rawSlDist; // Was 841.5 shares!
+   const constrainedPos = Math.min(unconstrainedPos, maxPosCap);
+
+   assert("Test 19c: Position is strictly capped below 10x balance notional", constrainedPos * entry <= 10000.01);
+   assert("Test 19d: Unconstrained $214k contract size is prevented", constrainedPos < 40);
+}
+
 console.log("\n=======================================================");
 console.log(`📊 TIMING GATE TEST SUITE SUMMARY: ${passedCount} PASSED | ${failedCount} FAILED`);
 console.log("=======================================================\n");

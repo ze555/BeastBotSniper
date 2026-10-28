@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import axios from "axios";
-import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig } from "./src/lib/apexPredator.js";
+import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState } from "./src/lib/apexPredator.js";
 import { 
   getTradingDecisionsData, 
   getRejectedSignalsData, 
@@ -53,6 +53,10 @@ async function startServer() {
         libyaClose2: req.body.libyaClose2,
      });
      res.json({ success: true });
+  });
+  app.post("/api/predator/reset", (req, res) => {
+     resetAccountState();
+     res.json({ success: true, balance: 1000 });
   });
   app.get("/api/trades/active", (req, res) => res.json(getTrades()));
   app.get("/api/trades/closed", (req, res) => res.json(getClosedTrades()));

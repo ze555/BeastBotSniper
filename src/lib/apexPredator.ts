@@ -85,10 +85,20 @@ let apexPredatorStats: any = {
   }
 };
 
+export function resetAccountState() {
+  virtualBalance = 1000;
+  initialVirtualBalance = 1000;
+  todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+  closedTrades = closedTrades.filter(t => t.symbol !== 'AMZNUSDT' && !((t.pos || t.initialPos) > 100));
+  activeTrades = activeTrades.filter(t => t.symbol !== 'AMZNUSDT');
+  addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وإلغاء قفل الخسارة اليومية.`, 'success');
+}
+
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
   initialVirtualBalance = balance;
-  if (closedTrades.length === 0 && activeTrades.length === 0) {
+  if (opts?.resetAccount || (closedTrades.length === 0 && activeTrades.length === 0)) {
      virtualBalance = balance;
+     todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
   }
   maxOpenTradesConfig = maxTrades;
   if (opts) {
@@ -247,7 +257,10 @@ async function updateDynamicWatchlist() {
       addLog(`🔄 جلب قائمة العملات من بينانس وتصفية الأقوى سيولة...`, "info");
       const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
       
-      const excludedBases = ['USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT'];
+      const excludedBases = [
+         'USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT',
+         'AMZN', 'AAPL', 'TSLA', 'GOOGL', 'GOOG', 'MSFT', 'NVDA', 'META', 'NFLX', 'BABA', 'COIN', 'MSTR'
+      ];
       
       let symbols = res.data
          .filter((s: any) => s.symbol.endsWith('USDT'))
@@ -970,50 +983,8 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
    }
 
-   // PILLAR 3: WYCKOFF SPRING & REVERSAL SNIPER (تحويل فخاخ السيولة إلى فرص ارتداد حية بدلاً من الحظر والموت!)
-   // 1. إذا كان هناك فخ كسر عند الدعم (إشارة SHORT هابطة ولكن السعر ملاصق لأرضية الدعم مع ضعف حجم البيع RVOL < 1.3):
-   if (ss >= minScore && reasoning.location.nearSupport && p.rvol < 1.3 && (w.slope15 > -80 || w.hidden_buy || p.rsi < 42)) {
-      addLog(`🎯 [الركيزة 3: اقتناص ارتداد الدعم] رصد فخ كسر كاذب عند دعم ${symbol} (${reasoning.location.nearestSupport.toFixed(4)}) مع ضعف حجم البيع. قلب الصفقة إلى شراء ارتدادي LONG!`, 'success');
-      apexPredatorStats.acceptedLongs++;
-      apexPredatorStats.pullbackSetups++;
-      return {
-         signal: "LONG",
-         score: Math.max(ss, 7.8),
-         grade: getGrade(Math.max(ss, 7.8)),
-         setupType: "BOUNCE_SNIPER",
-         p,
-         w,
-         ctx,
-         reasoning: {
-            ...reasoning,
-            scenario: {
-               primary: { type: "BOUNCE_LONG", bias: "LONG", thesis: "Wyckoff Spring support rejection bounce" }
-            }
-         }
-      };
-   }
-
-   // 2. إذا كان هناك فخ قمة عند المقاومة (إشارة LONG صاعدة ولكن السعر ملاصق لسقف المقاومة مع ضعف حجم الشراء RVOL < 1.3):
-   if (sl >= minScore && reasoning.location.nearResistance && p.rvol < 1.3 && (w.slope15 < 80 || w.hidden_sell || p.rsi > 62)) {
-      addLog(`🎯 [الركيزة 3: اقتناص ارتداد المقاومة] رصد فخ قمة عند مقاومة ${symbol} (${reasoning.location.nearestResistance.toFixed(4)}) مع ضعف حجم الشراء. قلب الصفقة إلى بيع ارتدادي SHORT!`, 'success');
-      apexPredatorStats.acceptedShorts++;
-      apexPredatorStats.pullbackSetups++;
-      return {
-         signal: "SHORT",
-         score: Math.max(sl, 7.8),
-         grade: getGrade(Math.max(sl, 7.8)),
-         setupType: "BOUNCE_SNIPER",
-         p,
-         w,
-         ctx,
-         reasoning: {
-            ...reasoning,
-            scenario: {
-               primary: { type: "BOUNCE_SHORT", bias: "SHORT", thesis: "Resistance ceiling rejection bounce" }
-            }
-         }
-      };
-   }
+   // Strict Rule: No trade can enter unless verified and confirmed by Confirmation Engine.
+   // Unconfirmed attempts at key levels must wait for valid breakout or reversal confirmation.
 
    // If indicator score was high but confirmation rejected or waiting:
    if ((sl >= minScore || ss >= minScore) && !reasoning.confirmation.isConfirmed) {
@@ -1067,11 +1038,15 @@ function executeTrade(symbol: string, decision: any) {
       const isBounce = setupType === "BOUNCE_SNIPER";
       // Pillar 5: Tight Structural Stop Loss with compressed buffer
       const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const sl = isBounce && reasoning?.location?.nearestSupport
-         ? reasoning.location.nearestSupport - structuralSlPad
+      const rawSl = isBounce && reasoning?.location?.nearestSupport && reasoning.location.nearestSupport < entry
+         ? Math.min(realLow, reasoning.location.nearestSupport) - structuralSlPad
          : (isPullback ? Math.min(realLow, p.ema21) - structuralSlPad : realLow - structuralSlPad);
+
+      // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
+      const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
+      const sl = Math.min(rawSl, entry - minSlDistance);
       const realSlDist = entry - sl;
-      if (realSlDist <= 0) return;
+      if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
       const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
@@ -1084,7 +1059,18 @@ function executeTrade(symbol: string, decision: any) {
          return;
       }
 
+      // IRON NOTIONAL & MARGIN CEILING:
+      // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
+      // Maximum margin allocated cannot exceed 15% of virtualBalance ($150 max).
+      const maxAllowedNotional = virtualBalance * 10;
+      const maxMarginCap = virtualBalance * 0.15;
+      const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
+
       let pos = riskAmt / realSlDist;
+      if (pos > maxPosCap) {
+         addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
+         pos = maxPosCap;
+      }
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
@@ -1123,11 +1109,15 @@ function executeTrade(symbol: string, decision: any) {
       const isBounce = setupType === "BOUNCE_SNIPER";
       // Pillar 5: Tight Structural Stop Loss with compressed buffer
       const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const sl = isBounce && reasoning?.location?.nearestResistance
-         ? reasoning.location.nearestResistance + structuralSlPad
+      const rawSl = isBounce && reasoning?.location?.nearestResistance && reasoning.location.nearestResistance > entry
+         ? Math.max(realHigh, reasoning.location.nearestResistance) + structuralSlPad
          : (isPullback ? Math.max(realHigh, p.ema21) + structuralSlPad : realHigh + structuralSlPad);
+
+      // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
+      const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
+      const sl = Math.max(rawSl, entry + minSlDistance);
       const realSlDist = sl - entry;
-      if (realSlDist <= 0) return;
+      if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
       const tp1 = entry - (initialSlDist * TP1_R);
@@ -1140,7 +1130,18 @@ function executeTrade(symbol: string, decision: any) {
          return;
       }
 
+      // IRON NOTIONAL & MARGIN CEILING:
+      // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
+      // Maximum margin allocated cannot exceed 15% of virtualBalance ($150 max).
+      const maxAllowedNotional = virtualBalance * 10;
+      const maxMarginCap = virtualBalance * 0.15;
+      const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
+
       let pos = riskAmt / realSlDist;
+      if (pos > maxPosCap) {
+         addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
+         pos = maxPosCap;
+      }
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
