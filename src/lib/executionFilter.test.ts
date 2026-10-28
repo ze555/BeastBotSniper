@@ -82,21 +82,24 @@ console.log("=======================================================");
 }
 
 // ----------------------------------------------------------------------------
-// 4. TOXIC HOURS FILTER (05:00, 06:00, 13:00, 18:00 UTC)
+// 4. TOXIC HOURS FILTER (v3.1.1 live-measured: 00/01/03/04/07/09/10/11/19/23 UTC)
 // ----------------------------------------------------------------------------
 {
-  // Toxic hours blocked
-  const resHour13 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 13 });
-  assert(resHour13.blocked === true && resHour13.reason?.includes("toxic hour 13:00 UTC"), "Entry blocked at 13:00 UTC (London/NY overlap chop)");
+  // Toxic hours blocked (from the 96-trade live hourly-PnL forensics)
+  for (const h of [0, 1, 3, 4, 7, 9, 10, 11, 19, 23]) {
+    const resToxic = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: h });
+    assert(resToxic.blocked === true && resToxic.reason?.includes(`toxic hour ${h}:00 UTC`), `Entry blocked at toxic hour ${h}:00 UTC (live-measured loss window)`);
+  }
+
+  // The OLD wrong hours (5/6/13/18) are now tradeable — live data proved they were fine
+  const resHour05 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 5 });
+  assert(resHour05.blocked === false, "Entry allowed at 05:00 UTC (old guess hour — live data cleared it)");
+
+  const resHour13 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 13 });
+  assert(resHour13.blocked === false, "Entry allowed at 13:00 UTC (old guess hour — live data cleared it)");
 
   const resHour18 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 18 });
-  assert(resHour18.blocked === true && resHour18.reason?.includes("toxic hour 18:00 UTC"), "Entry blocked at 18:00 UTC (Late NY liquidation chop)");
-
-  const resHour05 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 5 });
-  assert(resHour05.blocked === true && resHour05.reason?.includes("toxic hour 5:00 UTC"), "Entry blocked at 05:00 UTC (Asia end chop)");
-
-  const resHour06 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 6 });
-  assert(resHour06.blocked === true && resHour06.reason?.includes("toxic hour 6:00 UTC"), "Entry blocked at 06:00 UTC");
+  assert(resHour18.blocked === false, "Entry allowed at 18:00 UTC (old guess hour — live data cleared it)");
 
   // Golden hours allowed
   const resHour12 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 12 });
@@ -104,6 +107,60 @@ console.log("=======================================================");
 
   const resHour17 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 17 });
   assert(resHour17.blocked === false, "Entry allowed at 17:00 UTC (Golden New York power hour)");
+
+  const resHour02 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 2 });
+  assert(resHour02.blocked === false, "Entry allowed at 02:00 UTC (live gold hour)");
+}
+
+// ----------------------------------------------------------------------------
+// 4b. FORENSIC RULE A — FLOW-ALIGNED TAPE (short only into falling tape)
+// ----------------------------------------------------------------------------
+{
+  // SHORT into flat/rising tape is blocked (the fast EMA21/CVD death pattern)
+  const resFlatShort = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "TREND_DOWN", { chg10Pct: 0.32 });
+  assert(resFlatShort.blocked === true && resFlatShort.ruleTriggered === "FLOW_TAPE_MISMATCH", "Flat-tape SHORT blocked (chg10 +0.32% rising into a short)");
+
+  const resMildShort = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "TREND_DOWN", { chg10Pct: -0.05 });
+  assert(resMildShort.blocked === true, "Mild-drift SHORT blocked (chg10 -0.05% above -0.15% floor)");
+
+  // SHORT into a genuinely falling tape is allowed
+  const resFallingShort = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "TREND_DOWN", { chg10Pct: -0.9 });
+  assert(resFallingShort.blocked === false, "Falling-tape SHORT allowed (chg10 -0.9% <= -0.15%)");
+
+  // Symmetric: LONG into falling tape is blocked
+  const resKnifeLong = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { chg10Pct: -0.5 });
+  assert(resKnifeLong.blocked === true && resKnifeLong.ruleTriggered === "FLOW_TAPE_MISMATCH", "Knife-catch LONG blocked (chg10 -0.5% falling into a long)");
+
+  // LONG into rising tape is allowed
+  const resRisingLong = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { chg10Pct: 0.4 });
+  assert(resRisingLong.blocked === false, "Rising-tape LONG allowed (chg10 +0.4% >= +0.15%)");
+
+  // Omitting chg10Pct (e.g. RANGE_REVERSION counter-tape pathway) skips the rule
+  const resNoTape = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "RANGE", { rvol: 1.5, adx: 22 });
+  assert(resNoTape.blocked === false, "Rule skipped when chg10Pct not provided (reversion pathway)");
+}
+
+// ----------------------------------------------------------------------------
+// 4c. FORENSIC RULE B — SETUP x REGIME (PULLBACK_SNIPER banned in BEAR_STRONG)
+// ----------------------------------------------------------------------------
+{
+  const resPbBear = evaluateExecutionFilter("LONG", "BEAR_STRONG", "TREND_DOWN", { setupType: "PULLBACK_SNIPER" });
+  assert(resPbBear.blocked === true && resPbBear.ruleTriggered === "PULLBACK_IN_BEAR_STRONG", "PULLBACK_SNIPER banned in BEAR_STRONG (squeeze food, -31.79 forensic)");
+
+  const resPbBearShort = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "TREND_DOWN", { setupType: "PULLBACK_SNIPER" });
+  assert(resPbBearShort.blocked === true, "PULLBACK_SNIPER banned in BEAR_STRONG both directions");
+
+  // Breakouts remain allowed in the same regime
+  const resBoBear = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "TREND_DOWN", { setupType: "BREAKOUT_MOMENTUM" });
+  assert(resBoBear.blocked === false, "BREAKOUT_MOMENTUM still allowed in BEAR_STRONG");
+
+  // Pullback in weaker bear regime is allowed (graduated regime handles risk)
+  const resPbBearWeak = evaluateExecutionFilter("LONG", "BEAR_WEAK", "TRANSITION", { setupType: "PULLBACK_SNIPER" });
+  assert(resPbBearWeak.blocked === false, "PULLBACK_SNIPER allowed in BEAR_WEAK (graduated 0.5x risk handles it)");
+
+  // Range reversion never hits the matrix
+  const resRevBear = evaluateExecutionFilter("SHORT", "BEAR_STRONG", "RANGE", { setupType: "RANGE_REVERSION", rvol: 1.5, adx: 20 });
+  assert(resRevBear.blocked === false, "RANGE_REVERSION unaffected by setup x regime matrix");
 }
 
 // ----------------------------------------------------------------------------

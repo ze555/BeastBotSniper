@@ -103,7 +103,8 @@ console.log("\n🧪 RUNNING FLOW METRICS v3.1.0 VERIFICATION SUITE\n");
    assert("16:59 UTC is LONDON_NY_OVERLAP", getSessionName(16, 59) === "LONDON_NY_OVERLAP");
    assert("17:00 UTC is NEW_YORK", getSessionName(17) === "NEW_YORK");
    assert("21:30 UTC is LATE_US", getSessionName(21, 30) === "LATE_US");
-   assert("toxic hours are 5,6,13,18 UTC", JSON.stringify(TOXIC_HOURS_UTC) === JSON.stringify([5, 6, 13, 18]));
+   assert("toxic hours are the 10 LIVE-measured loss hours", JSON.stringify(TOXIC_HOURS_UTC) === JSON.stringify([0, 1, 3, 4, 7, 9, 10, 11, 19, 23]));
+   assert("gold hours 02/08/12/17 stay tradeable", !TOXIC_HOURS_UTC.includes(2) && !TOXIC_HOURS_UTC.includes(8) && !TOXIC_HOURS_UTC.includes(12) && !TOXIC_HOURS_UTC.includes(17));
    assert("session multipliers are sane", SESSION_RISK_MULT.LONDON === 1.0 && SESSION_RISK_MULT.LONDON_NY_OVERLAP < 1 && SESSION_RISK_MULT.ASIA < 1);
 }
 

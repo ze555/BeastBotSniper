@@ -10,6 +10,11 @@ import {
 import { liveFeed } from "./liveDataFeed.js";
 import { evaluateRangeReversion, RangeReversionSignal } from "./rangeReversion.js";
 import {
+   recordSymbolResult, isSymbolBlocked,
+   configureSymbolGuard, pruneSymbolGuard
+} from "./symbolGuard.js";
+import { MOMENTUM_FLOOR_PCT } from "./executionFilter.js";
+import {
    updateSymbolDirection, shouldTighten, isInvalidated,
    pruneRegistry, getEntryConvictionBonus
 } from "./directionRegistry.js";
@@ -79,12 +84,19 @@ let slippageRate = 0.0002; // 0.02% estimated market slippage
 let graduatedRegime = true;        // BULL_WEAK/BEAR_WEAK counter-trend trades allowed at 0.5x risk with elite flow
 let rangeReversionEnabled = true;  // RANGE-edge mean reversion with exhaustion evidence
 let liveFeedEnabled = true;        // WebSocket live microstructure (tick CVD, spread, real liquidations)
-let toxicHoursEnabled = true;      // Hard block new entries at 05/06/13/18 UTC (measured chop windows)
+let toxicHoursEnabled = true;      // Hard block new entries at live-measured loss hours 00/01/03/04/07/09/10/11/19/23 UTC (forensic Rule C)
 let sessionRiskEnabled = true;     // Session-based risk weighting (LONDON 1.0 ... OVERLAP 0.7)
 let timeStopMinutes = 90;          // Exit stagnant trades (no TP1 after N minutes)
 let spreadMaxPct = 0.10;           // Max live spread (%) allowed for new entries
 let maxGrossExposurePct = 600;     // Max aggregate notional exposure (% of balance)
 let maxSameDirectionTrades = 2;    // Max concurrent risked trades in the same direction (correlation guard)
+
+// ═══ v3.1.1 LIVE-FORENSICS RULE STACK ═══
+// The 4 validated rules that flip the live book from -61.27 → +30.74 (PF 4.12):
+let flowAlignedEntry = true;       // Rule A: SHORT only into falling tape, LONG only into rising tape (chg10 floor)
+let momentumFloorPct = MOMENTUM_FLOOR_PCT; // Rule A threshold: 0.15% 10-candle drift required in trade direction
+let setupRegimeMatrix = true;      // Rule B: ban PULLBACK_SNIPER in BEAR_STRONG (squeeze food, -31.79 measured)
+let symbolCooldownEnabled = true;  // Rule D: block re-entries after 2 straight losses on same symbol (-44 measured)
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -147,6 +159,17 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.spreadMaxPct !== undefined) spreadMaxPct = Math.max(0.01, Number(opts.spreadMaxPct) || 0.10);
       if (opts.maxGrossExposurePct !== undefined) maxGrossExposurePct = Math.max(100, Number(opts.maxGrossExposurePct) || 600);
       if (opts.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(opts.maxSameDirectionTrades) || 2);
+      // v3.1.1 live-forensics rule stack
+      if (opts.flowAlignedEntry !== undefined) flowAlignedEntry = !!opts.flowAlignedEntry;
+      if (opts.momentumFloorPct !== undefined) momentumFloorPct = Math.max(0.05, Number(opts.momentumFloorPct) || 0.15);
+      if (opts.setupRegimeMatrix !== undefined) setupRegimeMatrix = !!opts.setupRegimeMatrix;
+      if (opts.symbolCooldownEnabled !== undefined) symbolCooldownEnabled = !!opts.symbolCooldownEnabled;
+      if (opts.symbolLossStreakLimit !== undefined || opts.symbolCooldownMinutes !== undefined) {
+         configureSymbolGuard({
+            lossStreakLimit: opts.symbolLossStreakLimit !== undefined ? Number(opts.symbolLossStreakLimit) : undefined,
+            cooldownMinutes: opts.symbolCooldownMinutes !== undefined ? Number(opts.symbolCooldownMinutes) : undefined
+         });
+      }
   }
 }
 
@@ -228,6 +251,11 @@ export function getStats() {
     spreadMaxPct,
     maxGrossExposurePct,
     maxSameDirectionTrades,
+    // v3.1.1 live-forensics rule stack
+    flowAlignedEntry,
+    momentumFloorPct,
+    setupRegimeMatrix,
+    symbolCooldownEnabled,
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
     fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
     today: todaysStats 
@@ -264,7 +292,12 @@ export function getConfig() {
     timeStopMinutes,
     spreadMaxPct,
     maxGrossExposurePct,
-    maxSameDirectionTrades
+    maxSameDirectionTrades,
+    // v3.1.1 live-forensics rule stack
+    flowAlignedEntry,
+    momentumFloorPct,
+    setupRegimeMatrix,
+    symbolCooldownEnabled
   };
 }
 export function setConfig(config: any) {
@@ -299,6 +332,17 @@ export function setConfig(config: any) {
   if (config.spreadMaxPct !== undefined) spreadMaxPct = Math.max(0.01, Number(config.spreadMaxPct) || 0.10);
   if (config.maxGrossExposurePct !== undefined) maxGrossExposurePct = Math.max(100, Number(config.maxGrossExposurePct) || 600);
   if (config.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(config.maxSameDirectionTrades) || 2);
+  // v3.1.1 live-forensics rule stack
+  if (config.flowAlignedEntry !== undefined) flowAlignedEntry = !!config.flowAlignedEntry;
+  if (config.momentumFloorPct !== undefined) momentumFloorPct = Math.max(0.05, Number(config.momentumFloorPct) || 0.15);
+  if (config.setupRegimeMatrix !== undefined) setupRegimeMatrix = !!config.setupRegimeMatrix;
+  if (config.symbolCooldownEnabled !== undefined) symbolCooldownEnabled = !!config.symbolCooldownEnabled;
+  if (config.symbolLossStreakLimit !== undefined || config.symbolCooldownMinutes !== undefined) {
+     configureSymbolGuard({
+        lossStreakLimit: config.symbolLossStreakLimit !== undefined ? Number(config.symbolLossStreakLimit) : undefined,
+        cooldownMinutes: config.symbolCooldownMinutes !== undefined ? Number(config.symbolCooldownMinutes) : undefined
+     });
+  }
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
@@ -940,6 +984,24 @@ async function scoreEntry(symbol: string, ctx: any) {
 
    const minScore = geniusMode ? 7.6 : 6.8;
 
+   // ═══ v3.1.1 FORENSIC RULE INPUTS ═══
+   // Rule A input: 10-candle drift % (current price vs close 10 candles back on
+   // the trade tape). Live forensics: losers FOUGHT the immediate tape (fast
+   // EMA21/CVD deaths, median 26min = timing error); winners rode it.
+   // Rule C input: UTC hour → live-measured toxic hours inside the filter.
+   const hourUtc = new Date().getUTCHours();
+   const kls = p.klines || [];
+   let chg10Pct: number | undefined;
+   if (kls.length >= 11) {
+      const ref = kls[kls.length - 11].close;
+      if (ref > 0) chg10Pct = (p.price - ref) / ref * 100;
+   }
+   // Effective setup label: scenario pathway can promote to PULLBACK_SNIPER
+   // even when the base scanner type is BREAKOUT_MOMENTUM.
+   const effSetup = (reasoning.scenario?.primary?.type === "PULLBACK_LONG" ||
+                     reasoning.scenario?.primary?.type === "PULLBACK_SHORT")
+      ? "PULLBACK_SNIPER" : setupType;
+
    // Confirmation Gatekeeper: PREDICTION != ENTRY and SIGNAL != CONFIRMATION
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
@@ -948,7 +1010,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          // All regime/asset gates now live in reasoningEngine.checkConfirmation
          // (graduated positioning) — this layer enforces the execution matrix
          // and live microstructure vetoes as the final defense.
-         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx });
+         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
          if (exFilterLong.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] LONG ${symbol} blocked: ${exFilterLong.reason}`, "warn");
             logRejectedSignal({
@@ -1005,7 +1067,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
          // ═══ EXECUTION LAYER (v3.1) ═══
-         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx });
+         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
          if (exFilterShort.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] SHORT ${symbol} blocked: ${exFilterShort.reason}`, "warn");
             logRejectedSignal({
@@ -1095,7 +1157,9 @@ async function scoreEntry(symbol: string, ctx: any) {
    if (rangeReversionEnabled && reasoning.regime === "RANGE" && ctx.tradeable) {
       const rev = evaluateRangeReversion({ symbol, p, w, loc: reasoning.location, btcRegime: ctx.regime });
       if (rev) {
-         const exFilterRev = evaluateExecutionFilter(rev.signal, ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx });
+         const exFilterRev = evaluateExecutionFilter(rev.signal, ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, setupType: "RANGE_REVERSION" });
+         // NOTE: no chg10Pct here — fading a range edge is counter-tape BY DESIGN;
+         // the reversion engine has its own exhaustion/asymmetry gates.
          const revVetoed = rev.signal === "LONG" ? vetoLong : vetoShort;
          if (!exFilterRev.blocked && !revVetoed) {
             addLog(
@@ -1145,6 +1209,17 @@ function executeTrade(symbol: string, decision: any) {
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
    const isReversion = setupType === "RANGE_REVERSION";
+
+   // ═══ v3.1.1 FORENSIC RULE D: symbol re-entry loop protection ═══
+   // Re-entering the same falling knife after 2 straight stops = -44 USDT.
+   // Entry-layer guard only — open positions are never touched.
+   if (symbolCooldownEnabled) {
+      const guard = isSymbolBlocked(symbol);
+      if (guard.blocked) {
+         addLog(`🧊 [SYMBOL COOLDOWN] ${symbol} ${decision.signal} skipped: ${guard.reason}`, "warn");
+         return;
+      }
+   }
    // Dynamic Risk Sizing (v3.1): regime × session × graduated-confirmation
    // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
    const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
@@ -1583,6 +1658,9 @@ function closeTradeFull(t: any, reason: string = "") {
    t.pos = 0;
    todaysStats.count++;
 
+   // ═══ v3.1.1 FORENSIC RULE D bookkeeping: feed the symbol guard ═══
+   if (symbolCooldownEnabled) recordSymbolResult(t.symbol, t.finalPnl);
+
    // Neutral Breakeven threshold: avoid counting fee-friction scratches as distorted losses or false big wins
    const rThreshold = 0.05;
    if (t.profitR > rThreshold && t.finalPnl > 0.15) {
@@ -1693,6 +1771,7 @@ export async function runApexLoop() {
       if (currentBatchIndex === 0) {
          pruneFlowStores(new Set(WATCHLIST));
          pruneRegistry(new Set(WATCHLIST));
+         pruneSymbolGuard(new Set(WATCHLIST));
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities

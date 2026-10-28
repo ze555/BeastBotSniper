@@ -330,11 +330,16 @@ export const SESSION_RISK_MULT: Record<SessionName, number> = {
 };
 
 /**
- * Toxic hours (UTC) — measured chop/liquidation windows:
- * 05:00, 06:00 (Asia end chop), 13:00 (overlap open churn), 18:00 (late NY liq chop).
- * Matches the Enhanced Execution Filter specification.
+ * Toxic hours (UTC) — v3.1.1 FORENSIC UPDATE.
+ * The old list [5,6,13,18] was a research-export guess that turned out WRONG:
+ * the deployed bot bled exactly OUTSIDE those hours. Re-measured from the
+ * 96 real deployed trades (hostless.app): ten distinct loss hours dominate:
+ * 00/01/03/04 (Asia thin-tape churn), 07/09/10/11 (pre-London drift),
+ * 19/23 (late-US liq churn + rollover). Gold hours on the same data:
+ * 02/08/12/17 (kept tradeable).
+ * Matches the live hourly-PnL forensic chart (report: التقرير الجنائي للخسائر).
  */
-export const TOXIC_HOURS_UTC = [5, 6, 13, 18];
+export const TOXIC_HOURS_UTC = [0, 1, 3, 4, 7, 9, 10, 11, 19, 23];
 
 export function getSessionName(utcHour: number, utcMinute: number = 0): SessionName {
    const h = utcHour + utcMinute / 60;
