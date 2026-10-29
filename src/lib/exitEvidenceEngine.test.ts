@@ -51,6 +51,18 @@ const shortConfirmed = evaluateExitEvidence({
 });
 assert.equal(shortConfirmed.action, "EXIT");
 
+// A valid 5m/15m CVD + taker reversal with a broken structure can confirm an exit
+// even when historical OI/4h data is unavailable.
+const missingHigherTimeframe = evaluateExitEvidence({
+  ...base,
+  oiAvailable: false,
+  cvd4h: Number.NaN,
+  hiddenFlowAgainst: false,
+  opposingRegime: false
+});
+assert.equal(missingHigherTimeframe.action, "EXIT");
+assert.equal(missingHigherTimeframe.dataQuality.cvd4hAvailable, false);
+
 // Conflicting short-term flow with no structural break should not trigger exit.
 const mixedFlow = evaluateExitEvidence({
   ...base,
@@ -64,4 +76,4 @@ const mixedFlow = evaluateExitEvidence({
 });
 assert.notEqual(mixedFlow.action, "EXIT");
 
-console.log("exitEvidenceEngine: 5/5 tests passed");
+console.log("exitEvidenceEngine: 7/7 tests passed");

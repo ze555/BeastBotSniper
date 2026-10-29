@@ -72,8 +72,7 @@ export function evaluateExitEvidence(input: ExitEvidenceInput): ExitEvidenceDeci
   if (adverseRegime) { score += 1; reasons.push("broader market regime conflicts with position"); }
 
   // EXIT needs a real multi-signal chain; structure or a single indicator alone cannot trigger it.
-  const exitConfirmed = (input.structureBroken && adverseCvd5m15m && adverseTaker &&
-    (adverseOi || adverseCvd4h || adverseHiddenFlow)) ||
+  const exitConfirmed = (input.structureBroken && adverseCvd5m15m && adverseTaker) ||
     (score >= 6 && adverseCvd5m15m && adverseTaker);
 
   return {
