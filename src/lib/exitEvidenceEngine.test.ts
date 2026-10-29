@@ -76,4 +76,4 @@ const mixedFlow = evaluateExitEvidence({
 });
 assert.notEqual(mixedFlow.action, "EXIT");
 
-console.log("exitEvidenceEngine: 7/7 tests passed");
+console.log("exitEvidenceEngine: tests passed");

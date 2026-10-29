@@ -56,6 +56,9 @@ let haltProfitTarget = 150;
 let haltLossEnabled = false;
 let haltLossTarget = 50;
 let smartBtcHoldEnabled = true;
+// Disabled by default: the available historical replay is incomplete and showed premature-exit risk.
+// Enable only after a full candle-by-candle replay with live-equivalent OI/CVD/15m structure.
+let crossConfirmedExitEnabled = false;
 let btcVolThresholdStr = "0.80";
 let slAtrMultiplier = 1.3;
 let geniusMode = true;
@@ -180,6 +183,7 @@ export function getStats() {
     haltLossEnabled,
     haltLossTarget,
     smartBtcHoldEnabled,
+    crossConfirmedExitEnabled,
     btcVolThresholdStr,
     slAtrMultiplier,
     geniusMode,
@@ -213,6 +217,7 @@ export function getConfig() {
     haltLossEnabled, 
     haltLossTarget, 
     smartBtcHoldEnabled, 
+    crossConfirmedExitEnabled, 
     slAtrMultiplier, 
     geniusMode, 
     pullbackSniperEnabled,
@@ -236,6 +241,7 @@ export function setConfig(config: any) {
   if (config.haltLossEnabled !== undefined) haltLossEnabled = config.haltLossEnabled;
   if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
   if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
+  if (config.crossConfirmedExitEnabled !== undefined) crossConfirmedExitEnabled = Boolean(config.crossConfirmedExitEnabled);
   if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
   if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
   if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
@@ -1313,19 +1319,19 @@ async function exitBrain(trade: any, ctx: any) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من توقف صعود بيتكوين لأن الاتجاه منسجم مع وضعية الصعود (${ctx.btc_chg.toFixed(4)})`, "info");
       } else if (smartBtcHoldEnabled && t.direction === "SHORT" && ctx.btc_chg < -0.0) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من هبوط بيتكوين لأن الاتجاه منسجم مع وضعية الشورت (${ctx.btc_chg.toFixed(4)})`, "info");
-      } else if (exitEvidence.action === "EXIT") {
-         emergency = true; emReason = "BTC Chaos + confirmed adverse evidence";
+      } else if (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT") {
+         emergency = true; emReason = crossConfirmedExitEnabled ? "BTC Chaos + confirmed adverse evidence" : "BTC Chaos";
       } else {
-         addLog(`🧭 ${t.symbol}: BTC Chaos/عدم قابلية التداول لا يكفي وحده لإغلاق الصفقة؛ أدلة الانعكاس ${exitEvidence.score}/8 (${exitEvidence.action}).`, "info");
+         addLog(`🧭 ${t.symbol}: تأكيد الخروج المؤسسي ما زال معطلاً حتى اكتمال الاختبار التاريخي؛ أدلة الانعكاس ${exitEvidence.score}/9 (${exitEvidence.action}).`, "info");
       }
    }
 
-   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear && exitEvidence.action === "EXIT") { emergency = true; emReason = "Inst Short (cross-confirmed)"; }
-   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull && exitEvidence.action === "EXIT") { emergency = true; emReason = "Inst Long (cross-confirmed)"; }
+   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Inst Short (cross-confirmed)" : "Inst Short"; }
+   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Inst Long (cross-confirmed)" : "Inst Long"; }
 
-   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5 && exitEvidence.action === "EXIT") { emergency = true; emReason = "Hidden Sell + cross-confirmation"; }
+   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5 && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Hidden Sell + cross-confirmation" : "Hidden Sell"; }
    const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
-   if (t.direction === "LONG" && threeBelow && profitR < 1.0 && exitEvidence.action === "EXIT") { emergency = true; emReason = "Structural Break + cross-confirmation"; }
+   if (t.direction === "LONG" && threeBelow && profitR < 1.0 && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Structural Break + cross-confirmation" : "Structural Break"; }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
@@ -1441,9 +1447,16 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 5a. FAST FLOW LOSS CUT (-0.25R)
    // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا:
-   if (!t.a_closed && profitR <= -0.25 && exitEvidence.action === "EXIT") {
-      addLog(`🛡️ [قص الخسارة المبكر المؤكد] ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R | أدلة ${exitEvidence.score}/9: ${exitEvidence.reasons.join("; ")}`, 'warn');
-      closeTradeFull(t, "Cross-confirmed Early Flow Reversal Cut");
+   const cvdReversed = t.direction === "LONG"
+      ? (w.slope15 < -60 || w.slope5 < -50 || p.taker < 0.47 || w.hidden_sell)
+      : (w.slope15 > 60 || w.slope5 > 50 || p.taker > 0.53 || w.hidden_buy);
+   const allowFastFlowCut = crossConfirmedExitEnabled ? exitEvidence.action === "EXIT" : cvdReversed;
+   if (!t.a_closed && profitR <= -0.25 && allowFastFlowCut) {
+      addLog(crossConfirmedExitEnabled
+         ? `🛡️ [قص الخسارة المبكر المؤكد] ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R | أدلة ${exitEvidence.score}/9: ${exitEvidence.reasons.join("; ")}`
+         : `🛡️ [قص الخسارة السريع] خروج مبكر وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لانعكاس تدفق السيولة وCVD. تم توفير ${(1 + profitR).toFixed(2)}R!`,
+         'warn');
+      closeTradeFull(t, crossConfirmedExitEnabled ? "Cross-confirmed Early Flow Reversal Cut" : "Early Flow Reversal Cut (-0.25R)");
       return;
    }
 
@@ -1457,7 +1470,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? (lastCandle && lastCandle.close < lastCandle.open)
          : (lastCandle && lastCandle.close > lastCandle.open);
 
-      if (profitR <= -0.40 || (adverseCandle && exitEvidence.action === "EXIT")) {
+      if (profitR <= -0.40 || (adverseCandle && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT"))) {
          addLog(`🛡️ [قص الخسارة الحاسم] إغلاق وقائي فوري لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لمنع النزيف وتوفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, "Hard Early Loss Cut (-0.40R)");
          return;
@@ -1476,7 +1489,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -120 || (p.taker < 0.46 && p.rsi < 44))
          : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 120 || (p.taker > 0.54 && p.rsi > 56));
 
-      if ((isBreakingEMA || orderflowFlipped) && exitEvidence.action === "EXIT") {
+      if ((isBreakingEMA || orderflowFlipped) && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) {
          const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
          addLog(`🛡️ [قص الخسارة الهيكلي] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);
