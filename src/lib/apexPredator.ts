@@ -437,9 +437,24 @@ async function getContext() {
    
    const vols15m = btc15m.slice(-20).map((k: any) => k.volume);
    const avgVol15m = vols15m.reduce((a: number, b: number) => a + b, 0) / 20;
-   const rvol = c15_0.volume / avgVol15m;
+   const rvol = c15_0.volume / (avgVol15m || 1);
    
-   const btc_violent = Math.abs(btc_15m_chg) > (Number(btcVolThresholdStr) / 100) && rvol > 2.5;
+   const volThreshold = Number(btcVolThresholdStr) / 100;
+   const isExtremeVol = Math.abs(btc_15m_chg) > volThreshold && rvol > 2.5;
+
+   // Analyze BTC 15m candle structure to distinguish directional dump/pump from erratic 2-way whipsaw
+   const btc_body = Math.abs(c15_0.close - c15_0.open);
+   const btc_range = c15_0.high - c15_0.low;
+   const btc_body_ratio = btc_range > 0 ? btc_body / btc_range : 0.5;
+
+   // Directional Dump: BTC is plunging with bearish body and strong volume (Prime SHORT regime!)
+   const btc_dump = btc_15m_chg < -volThreshold && c15_0.close < c15_0.open && btc_body_ratio > 0.40;
+
+   // Directional Pump: BTC is exploding upward with bullish body and strong volume (Prime LONG regime!)
+   const btc_pump = btc_15m_chg > volThreshold && c15_0.close > c15_0.open && btc_body_ratio > 0.40;
+
+   // Erratic whipsaw: high volatility but indecisive body with large 2-way wicks (liquidation chop)
+   const btc_whipsaw = isExtremeVol && !btc_dump && !btc_pump;
 
    // Calculate 24h momentum for BTC to distinguish between true trends and sideways consolidation:
    const c4h_start = btc4h[Math.max(0, btc4h.length - 6)]; // 24h ago (6 * 4h candles)
@@ -447,8 +462,11 @@ async function getContext() {
 
    let regime = "NEUTRAL_CONSOLIDATION";
 
-   // If BTC 24h change is within a tight sideways corridor [-1.0%, +1.0%], it's neutral consolidation
-   if (Math.abs(btc_24h_chg) <= 0.010 && Math.abs(btc_15m_chg) <= 0.008) {
+   if (btc_dump) {
+      regime = "BEAR_STRONG";
+   } else if (btc_pump) {
+      regime = "BULL_STRONG";
+   } else if (Math.abs(btc_24h_chg) <= 0.010 && Math.abs(btc_15m_chg) <= 0.008) {
       regime = "NEUTRAL_CONSOLIDATION";
    } else if (price > ema50 && ema50 > ema200 && hh_hl && btc_24h_chg > 0.012) {
       regime = "BULL_STRONG";
@@ -471,7 +489,11 @@ async function getContext() {
 
    return {
       regime,
-      tradeable: !btc_violent, // allow finding trades even if ranging, handled by layer scoring
+      tradeable: !btc_whipsaw, // Only block completely during erratic 2-way whipsaws!
+      tradeableDirection: btc_dump ? "SHORT_ONLY" : (btc_pump ? "LONG_ONLY" : "BOTH"),
+      btc_dump,
+      btc_pump,
+      btc_whipsaw,
       btc_chg: btc_15m_chg,
       avg_fund,
       price,
@@ -679,7 +701,7 @@ async function scoreEntry(symbol: string, ctx: any) {
    else if (p.rsi > 78 || p.rsi < 22) earlyReason = "RSI Exhst";
    else if (p.adx > 60) earlyReason = "ADX Exhst";
    else if (w.scenario === "SHORT_COVER" || w.scenario === "LONG_LIQ") earlyReason = `TEMP: ${w.scenario}`;
-   if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
+   if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && !ctx.btc_dump && !ctx.btc_pump && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
    if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
 
    let sl = 0.0, ss = 0.0;
@@ -779,6 +801,15 @@ async function scoreEntry(symbol: string, ctx: any) {
 
    // High win-rate filters for 3:1 Genius Mode
    if (geniusMode) {
+      // Directional Market Enforcement during BTC Expansion
+      if (ctx.btc_dump) {
+         sl = 0; // Strict: No longs during BTC Dump
+         ss += 2.5; // Big tailwind for breakdown shorts
+      } else if (ctx.btc_pump) {
+         ss = 0; // Strict: No shorts during BTC Pump
+         sl += 2.5; // Big tailwind for breakout longs
+      }
+
       // 1. Strict Market Regime filter:
       if (ctx.regime.includes("BEAR")) {
          sl = 0; // Strict: Don't buy in bear regime
@@ -789,9 +820,11 @@ async function scoreEntry(symbol: string, ctx: any) {
 
       // 2. High-probability RSI Momentum Corridor:
       if (p.rsi > 68) sl -= 2.5; // Avoid buying overbought tops
-      if (p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms
+      const isBearMarket = ctx.regime.includes("BEAR") || ctx.btc_dump;
+      if (!isBearMarket && p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms in non-bear markets
+      if (isBearMarket && p.rsi < 28) ss -= 2.5; // In bear markets, allow breakdown momentum down to 28
       if (p.rsi >= 50 && p.rsi <= 66) sl += 1.0;
-      if (p.rsi <= 50 && p.rsi >= 34) ss += 1.0;
+      if (p.rsi <= 50 && p.rsi >= (isBearMarket ? 28 : 34)) ss += 1.0;
 
       // 3. Supertrend & Trend Confluence:
       if (p.st_bull && p.price > p.ema50) sl += 1.2;
@@ -980,18 +1013,24 @@ async function scoreEntry(symbol: string, ctx: any) {
          }
 
          // OVERSOLD SHORT BLOCKER: مانع بيع القيعان عند التشبع البيعي
-         // الشرط: حظر فتح أي صفقة SHORT إذا كان مؤشر RSI < 42 أو السعر يبتعد أكثر من 1.8 * ATR14 تحت متوسط EMA21.
-         // الهدف: منع بيع القيعان المحلية وتفادي ضربات الارتداد العكسية الصاعدة (Short Squeeze).
+         // في الظروف العادية (تذبذب عرضي): يتم حظر الشورت إذا كان RSI < 42 لحماية الحساب من الارتداد.
+         // في حالة انهيار البيتكوين (BTC DUMP) أو الاتجاه الهابط القوي (BEAR):
+         // يُسمح بركوب شلال الهبوط الانفجاري (Breakdown Ignition) حتى RSI >= 28 طالما لا يوجد ذيل امتصاص شرائي سفلي.
          const rsiVal = p.rsi ?? 50;
-         const isOverstretched = p.atr14 > 0 && p.price < (p.ema21 - (1.8 * p.atr14));
-         if (rsiVal < 42 || isOverstretched) {
-            addLog(`🛡️ [OVERSOLD SHORT BLOCK] تم منع صفقة SHORT على ${symbol} بسبب التشبع البيعي الحاد (RSI: ${rsiVal.toFixed(1)} < 42 أو تمدد سعري مفرط تحت EMA21). ممنوع بيع القيعان!`, "warn");
+         const isBearMarket = ctx.regime.includes("BEAR") || ctx.btc_dump;
+         const minRsiAllowed = isBearMarket ? 28 : 42;
+         const maxAtrDist = isBearMarket ? 2.5 : 1.8;
+         const isOverstretched = p.atr14 > 0 && p.price < (p.ema21 - (maxAtrDist * p.atr14));
+         const hasBuyerAbsorptionWick = p.l_wick > p.body * 1.5 && p.l_wick > (p.atr14 * 0.4);
+
+         if (rsiVal < minRsiAllowed || isOverstretched || hasBuyerAbsorptionWick) {
+            addLog(`🛡️ [OVERSOLD SHORT BLOCK] تم منع صفقة SHORT على ${symbol} بسبب ${rsiVal < minRsiAllowed ? `التشبع البيعي الحاد (RSI: ${rsiVal.toFixed(1)} < ${minRsiAllowed})` : (hasBuyerAbsorptionWick ? "ظهور ذيل امتصاص شرائي سفلي" : `تمدد سعري مفرط تحت EMA21 (> ${maxAtrDist}x ATR)`)}.`, "warn");
             logRejectedSignal({
                symbol,
                timeframe: "15m",
                direction: "SHORT",
                signal_score: ss,
-               rejection_reason: `Oversold Short Blocker: SHORT prohibited at local bottom (RSI: ${rsiVal.toFixed(1)} < 42 or overstretched below EMA21). Prevents selling bottoms into relief bounces.`,
+               rejection_reason: `Oversold Short Blocker: SHORT prohibited (RSI: ${rsiVal.toFixed(1)} < ${minRsiAllowed} or overstretched > ${maxAtrDist}x ATR14). Prevents selling bottoms.`,
                p,
                w,
                ctx,
@@ -1547,11 +1586,17 @@ export async function runApexLoop() {
          return; // Only skip scanning and new trade entry for this cycle, keeping bot active to manage existing trades!
       }
 
-      // BTC Violent Regime check: if BTC is violent (ctx.tradeable === false), block new trades
-      if (ctx.tradeable === false) {
-         addLog("⚠️ BTC Violent Regime: تم حظر فتح صفقات جديدة نظراً لتذبذب بيتكوين العنيف.", "warn");
+      // BTC Violent Regime check: if BTC is an erratic two-way whipsaw, block new trades
+      if (ctx.tradeable === false || ctx.btc_whipsaw) {
+         addLog("⚠️ BTC Violent Whipsaw: تم حظر فتح صفقات جديدة نظراً للتذبذب العشوائي العنيف في بيتكوين (Whipsaw).", "warn");
          isLoopRunning = false;
          return;
+      }
+
+      if (ctx.btc_dump) {
+         addLog(`⚡ [BTC DUMP REGIME] تم رصد هبوط عنيف لبيتكوين (${(ctx.btc_chg * 100).toFixed(2)}%). تم توجيه الروبوت لصفقات الـ SHORT وحظر الـ LONG بنسبة 100%!`, "info");
+      } else if (ctx.btc_pump) {
+         addLog(`⚡ [BTC PUMP REGIME] تم رصد صعود عنيف لبيتكوين (+${(ctx.btc_chg * 100).toFixed(2)}%). تم توجيه الروبوت لصفقات الـ LONG وحظر الـ SHORT بنسبة 100%!`, "info");
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities

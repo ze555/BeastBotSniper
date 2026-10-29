@@ -470,6 +470,13 @@ console.log("=======================================================\n");
    const timing3 = evaluateTimingGate("SHORT", healthyShortPrice, mockBearWhale, loc, flow3);
    const conf3 = checkConfirmation("TREND_DOWN", flow3, loc, shortScenario, timing3, healthyShortPrice, mockBearWhale, { sl: 2.0, ss: 8.5 }, { regime: "NEUTRAL_CONSOLIDATION" });
    assert("Test 17d: Healthy Short near resistance/EMA21 passes oversold check", conf3.reason.includes("Oversold Short Blocker") === false);
+
+   // 17e: Breakdown Short during BTC BEAR_STRONG / Dump allows RSI down to 28 (RSI = 35 allowed)
+   const breakdownPrice = { price: 94.5, ema21: 96, atr14: 1.0, rvol: 2.2, taker: 0.40, rsi: 35, adx: 32, di_plus: 10, di_minus: 38, ema50: 100, st_bull: false, bear_align: true, LH_LL: true, klines: [{ open: 96, high: 96, low: 94, close: 94.5 }] };
+   const flow4 = interpretFlow(breakdownPrice, mockBearWhale);
+   const timing4 = evaluateTimingGate("SHORT", breakdownPrice, mockBearWhale, loc, flow4);
+   const conf4 = checkConfirmation("TREND_DOWN", flow4, loc, shortScenario, timing4, breakdownPrice, mockBearWhale, { sl: 2.0, ss: 8.5 }, { regime: "BEAR_STRONG", btc_dump: true });
+   assert("Test 17e: Breakdown Short with RSI 35 is NOT blocked by Oversold Blocker during BTC BEAR / DUMP", conf4.reason.includes("Oversold Short Blocker") === false);
 }
 
 // ----------------------------------------------------------------------------

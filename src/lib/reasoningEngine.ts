@@ -147,12 +147,12 @@ export interface ReasoningResult {
 // Contextual environment classifier. Does NOT give buy/sell signals.
 // ----------------------------------------------------------------------------
 export function detectMarketRegime(ctx: any, p: any): MarketRegimeType {
-   if (ctx.regime === "VIOLENT" || ctx.tradeable === false || (p.rvol > 2.8 && p.atr14 > p.atr20 * 1.6)) {
+   if (ctx.btc_whipsaw || ctx.regime === "VIOLENT" || (!ctx.btc_dump && !ctx.btc_pump && ctx.tradeable === false) || (!ctx.btc_dump && !ctx.btc_pump && p.rvol > 3.0 && p.body < p.rng * 0.25)) {
       return "HIGH_VOLATILITY";
    }
 
-   const btcBull = ctx.regime.includes("BULL");
-   const btcBear = ctx.regime.includes("BEAR");
+   const btcBull = (ctx.regime && ctx.regime.includes("BULL")) || Boolean(ctx.btc_pump);
+   const btcBear = (ctx.regime && ctx.regime.includes("BEAR")) || Boolean(ctx.btc_dump);
 
    const assetBullAlign = p.price > p.ema50 && p.ema50 > p.ema200 && p.HH_HL;
    const assetBearAlign = p.price < p.ema50 && p.ema50 < p.ema200 && p.LH_LL;
@@ -900,20 +900,26 @@ export function checkConfirmation(
       }
 
       // 1b. OVERSOLD SHORT BLOCKER: مانع بيع القيعان عند التشبع البيعي
-      // حظر فتح أي صفقة SHORT إذا كان مؤشر RSI < 42 أو السعر يبتعد أكثر من 1.8 * ATR14 تحت متوسط EMA21.
+      // حظر فتح أي صفقة SHORT عند وصول السعر لتشبع بيعي حقيقي.
+      // في الأسواق الهابطة (BEAR) أو هبوط بيتكوين (btc_dump)، يُسمح بركوب شلال الهبوط حتى RSI >= 28.
+      // في الأسواق المحايدة أو العرضية، يتم الحظر عند RSI < 42 لمنع الشورت في قاع الرينج.
+      const isBearMarket = btcRegime.includes("BEAR") || Boolean(ctx?.btc_dump);
+      const minRsiAllowed = isBearMarket ? 28 : 42;
+      const maxAtrDist = isBearMarket ? 2.5 : 1.8;
+
       const rsiVal = p?.rsi ?? 50;
       const priceVal = p?.price ?? 0;
       const ema21Val = p?.ema21 ?? priceVal;
       const atr14Val = p?.atr14 ?? 0;
-      const isOverstretched = atr14Val > 0 && priceVal < (ema21Val - (1.8 * atr14Val));
+      const isOverstretched = atr14Val > 0 && priceVal < (ema21Val - (maxAtrDist * atr14Val));
 
-      if (rsiVal < 42 || isOverstretched) {
+      if (rsiVal < minRsiAllowed || isOverstretched) {
          return {
             isConfirmed: false,
             confirmedSignal: "WAIT",
-            reason: `Oversold Short Blocker: SHORT prohibited when asset is deeply oversold (RSI ${rsiVal.toFixed(1)} < 42 or overstretched below EMA21). Prevents selling local bottoms into relief bounces.`,
+            reason: `Oversold Short Blocker: SHORT prohibited when asset is deeply oversold (RSI ${rsiVal.toFixed(1)} < ${minRsiAllowed} or overstretched > ${maxAtrDist}x ATR14 below EMA21). Prevents selling local bottoms into relief bounces.`,
             evidence,
-            missingItems: ["Asset relief bounce back towards EMA21 / resistance (RSI >= 45)"]
+            missingItems: [`Asset relief bounce back towards EMA21 / resistance (RSI >= ${minRsiAllowed + 5})`]
          };
       }
    }
