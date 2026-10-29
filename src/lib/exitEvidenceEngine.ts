@@ -38,18 +38,19 @@ export interface ExitEvidenceDecision {
 export function evaluateExitEvidence(input: ExitEvidenceInput): ExitEvidenceDecision {
   const finite = (value: number) => Number.isFinite(value);
   const oiAvailable = input.oiAvailable && finite(input.oiChangePct);
-  const cvdAvailable = finite(input.cvd5) && finite(input.cvd15) && finite(input.cvd4h);
+  const cvd5m15mAvailable = finite(input.cvd5) && finite(input.cvd15);
+  const cvd4hAvailable = finite(input.cvd4h);
   const takerAvailable = finite(input.takerRatio) && input.takerRatio >= 0 && input.takerRatio <= 1;
 
   const adversePrice = input.direction === "LONG"
     ? input.priceChangePct <= -0.001
     : input.priceChangePct >= 0.001;
-  const adverseCvd5m15m = input.direction === "LONG"
+  const adverseCvd5m15m = cvd5m15mAvailable && (input.direction === "LONG"
     ? input.cvd5 < 0 && input.cvd15 < 0
-    : input.cvd5 > 0 && input.cvd15 > 0;
-  const adverseCvd4h = input.direction === "LONG"
+    : input.cvd5 > 0 && input.cvd15 > 0);
+  const adverseCvd4h = cvd4hAvailable && (input.direction === "LONG"
     ? input.cvd4h < 0
-    : input.cvd4h > 0;
+    : input.cvd4h > 0);
   const adverseTaker = takerAvailable && (input.direction === "LONG"
     ? input.takerRatio < 0.47
     : input.takerRatio > 0.53);
@@ -62,8 +63,8 @@ export function evaluateExitEvidence(input: ExitEvidenceInput): ExitEvidenceDeci
   let score = 0;
 
   if (input.structureBroken) { score += 2; reasons.push("price structure/EMA21 broken"); }
-  if (adverseCvd5m15m && cvdAvailable) { score += 2; reasons.push("5m and 15m CVD proxies aligned against trade"); }
-  if (adverseCvd4h && cvdAvailable) { score += 1; reasons.push("4h CVD proxy confirms adverse direction"); }
+  if (adverseCvd5m15m) { score += 2; reasons.push("5m and 15m CVD proxies aligned against trade"); }
+  if (adverseCvd4h) { score += 1; reasons.push("4h CVD proxy confirms adverse direction"); }
   if (adverseTaker) { score += 1; reasons.push("taker aggression against trade"); }
   if (adverseOi) { score += 1; reasons.push("valid OI change confirms adverse price expansion"); }
   if (adverseHiddenFlow) { score += 1; reasons.push("flow/price divergence against trade"); }
@@ -81,7 +82,8 @@ export function evaluateExitEvidence(input: ExitEvidenceInput): ExitEvidenceDeci
     reasons,
     dataQuality: {
       oiAvailable,
-      multiTimeframeCvdAvailable: cvdAvailable,
+      multiTimeframeCvdAvailable: cvd5m15mAvailable,
+      cvd4hAvailable,
       takerAvailable
     }
   };
