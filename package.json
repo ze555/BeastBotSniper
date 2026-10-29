@@ -8,7 +8,8 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --target=node18 --outfile=dist/server.cjs --format=cjs --packages=external",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "start": "NODE_ENV=production node dist/server.cjs"
+    "start": "NODE_ENV=production node dist/server.cjs",
+    "test": "tsx src/lib/exitEvidenceEngine.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

@@ -1,6 +1,7 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
+import { evaluateExitEvidence } from "./exitEvidenceEngine.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -407,11 +408,6 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
-async function fetchLiq(symbol: string) {
-   // Proxying liquidation calculation (mocked for this specific requirement due to Binance lacking a free direct liq map)
-   return { _up: 3000000, _down: 3000000 };
-}
-
 // --- SEC 1: MARKET CONTEXT (BTC) ---
 async function getContext() {
    const btc4h = await fetchKl("BTCUSDT", "4h", 210);
@@ -525,10 +521,14 @@ async function readWhale(symbol: string, btc_chg: number) {
 
    const oiData = await fetchOI(symbol, "15m", 4);
    let oi_chg = 0;
+   let oi_available = false;
    if (oiData && oiData.length >= 4) {
       const oi0 = parseFloat(oiData[oiData.length-1].sumOpenInterest);
       const oi3 = parseFloat(oiData[0].sumOpenInterest);
-      oi_chg = (oi0 - oi3) / oi3;
+      if (Number.isFinite(oi0) && Number.isFinite(oi3) && oi3 > 0) {
+         oi_chg = (oi0 - oi3) / oi3;
+         oi_available = Number.isFinite(oi_chg);
+      }
    }
 
    const p0 = c15[c15.length-1].close;
@@ -560,13 +560,13 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, p_chg, fund,
+      scenario, oi_chg, oi_available, p_chg, fund,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15
+      asset_strong, c15, c5, slope5, slope15, slope4h
    };
 }
 
@@ -1269,6 +1269,27 @@ async function exitBrain(trade: any, ctx: any) {
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
 
+   // Cross-confirmation for open-trade exits. Missing OI is unavailable, never a positive/neutral vote.
+   const recentExitCandles = p.klines || [];
+   const structureBrokenForExit = recentExitCandles.length >= 3 && recentExitCandles.slice(-3).every((c: any) =>
+      t.direction === "LONG" ? c.close < p.ema21 : c.close > p.ema21
+   );
+   const exitEvidence = evaluateExitEvidence({
+      direction: t.direction,
+      priceChangePct: w.p_chg,
+      oiChangePct: w.oi_chg,
+      oiAvailable: w.oi_available === true,
+      cvd5: w.slope5,
+      cvd15: w.slope15,
+      cvd4h: w.slope4h,
+      takerRatio: p.taker,
+      structureBroken: structureBrokenForExit,
+      hiddenFlowAgainst: t.direction === "LONG" ? Boolean(w.hidden_sell) : Boolean(w.hidden_buy),
+      opposingRegime: t.direction === "LONG"
+         ? String(ctx.regime || "").includes("BEAR")
+         : String(ctx.regime || "").includes("BULL")
+   });
+
    // Floating PnL Mark-to-Market calculation (Exact match with closePart and closeTradeFull formulas)
    const effectiveExitPrice = t.direction === "LONG"
       ? price * (1 - slippageRate)
@@ -1292,17 +1313,19 @@ async function exitBrain(trade: any, ctx: any) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من توقف صعود بيتكوين لأن الاتجاه منسجم مع وضعية الصعود (${ctx.btc_chg.toFixed(4)})`, "info");
       } else if (smartBtcHoldEnabled && t.direction === "SHORT" && ctx.btc_chg < -0.0) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من هبوط بيتكوين لأن الاتجاه منسجم مع وضعية الشورت (${ctx.btc_chg.toFixed(4)})`, "info");
+      } else if (exitEvidence.action === "EXIT") {
+         emergency = true; emReason = "BTC Chaos + confirmed adverse evidence";
       } else {
-         emergency = true; emReason = "BTC Chaos";
+         addLog(`🧭 ${t.symbol}: BTC Chaos/عدم قابلية التداول لا يكفي وحده لإغلاق الصفقة؛ أدلة الانعكاس ${exitEvidence.score}/8 (${exitEvidence.action}).`, "info");
       }
    }
 
-   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
-   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
-   
-   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
+   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear && exitEvidence.action === "EXIT") { emergency = true; emReason = "Inst Short (cross-confirmed)"; }
+   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull && exitEvidence.action === "EXIT") { emergency = true; emReason = "Inst Long (cross-confirmed)"; }
+
+   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5 && exitEvidence.action === "EXIT") { emergency = true; emReason = "Hidden Sell + cross-confirmation"; }
    const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
-   if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
+   if (t.direction === "LONG" && threeBelow && profitR < 1.0 && exitEvidence.action === "EXIT") { emergency = true; emReason = "Structural Break + cross-confirmation"; }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
@@ -1399,7 +1422,7 @@ async function exitBrain(trade: any, ctx: any) {
    if (profitR >= 0.70) {
       if (t.direction === "LONG") {
          const cvdExhaustion = w.slope15 < -100 && w.slope5 < -80;
-         const oiDropping = w.oi_chg < -0.005;
+         const oiDropping = w.oi_available === true && w.oi_chg < -0.005;
          if (cvdExhaustion && oiDropping) {
             addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي وتصريف مؤسساتي في CVD/OI.`, 'success');
             closeTradeFull(t, "CVD/OI Exhaustion Peak");
@@ -1407,7 +1430,7 @@ async function exitBrain(trade: any, ctx: any) {
          }
       } else if (t.direction === "SHORT") {
          const cvdExhaustion = w.slope15 > 100 && w.slope5 > 80;
-         const oiDropping = w.oi_chg < -0.005;
+         const oiDropping = w.oi_available === true && w.oi_chg < -0.005;
          if (cvdExhaustion && oiDropping) {
             addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانتهاء تغطية الشورتات وانعكاس CVD صعوداً.`, 'success');
             closeTradeFull(t, "CVD/OI Short Squeeze Peak");
@@ -1418,16 +1441,10 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 5a. FAST FLOW LOSS CUT (-0.25R)
    // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا:
-   if (!t.a_closed && profitR <= -0.25) {
-      const cvdReversed = t.direction === "LONG"
-         ? (w.slope15 < -60 || w.slope5 < -50 || p.taker < 0.47 || w.hidden_sell)
-         : (w.slope15 > 60 || w.slope5 > 50 || p.taker > 0.53 || w.hidden_buy);
-
-      if (cvdReversed) {
-         addLog(`🛡️ [قص الخسارة السريع] خروج مبكر وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لانعكاس تدفق السيولة وCVD. تم توفير ${(1 + profitR).toFixed(2)}R!`, 'warn');
-         closeTradeFull(t, "Early Flow Reversal Cut (-0.25R)");
-         return;
-      }
+   if (!t.a_closed && profitR <= -0.25 && exitEvidence.action === "EXIT") {
+      addLog(`🛡️ [قص الخسارة المبكر المؤكد] ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R | أدلة ${exitEvidence.score}/8: ${exitEvidence.reasons.join("; ")}`, 'warn');
+      closeTradeFull(t, "Cross-confirmed Early Flow Reversal Cut");
+      return;
    }
 
    // 5b. HARD EARLY LOSS CUT (-0.38R to -0.40R)
@@ -1440,7 +1457,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? (lastCandle && lastCandle.close < lastCandle.open)
          : (lastCandle && lastCandle.close > lastCandle.open);
 
-      if (profitR <= -0.40 || adverseCandle) {
+      if (profitR <= -0.40 || (adverseCandle && exitEvidence.action === "EXIT")) {
          addLog(`🛡️ [قص الخسارة الحاسم] إغلاق وقائي فوري لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لمنع النزيف وتوفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, "Hard Early Loss Cut (-0.40R)");
          return;
@@ -1459,7 +1476,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -120 || (p.taker < 0.46 && p.rsi < 44))
          : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 120 || (p.taker > 0.54 && p.rsi > 56));
 
-      if (isBreakingEMA || orderflowFlipped) {
+      if ((isBreakingEMA || orderflowFlipped) && exitEvidence.action === "EXIT") {
          const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
          addLog(`🛡️ [قص الخسارة الهيكلي] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);
