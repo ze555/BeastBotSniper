@@ -1442,7 +1442,7 @@ async function exitBrain(trade: any, ctx: any) {
    // 5a. FAST FLOW LOSS CUT (-0.25R)
    // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا:
    if (!t.a_closed && profitR <= -0.25 && exitEvidence.action === "EXIT") {
-      addLog(`🛡️ [قص الخسارة المبكر المؤكد] ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R | أدلة ${exitEvidence.score}/8: ${exitEvidence.reasons.join("; ")}`, 'warn');
+      addLog(`🛡️ [قص الخسارة المبكر المؤكد] ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R | أدلة ${exitEvidence.score}/9: ${exitEvidence.reasons.join("; ")}`, 'warn');
       closeTradeFull(t, "Cross-confirmed Early Flow Reversal Cut");
       return;
    }

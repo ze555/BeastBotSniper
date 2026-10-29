@@ -21,7 +21,7 @@ export interface ExitEvidenceInput {
 export interface ExitEvidenceDecision {
   action: ExitManagementAction;
   score: number;
-  maxScore: 8;
+  maxScore: 9;
   reasons: string[];
   dataQuality: {
     oiAvailable: boolean;
