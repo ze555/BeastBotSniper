@@ -44,18 +44,25 @@ export function getSymbolGuardConfig(): SymbolGuardConfig {
 
 /**
  * Feed a closed trade result. Call once per full close (closeTradeFull).
- *  - pnl > +scratch  → win: streak resets, cooldown lifts
- *  - |pnl| <= scratch → scratch: streak unchanged
- *  - pnl < -scratch  → loss: streak grows; at limit, cooldown window opens
+ * Classification is R-AWARE when profitR is provided (v3.1.2 fix): the live
+ * ETH loop re-entered because tiny-USD emergency exits (-0.12R at 0.42x risk)
+ * fell under the USDT scratch threshold. R-based classification counts any
+ * loss beyond -0.10R as a real loss regardless of position size.
+ *  - win  (>= +0.15R or pnl > +scratch) → streak resets, cooldown lifts
+ *  - scratch (between -0.10R and +0.15R) → streak unchanged
+ *  - loss (<= -0.10R or pnl < -scratch) → streak grows; at limit, cooldown opens
  */
-export function recordSymbolResult(symbol: string, pnl: number, nowMs: number = Date.now()) {
+export function recordSymbolResult(symbol: string, pnl: number, nowMs: number = Date.now(), profitR?: number) {
    if (!symbol) return;
-   if (pnl > cfg.scratchThreshold) {
+   const isWin = profitR !== undefined ? profitR >= 0.15 : pnl > cfg.scratchThreshold;
+   const isLoss = profitR !== undefined ? profitR <= -0.10 : pnl < -cfg.scratchThreshold;
+
+   if (isWin) {
       lossStreaks.set(symbol, 0);
       blockedUntil.delete(symbol);
       return;
    }
-   if (pnl >= -cfg.scratchThreshold) return; // fee scratch — neutral
+   if (!isLoss) return; // fee scratch — neutral
 
    const streak = (lossStreaks.get(symbol) || 0) + 1;
    lossStreaks.set(symbol, streak);

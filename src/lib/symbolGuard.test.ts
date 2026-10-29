@@ -136,6 +136,33 @@ console.log("\n🧪 RUNNING SYMBOL GUARD v3.1.1 VERIFICATION SUITE\n");
    assert("guard blocks only NEW entries", isSymbolBlocked(openTrade.symbol, t0).blocked === true && openTrade.status === "OPEN");
 }
 
+// ---------------------------------------------------------------------------
+// 9. R-AWARE CLASSIFICATION (v3.1.2) — the live ETH loop fix
+// Tiny-USD emergency exits at reduced risk (-0.12R => ~-$0.10) fell under
+// the USDT scratch hole and the loop re-entered forever.
+// ---------------------------------------------------------------------------
+{
+   resetSymbolGuard();
+   const t0 = 1_700_000_000_000;
+   // tiny USD loss but -0.12R => REAL loss (R-based)
+   recordSymbolResult("ETHUSDT", -0.10, t0, -0.12);
+   assert("tiny-USD -0.12R counts as a real loss (streak 1)", isSymbolBlocked("ETHUSDT", t0).streak === 1);
+   recordSymbolResult("ETHUSDT", -0.11, t0 + 60_000, -0.14);
+   assert("second tiny-USD R-loss triggers the cooldown (loop closed)", isSymbolBlocked("ETHUSDT", t0 + 60_000).blocked === true);
+}
+
+{
+   resetSymbolGuard();
+   const t0 = 1_700_000_000_000;
+   // R-based wins/scratches
+   recordSymbolResult("BTCUSDT", 0.20, t0, 0.3);            // +0.3R tiny USD => WIN
+   assert("tiny-USD +0.3R counts as a win (streak 0)", isSymbolBlocked("BTCUSDT", t0).streak === 0);
+   recordSymbolResult("BTCUSDT", -0.05, t0 + 60_000, -0.05); // -0.05R => scratch, neutral
+   assert("-0.05R scratch is neutral", isSymbolBlocked("BTCUSDT", t0 + 60_000).streak === 0);
+   recordSymbolResult("BTCUSDT", -500, t0 + 120_000, -2.0);  // big R loss
+   assert("big R loss grows streak to 1", isSymbolBlocked("BTCUSDT", t0 + 120_000).streak === 1);
+}
+
 console.log("=======================================================");
 console.log(`📊 SYMBOL GUARD TEST SUMMARY: ${passed} PASSED | ${failed} FAILED`);
 console.log("=======================================================");

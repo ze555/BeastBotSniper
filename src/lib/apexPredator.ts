@@ -13,6 +13,10 @@ import {
    recordSymbolResult, isSymbolBlocked,
    configureSymbolGuard, pruneSymbolGuard
 } from "./symbolGuard.js";
+import {
+   updateCrashRadar, getViolenceState, isCounterTape, isWithTape,
+   configureCrashRadar, ViolenceState
+} from "./crashRadar.js";
 import { MOMENTUM_FLOOR_PCT } from "./executionFilter.js";
 import {
    updateSymbolDirection, shouldTighten, isInvalidated,
@@ -98,6 +102,13 @@ let momentumFloorPct = MOMENTUM_FLOOR_PCT; // Rule A threshold: 0.15% 10-candle 
 let setupRegimeMatrix = true;      // Rule B: ban PULLBACK_SNIPER in BEAR_STRONG (squeeze food, -31.79 measured)
 let symbolCooldownEnabled = true;  // Rule D: block re-entries after 2 straight losses on same symbol (-44 measured)
 
+// ═══ v3.1.2 CRASH MODE — ride the collapse instead of hiding from it ═══
+// Live forensics (BTC crash 2026-10-29 01:00-02:35 UTC): btc_violent blocked
+// EVERYTHING (tradeable=false), stale 4h BULL regime zeroed all shorts, RSI
+// corridor penalized oversold shorts, and range reversion caught LONG knives.
+let crashMode = true;              // Master switch: cascade overrides regime lag + toxic hours, blocks knife entries
+let crashRiskMult = 0.80;          // Risk multiplier for with-tape cascade entries (slippage + whipsaw shield)
+
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
 let libyaOpen1 = 10;
@@ -168,6 +179,16 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
          configureSymbolGuard({
             lossStreakLimit: opts.symbolLossStreakLimit !== undefined ? Number(opts.symbolLossStreakLimit) : undefined,
             cooldownMinutes: opts.symbolCooldownMinutes !== undefined ? Number(opts.symbolCooldownMinutes) : undefined
+         });
+      }
+      // v3.1.2 crash mode
+      if (opts.crashMode !== undefined) crashMode = !!opts.crashMode;
+      if (opts.crashRiskMult !== undefined) crashRiskMult = Math.min(1.0, Math.max(0.3, Number(opts.crashRiskMult) || 0.8));
+      if (opts.crashDrop45Pct !== undefined || opts.crashDrop90Pct !== undefined || opts.crashHoldMinutes !== undefined) {
+         configureCrashRadar({
+            drop45Pct: opts.crashDrop45Pct !== undefined ? Number(opts.crashDrop45Pct) : undefined,
+            drop90Pct: opts.crashDrop90Pct !== undefined ? Number(opts.crashDrop90Pct) : undefined,
+            holdMinutes: opts.crashHoldMinutes !== undefined ? Number(opts.crashHoldMinutes) : undefined
          });
       }
   }
@@ -256,6 +277,10 @@ export function getStats() {
     momentumFloorPct,
     setupRegimeMatrix,
     symbolCooldownEnabled,
+    // v3.1.2 crash mode
+    crashMode,
+    crashRiskMult,
+    violence: getViolenceState(),
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
     fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
     today: todaysStats 
@@ -297,7 +322,10 @@ export function getConfig() {
     flowAlignedEntry,
     momentumFloorPct,
     setupRegimeMatrix,
-    symbolCooldownEnabled
+    symbolCooldownEnabled,
+    // v3.1.2 crash mode
+    crashMode,
+    crashRiskMult
   };
 }
 export function setConfig(config: any) {
@@ -341,6 +369,16 @@ export function setConfig(config: any) {
      configureSymbolGuard({
         lossStreakLimit: config.symbolLossStreakLimit !== undefined ? Number(config.symbolLossStreakLimit) : undefined,
         cooldownMinutes: config.symbolCooldownMinutes !== undefined ? Number(config.symbolCooldownMinutes) : undefined
+     });
+  }
+  // v3.1.2 crash mode
+  if (config.crashMode !== undefined) crashMode = !!config.crashMode;
+  if (config.crashRiskMult !== undefined) crashRiskMult = Math.min(1.0, Math.max(0.3, Number(config.crashRiskMult) || 0.8));
+  if (config.crashDrop45Pct !== undefined || config.crashDrop90Pct !== undefined || config.crashHoldMinutes !== undefined) {
+     configureCrashRadar({
+        drop45Pct: config.crashDrop45Pct !== undefined ? Number(config.crashDrop45Pct) : undefined,
+        drop90Pct: config.crashDrop90Pct !== undefined ? Number(config.crashDrop90Pct) : undefined,
+        holdMinutes: config.crashHoldMinutes !== undefined ? Number(config.crashHoldMinutes) : undefined
      });
   }
 }
@@ -559,13 +597,33 @@ async function getContext() {
    const fundBtc = await fetchFunding("BTCUSDT");
    const avg_fund = fundBtc;
 
+   // ═══ CRASH RADAR (v3.1.2) ═══
+   // Detect a LIVE directional cascade from the 15m tape (+ real liquidation
+   // dominance when the WebSocket feed has it). During an active cascade the
+   // blanket btc_violent block is lifted FOR THE CASCADE DIRECTION ONLY —
+   // the old code hid exactly when the wave was biggest.
+   let liqSnap: any = null;
+   try { liqSnap = getLiquidationSnapshot("BTCUSDT"); } catch { liqSnap = null; }
+   const prevDir = getViolenceState().direction;
+   const violence: ViolenceState = updateCrashRadar(btc15m, liqSnap && liqSnap.cascadeActive ? { intensity: liqSnap.intensity, dominantSide: liqSnap.dominantSide } : null);
+   if (crashMode && violence.active && prevDir !== violence.direction) {
+      addLog(
+         `🌪️ [CRASH RADAR] ${violence.direction === "DOWN" ? "انهيار هابط" : "موجة صاعدة"} — 45m ${violence.drop45Pct.toFixed(2)}% · 90m ${violence.drop90Pct.toFixed(2)}% · شدة ${(violence.intensity * 100).toFixed(0)}%. تُفتح صفقات مع الموجة بمخاطرة مخفضة ويُمنع صيد السكاكين عكسها.`,
+         violence.direction === "DOWN" ? "warn" : "info"
+      );
+   }
+
    return {
       regime,
-      tradeable: !btc_violent, // allow finding trades even if ranging, handled by layer scoring
+      // Cascade-active lifts the blanket violence block (direction is enforced
+      // downstream: flow-tape filter + with-tape-only sizing + knife guard).
+      tradeable: !btc_violent || (crashMode && violence.active),
       btc_chg: btc_15m_chg,
       avg_fund,
       price,
-      ema200
+      ema200,
+      crashMode,
+      violence
    };
 }
 
@@ -835,7 +893,16 @@ async function scoreEntry(symbol: string, ctx: any) {
    else if (p.rvol > 5.0) earlyReason = "RVOL Crazy";
    else if (p.rsi > 78 || p.rsi < 22) earlyReason = "RSI Exhst";
    else if (p.adx > 60) earlyReason = "ADX Exhst";
-   else if (w.scenario === "SHORT_COVER" || w.scenario === "LONG_LIQ") earlyReason = `TEMP: ${w.scenario}`;
+   else if (w.scenario === "SHORT_COVER" || w.scenario === "LONG_LIQ") {
+      // CRASH MODE (v3.1.2): a live cascade in the SAME direction as the
+      // forced-flow scenario is FUEL (long liquidations beget more selling),
+      // not a disqualifier. Live forensics: LONG_LIQ fires exactly during
+      // crashes — blocking it starved the bot of the biggest shorts.
+      const vsEarly = getViolenceState();
+      const scenarioAligned = (w.scenario === "LONG_LIQ" && vsEarly.active && vsEarly.direction === "DOWN") ||
+                              (w.scenario === "SHORT_COVER" && vsEarly.active && vsEarly.direction === "UP");
+      if (!(crashMode && scenarioAligned)) earlyReason = `TEMP: ${w.scenario}`;
+   }
    if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
    if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
 
@@ -940,19 +1007,42 @@ async function scoreEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: earlyReason };
    }
 
+   // ═══ v3.1.2 CRASH/PUMP CASCADE FLAGS ═══
+   // Computed once, used by the genius score gates below AND by minScore —
+   // the wave must be rideable, not just visible.
+   const vs: ViolenceState = (ctx as any).violence || { active: false, direction: "NONE" } as ViolenceState;
+   const cascadeDown = crashMode && vs.active && vs.direction === "DOWN";
+   const cascadeUp = crashMode && vs.active && vs.direction === "UP";
+
    // High win-rate filters for 3:1 Genius Mode
    if (geniusMode) {
+      // ═══ CRASH/PUMP OVERRIDE (v3.1.2) ═══
+      // The 4h EMA regime is a rear-view mirror: during a live cascade it
+      // still says BULL_* for hours while price is in freefall. When the
+      // radar confirms a live cascade, the stale label must NOT zero the
+      // with-tape direction (flow-tape filter + risk mult keep it safe).
+      // Flags cascadeDown/cascadeUp computed above (before minScore).
+
       // 1. Strict Market Regime filter:
       if (ctx.regime.includes("BEAR")) {
          sl = 0; // Strict: Don't buy in bear regime
       }
       if (ctx.regime.includes("BULL")) {
-         ss = 0; // Strict: Don't short in bull regime
+         if (cascadeDown) {
+            // CRASH MODE: regime label is stale — the collapse IS the trend.
+            ss = Math.max(ss, 4.0); // floor the short score so the cascade can actually fire
+         } else {
+            ss = 0; // Strict: Don't short in bull regime
+         }
+      }
+      if (ctx.regime.includes("BEAR") && cascadeUp) {
+         sl = Math.max(sl, 4.0); // symmetric pump override
       }
 
       // 2. High-probability RSI Momentum Corridor:
-      if (p.rsi > 68) sl -= 2.5; // Avoid buying overbought tops
-      if (p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms
+      // During a live cascade, "oversold" is not exhaustion — it is FUEL.
+      if (p.rsi > 68 && !cascadeUp) sl -= 2.5; // Avoid buying overbought tops
+      if (p.rsi < 32 && !cascadeDown) ss -= 2.5; // ...unless a cascade is live (oversold gets more oversold)
       if (p.rsi >= 50 && p.rsi <= 66) sl += 1.0;
       if (p.rsi <= 50 && p.rsi >= 34) ss += 1.0;
 
@@ -982,7 +1072,8 @@ async function scoreEntry(symbol: string, ctx: any) {
       { sl, ss }
    );
 
-   const minScore = geniusMode ? 7.6 : 6.8;
+   // ═══ v3.1.2 cascade flags declared above (before genius gates) ═══
+   const minScore = geniusMode ? ((cascadeDown || cascadeUp) ? 6.8 : 7.6) : 6.8;
 
    // ═══ v3.1.1 FORENSIC RULE INPUTS ═══
    // Rule A input: 10-candle drift % (current price vs close 10 candles back on
@@ -1010,7 +1101,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          // All regime/asset gates now live in reasoningEngine.checkConfirmation
          // (graduated positioning) — this layer enforces the execution matrix
          // and live microstructure vetoes as the final defense.
-         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
+         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "UP")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
          if (exFilterLong.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] LONG ${symbol} blocked: ${exFilterLong.reason}`, "warn");
             logRejectedSignal({
@@ -1067,7 +1158,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
          // ═══ EXECUTION LAYER (v3.1) ═══
-         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
+         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "DOWN")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
          if (exFilterShort.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] SHORT ${symbol} blocked: ${exFilterShort.reason}`, "warn");
             logRejectedSignal({
@@ -1157,6 +1248,13 @@ async function scoreEntry(symbol: string, ctx: any) {
    if (rangeReversionEnabled && reasoning.regime === "RANGE" && ctx.tradeable) {
       const rev = evaluateRangeReversion({ symbol, p, w, loc: reasoning.location, btcRegime: ctx.regime });
       if (rev) {
+         // ═══ KNIFE GUARD (v3.1.2) ═══ — live logs 02:23 & 02:26 UTC: reversion
+         // opened LONGs on "RSI oversold" DURING the crash and died in 30s.
+         // Counter-tape fades are forbidden while a cascade is live.
+         if (crashMode && isCounterTape(rev.signal as "LONG" | "SHORT")) {
+            addLog(`🚫 [KNIFE GUARD] ${rev.signal} ${symbol} reversion blocked: live ${getViolenceState().direction} cascade — fading it is knife catching.`, "warn");
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
          const exFilterRev = evaluateExecutionFilter(rev.signal, ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, setupType: "RANGE_REVERSION" });
          // NOTE: no chg10Pct here — fading a range edge is counter-tape BY DESIGN;
          // the reversion engine has its own exhaustion/asymmetry gates.
@@ -1227,9 +1325,15 @@ function executeTrade(symbol: string, decision: any) {
    const timing = extractEntryTiming();
    const sessionMult = sessionRiskEnabled ? ((SESSION_RISK_MULT as any)[timing.session] ?? 1.0) : 1.0;
    const confirmedMult = decision.reasoning?.confirmation?.suggestedRiskMult ?? 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult * sessionMult * confirmedMult;
-   if (regimeRiskMult < 1.0 || sessionMult < 1.0 || confirmedMult < 1.0) {
-      addLog(`🛡️ [DYNAMIC RISK] ${symbol}: risk ×${(regimeRiskMult * sessionMult * confirmedMult).toFixed(2)} (regime: ${reasoning?.regime || ctx?.regime}, session: ${timing.session}, graduated: ${confirmedMult.toFixed(2)}).`, 'info');
+   // ═══ CRASH MODE SIZING (v3.1.2) ═══ with-tape cascade entries at reduced risk
+   const vsExec: ViolenceState = ctx?.violence || { active: false, direction: "NONE" } as ViolenceState;
+   const withTapeCascade = crashMode && vsExec.active &&
+      ((decision.signal === "SHORT" && vsExec.direction === "DOWN") ||
+       (decision.signal === "LONG" && vsExec.direction === "UP"));
+   const cascadeMult = withTapeCascade ? crashRiskMult : 1.0;
+   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult * sessionMult * confirmedMult * cascadeMult;
+   if (regimeRiskMult < 1.0 || sessionMult < 1.0 || confirmedMult < 1.0 || cascadeMult < 1.0) {
+      addLog(`🛡️ [DYNAMIC RISK] ${symbol}: risk ×${(regimeRiskMult * sessionMult * confirmedMult * cascadeMult).toFixed(2)} (regime: ${reasoning?.regime || ctx?.regime}, session: ${timing.session}, graduated: ${confirmedMult.toFixed(2)}${withTapeCascade ? `, CRASH ${vsExec.direction} ×${crashRiskMult}` : ""}).`, 'info');
    }
 
    const entryTiming = extractEntryTiming();
@@ -1659,7 +1763,10 @@ function closeTradeFull(t: any, reason: string = "") {
    todaysStats.count++;
 
    // ═══ v3.1.1 FORENSIC RULE D bookkeeping: feed the symbol guard ═══
-   if (symbolCooldownEnabled) recordSymbolResult(t.symbol, t.finalPnl);
+   // R-aware classification (v3.1.2): tiny-USD emergency exits (-0.12R at
+   // reduced risk) must count as REAL losses — the live ETH loop exploited
+   // the USDT scratch hole.
+   if (symbolCooldownEnabled) recordSymbolResult(t.symbol, t.finalPnl, Date.now(), t.profitR);
 
    // Neutral Breakeven threshold: avoid counting fee-friction scratches as distorted losses or false big wins
    const rThreshold = 0.05;

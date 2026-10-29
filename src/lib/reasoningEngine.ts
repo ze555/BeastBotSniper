@@ -1079,9 +1079,19 @@ export function checkConfirmation(
    const bias = scenario.primary.bias;
    const graduated = ctx?.graduatedRegime !== false; // default ON
 
+   // ═══ CRASH MODE OVERRIDE (v3.1.2) ═══
+   // A LIVE cascade (crashRadar) outranks the stale 4h regime label. During
+   // the 2026-10-29 BTC crash the label stayed BULL_* for hours while price
+   // was in freefall — these gates refused every short and the whole event
+   // was missed. With-tape cascade entries pass at reduced risk instead.
+   const vs = (ctx as any)?.violence || null;
+   const cascadeDown = !!(ctx as any)?.crashMode && vs?.active && vs.direction === "DOWN";
+   const cascadeUp = !!(ctx as any)?.crashMode && vs?.active && vs.direction === "UP";
+
    if (bias === "SHORT") {
+      const crashOverride = cascadeDown && btcRegime.includes("BULL");
       const hardBlock = btcRegime === "BULL_STRONG" || (!graduated && btcRegime.includes("BULL"));
-      if (hardBlock) {
+      if (hardBlock && !crashOverride) {
          return {
             isConfirmed: false,
             confirmedSignal: "WAIT",
@@ -1090,7 +1100,7 @@ export function checkConfirmation(
             missingItems: ["BTC transition into neutral or bear market"]
          };
       }
-      if (graduated && btcRegime === "BULL_WEAK") {
+      if (graduated && btcRegime === "BULL_WEAK" && !crashOverride) {
          const eliteBearFlow = flow.persistenceState === "STRONG" && (w?.slope4hN ?? w?.slope4h ?? 0) < 0;
          if (!eliteBearFlow) {
             return {
@@ -1104,11 +1114,16 @@ export function checkConfirmation(
          suggestedRiskMult = 0.5;
          evidence.push("Graduated regime: elite bear flow short at 0.5x risk");
       }
+      if (crashOverride) {
+         suggestedRiskMult = 0.8;
+         evidence.push(`Crash mode: live DOWN cascade (intensity ${((vs.intensity || 0) * 100).toFixed(0)}%, 45m ${Number(vs.drop45Pct || 0).toFixed(2)}%) overrides stale ${btcRegime} label — with-tape short at 0.8x risk`);
+      }
    }
 
    if (bias === "LONG") {
+      const pumpOverride = cascadeUp && btcRegime.includes("BEAR");
       const hardBlock = btcRegime === "BEAR_STRONG" || (!graduated && btcRegime.includes("BEAR"));
-      if (hardBlock) {
+      if (hardBlock && !pumpOverride) {
          return {
             isConfirmed: false,
             confirmedSignal: "WAIT",
@@ -1117,7 +1132,7 @@ export function checkConfirmation(
             missingItems: ["BTC transition into neutral or bull market"]
          };
       }
-      if (graduated && btcRegime === "BEAR_WEAK") {
+      if (graduated && btcRegime === "BEAR_WEAK" && !pumpOverride) {
          const eliteBullFlow = flow.persistenceState === "STRONG" && (w?.slope4hN ?? w?.slope4h ?? 0) > 0;
          if (!eliteBullFlow) {
             return {
@@ -1130,6 +1145,10 @@ export function checkConfirmation(
          }
          suggestedRiskMult = 0.5;
          evidence.push("Graduated regime: elite bull flow long at 0.5x risk");
+      }
+      if (pumpOverride) {
+         suggestedRiskMult = 0.8;
+         evidence.push(`Pump mode: live UP cascade (intensity ${((vs.intensity || 0) * 100).toFixed(0)}%, 45m ${Number(vs.drop45Pct || 0).toFixed(2)}%) overrides stale ${btcRegime} label — with-tape long at 0.8x risk`);
       }
       if (btcRegime === "BULL_WEAK" && (regime === "TREND_DOWN" || regime === "TRANSITION")) {
          return {
