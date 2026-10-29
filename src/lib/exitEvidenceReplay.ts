@@ -54,10 +54,11 @@ for (const trade of trades) {
   const exitTime = Date.parse(trade.timestamp_exit);
   const risk = Math.abs(trade.entry_price - trade.stop_loss);
   if (!Number.isFinite(entryTime) || !Number.isFinite(exitTime) || risk <= 0) continue;
-  const timeline = candles.filter(c => c.time >= entryTime && c.time <= exitTime).sort((a,b) => a.time-b.time);
+  const timeline = candles.filter(c => c.time <= exitTime).sort((a,b) => a.time-b.time);
 
-  for (let i = 20; i < timeline.length; i++) {
+  for (let i = 5; i < timeline.length; i++) {
     const candle = timeline[i];
+    if (candle.time < entryTime) continue;
     const closes = timeline.slice(Math.max(0, i-20), i+1).map(c => c.close);
     const ema21 = ema(closes, 21);
     const last5 = timeline.slice(Math.max(0, i-4), i+1);

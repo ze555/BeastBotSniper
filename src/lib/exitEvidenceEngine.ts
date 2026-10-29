@@ -26,6 +26,7 @@ export interface ExitEvidenceDecision {
   dataQuality: {
     oiAvailable: boolean;
     multiTimeframeCvdAvailable: boolean;
+    cvd4hAvailable: boolean;
     takerAvailable: boolean;
   };
 }
