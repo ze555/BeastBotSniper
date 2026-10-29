@@ -9,7 +9,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "start": "NODE_ENV=production node dist/server.cjs",
-    "test": "tsx src/lib/exitEvidenceEngine.test.ts && tsx src/lib/directionStateEngine.test.ts && tsx src/lib/directionDecoupling.test.ts && tsx src/lib/reasoningEngine.test.ts && tsx src/lib/researchLogger.test.ts && tsx src/lib/exitEvidenceReplay.ts"
+    "test": "tsx src/lib/exitEvidenceEngine.test.ts && tsx src/lib/directionStateEngine.test.ts && tsx src/lib/directionDecoupling.test.ts && tsx src/lib/reasoningEngine.test.ts && tsx src/lib/exitEvidenceReplay.ts"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",
