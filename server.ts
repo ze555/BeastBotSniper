@@ -51,6 +51,27 @@ async function startServer() {
         libyaClose1: req.body.libyaClose1,
         libyaOpen2: req.body.libyaOpen2,
         libyaClose2: req.body.libyaClose2,
+        // v3.1 / v3.1.1 / v3.1.2 / v3.2 engine flags (additive passthrough)
+        graduatedRegime: req.body.graduatedRegime,
+        rangeReversionEnabled: req.body.rangeReversionEnabled,
+        liveFeedEnabled: req.body.liveFeedEnabled,
+        toxicHoursEnabled: req.body.toxicHoursEnabled,
+        sessionRiskEnabled: req.body.sessionRiskEnabled,
+        timeStopMinutes: req.body.timeStopMinutes,
+        spreadMaxPct: req.body.spreadMaxPct,
+        maxGrossExposurePct: req.body.maxGrossExposurePct,
+        maxSameDirectionTrades: req.body.maxSameDirectionTrades,
+        flowAlignedEntry: req.body.flowAlignedEntry,
+        momentumFloorPct: req.body.momentumFloorPct,
+        setupRegimeMatrix: req.body.setupRegimeMatrix,
+        symbolCooldownEnabled: req.body.symbolCooldownEnabled,
+        symbolLossStreakLimit: req.body.symbolLossStreakLimit,
+        symbolCooldownMinutes: req.body.symbolCooldownMinutes,
+        crashMode: req.body.crashMode,
+        crashRiskMult: req.body.crashRiskMult,
+        institutionalExitEnabled: req.body.institutionalExitEnabled,
+        iceExitScore: req.body.iceExitScore,
+        iceContinueScore: req.body.iceContinueScore,
      });
      res.json({ success: true });
   });

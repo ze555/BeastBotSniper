@@ -17,6 +17,10 @@ import {
    updateCrashRadar, getViolenceState, isCounterTape, isWithTape,
    configureCrashRadar, ViolenceState
 } from "./crashRadar.js";
+import {
+   evaluateIceExit, configureIce, resetIceState, pruneIceStore,
+   getIceConfig, isIceRiding, IceDecision
+} from "./institutionalExit.js";
 import { MOMENTUM_FLOOR_PCT } from "./executionFilter.js";
 import {
    updateSymbolDirection, shouldTighten, isInvalidated,
@@ -109,6 +113,16 @@ let symbolCooldownEnabled = true;  // Rule D: block re-entries after 2 straight 
 let crashMode = true;              // Master switch: cascade overrides regime lag + toxic hours, blocks knife entries
 let crashRiskMult = 0.80;          // Risk multiplier for with-tape cascade entries (slippage + whipsaw shield)
 
+// ═══ v3.2 ICE — INSTITUTIONAL CONFIRMATION EXIT ENGINE ═══
+// Six institutional layers (CVD / taker / OI+funding / whale / cascades+wave /
+// tape velocity) must CONFLUENCE before any open-position decision. Three
+// states: نستمر (ride, wider trail) / نخرج (confirmed reversal signature) /
+// ننتظر (hold plan; pending signature only tightens the trail). Price WITHOUT
+// flow = trap → we hold; flow WITH price = truth → we act.
+let institutionalExitEnabled = true; // ICE master switch (replaces scattered reversal exits when ON)
+let iceExitScore = -55;              // cross-layer condemnation floor for EXIT without a hard pair
+let iceContinueScore = 50;           // consensus needed for ride mode
+
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
 let libyaOpen1 = 10;
@@ -184,6 +198,16 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       // v3.1.2 crash mode
       if (opts.crashMode !== undefined) crashMode = !!opts.crashMode;
       if (opts.crashRiskMult !== undefined) crashRiskMult = Math.min(1.0, Math.max(0.3, Number(opts.crashRiskMult) || 0.8));
+      // v3.2 ICE
+      if (opts.institutionalExitEnabled !== undefined) institutionalExitEnabled = !!opts.institutionalExitEnabled;
+      if (opts.iceExitScore !== undefined || opts.iceContinueScore !== undefined) {
+         configureIce({
+            exitScore: opts.iceExitScore !== undefined ? Number(opts.iceExitScore) : undefined,
+            continueScore: opts.iceContinueScore !== undefined ? Number(opts.iceContinueScore) : undefined
+         });
+         iceExitScore = getIceConfig().exitScore;
+         iceContinueScore = getIceConfig().continueScore;
+      }
       if (opts.crashDrop45Pct !== undefined || opts.crashDrop90Pct !== undefined || opts.crashHoldMinutes !== undefined) {
          configureCrashRadar({
             drop45Pct: opts.crashDrop45Pct !== undefined ? Number(opts.crashDrop45Pct) : undefined,
@@ -280,6 +304,10 @@ export function getStats() {
     // v3.1.2 crash mode
     crashMode,
     crashRiskMult,
+    // v3.2 ICE
+    institutionalExitEnabled,
+    iceExitScore,
+    iceContinueScore,
     violence: getViolenceState(),
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
     fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
@@ -325,7 +353,11 @@ export function getConfig() {
     symbolCooldownEnabled,
     // v3.1.2 crash mode
     crashMode,
-    crashRiskMult
+    crashRiskMult,
+    // v3.2 ICE
+    institutionalExitEnabled,
+    iceExitScore,
+    iceContinueScore
   };
 }
 export function setConfig(config: any) {
@@ -705,6 +737,7 @@ async function readWhale(symbol: string, btc_chg: number): Promise<any> {
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
       scenario, oi_chg, p_chg, fund,
+      oiAvailable: Array.isArray(oiData) && oiData.length >= 4,   // v3.2 ICE: OI feed availability
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
@@ -717,6 +750,7 @@ async function readWhale(symbol: string, btc_chg: number): Promise<any> {
       slope4hN: cvd4hN.norm,
       cvdZ15: cvd15N.z,
       takerEma: takerPersist.ema,
+      takerEmaSlope: takerPersist.emaSlope,   // v3.2 ICE: aggression drift
       takerPercentile: takerPersist.percentile,
       fundingPercentile: fundingProfile.percentile,
       fundingMean: fundingProfile.mean
@@ -1564,12 +1598,94 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
+   // ═══ ICE — INSTITUTIONAL CONFIRMATION EXIT ENGINE (v3.2) ═══
+   // Six institutional layers vote on the OPEN position; decisions require
+   // CONFLUENCE (a single indicator can never exit a trade). Reversal vs
+   // explosion is decided by whether price moves WITH or WITHOUT the flow:
+   // price without flow = trap (نتمسك) — flow with price = truth (نتصرف).
+   // When ICE is ON it REPLACES the legacy scattered reversal exits below.
+   let iceTrailMult: number | null = null;
+   let iceRideMode = false;
+   if (institutionalExitEnabled) {
+      const k15 = p.klines || [];
+      const c5ice = w.c5 || [];
+      const chg10Ice = k15.length >= 11 ? (price - k15[k15.length - 11].close) / k15[k15.length - 11].close * 100 : 0;
+      const chg10PrevIce = k15.length >= 16 ? (k15[k15.length - 6].close - k15[k15.length - 16].close) / k15[k15.length - 16].close * 100 : 0;
+      const chg5Ice = c5ice.length >= 11 ? (price - c5ice[c5ice.length - 11].close) / c5ice[c5ice.length - 11].close * 100 : 0;
+      const liveIce = liveFeedEnabled ? liveFeed.getLiveFlow(t.symbol) : null;
+      const tickCvd5mN = liveIce && liveIce.available && liveIce.tickCvd5m !== null
+         ? liveIce.tickCvd5m / ((p.avg_vol || 1) / 3)
+         : null;
+      const vsIce = getViolenceState();
+      const iceDecision: IceDecision = evaluateIceExit(t.symbol, {
+         direction: t.direction,
+         profitR, peakR: t.peak_r || 0,
+         slope5N: w.slope5N ?? 0,
+         slope15N: w.slope15N ?? 0,
+         slope4hN: w.slope4hN ?? 0,
+         priceNewExtremeInD: t.direction === "LONG" ? price >= p.res10 : price <= p.sup10,
+         takerEma: w.takerEma ?? 0.5,
+         takerEmaSlope: w.takerEmaSlope ?? 0,
+         takerPercentile: w.takerPercentile ?? 50,
+         tickCvd5mN,
+         oiAvailable: w.oiAvailable ?? false,
+         oiChg: w.oi_chg ?? 0,
+         scenario: w.scenario ?? "UNCLEAR",
+         fundingPercentile: w.fundingPercentile ?? 50,
+         strongAccumulation: !!w.strong_acc,
+         strongDistribution: !!w.strong_dis,
+         hiddenBuy: !!w.hidden_buy,
+         hiddenSell: !!w.hidden_sell,
+         liqCascadeAgainst: !!(liqSnap && liqSnap.cascadeActive &&
+            ((t.direction === "LONG" && liqSnap.dominantSide === "LONGS") ||
+             (t.direction === "SHORT" && liqSnap.dominantSide === "SHORTS"))),
+         liqCascadeWith: !!(liqSnap && liqSnap.cascadeActive &&
+            ((t.direction === "SHORT" && liqSnap.dominantSide === "LONGS") ||
+             (t.direction === "LONG" && liqSnap.dominantSide === "SHORTS"))),
+         liqIntensity: liqSnap ? (liqSnap.intensity || 0) : 0,
+         violenceAlignedWith: isWithTape(t.direction),
+         violenceAgainst: isCounterTape(t.direction),
+         chg10Pct: chg10Ice,
+         chg10PrevPct: chg10PrevIce,
+         chg5Pct: chg5Ice,
+         rvol: p.rvol ?? 1,
+         cpos: p.cpos ?? 0.5
+      });
+
+      // Attach to the trade object so /api/trades/active exposes the live verdict
+      t.iceState = iceDecision.state;
+      t.iceScore = iceDecision.score;
+      t.iceVotes = iceDecision.votes.reduce((acc: any, v: any) => { acc[v.layer] = v.vote; return acc; }, {});
+      t.iceTrap = iceDecision.trapDetected;
+
+      if (iceDecision.state === "EXIT") {
+         addLog(`🧠 [ICE] خروج مؤكد ${t.symbol} (${t.direction}) | ${iceDecision.reason}`, "warn");
+         closeTradeFull(t, `ICE Reversal Confirmed (${iceDecision.hardReversal})`);
+         return;
+      }
+      if (iceDecision.state === "CONTINUE") {
+         iceTrailMult = iceDecision.trailMult;
+         iceRideMode = true;
+         addLog(`🧠 [ICE] نستمر ${t.symbol} (${t.direction}) | ${iceDecision.reason}`, "success");
+      } else {
+         if (iceDecision.trailMult) iceTrailMult = iceDecision.trailMult;
+         if (iceDecision.confirmationPending || iceDecision.trapDetected) {
+            addLog(`🧠 [ICE] ننتظر ${t.symbol} (${t.direction}) | ${iceDecision.reason}`, "info");
+         }
+      }
+   }
+
    if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
    if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
    
    if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
    const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
    if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
+
+   // v3.2 ICE: when ICE is ON, the scattered single-indicator reversal exits
+   // above are superseded by the confluence engine — they fired too early and
+   // alone (forensics: median death 26min after the flip, winners shaken out).
+   if (institutionalExitEnabled && emReason !== "BTC Chaos") { emergency = false; emReason = ""; }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
@@ -1595,6 +1711,9 @@ async function exitBrain(trade: any, ctx: any) {
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
    // v3.1: state machine WEAKENING_* => tighten the trail to protect gains faster
    if (shouldTighten(t.symbol)) trailDist *= 0.6;
+   // v3.2 ICE: ride mode widens the trail so explosions breathe (نستمر);
+   // a pending reversal candidate tightens it (ننتظر مع حماية).
+   if (iceTrailMult !== null) trailDist *= iceTrailMult;
 
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
@@ -1633,12 +1752,19 @@ async function exitBrain(trade: any, ctx: any) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
+      // v3.2 ICE ride latch: while institutional consensus confirms the wave,
+      // the runner (25%) KEEPS RIDING past TP3 — the ratcheted ×1.25 trail and
+      // the ICE reversal signatures decide the real exit at the actual turn.
+      const riding = institutionalExitEnabled && (iceRideMode || isIceRiding(t.symbol));
       if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
-         closePart(t, "C", t.part_c);
-         t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
-         closeTradeFull(t, "TP3 Full Target Hit");
-         return;
+         if (!riding) {
+            closePart(t, "C", t.part_c);
+            t.c_closed = true;
+            addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
+            closeTradeFull(t, "TP3 Full Target Hit");
+            return;
+         }
+         addLog(`🧠 [ICE RIDE] ${t.symbol}: تم تجاوز TP3 (+${profitR.toFixed(2)}R) — الموجة مؤسساتياً مستمرة، الكمية المتبقية تركب حتى الانعكاس الحقيقي (تتبّع ×1.25)`, "info");
       }
    }
 
@@ -1646,7 +1772,8 @@ async function exitBrain(trade: any, ctx: any) {
    // Legacy compared RAW slopes to absolute constants (-100/-80) which meant
    // nothing consistent across symbols. Now: unit-free normalized CVD slopes
    // (fraction of average bar volume) — same meaning on PEPE and BTC.
-   if (profitR >= 0.70) {
+   // v3.2 ICE: superseded by the confluence engine when ICE is ON.
+   if (!institutionalExitEnabled && profitR >= 0.70) {
       if (t.direction === "LONG") {
          const cvdExhaustion = (w.slope15N ?? 0) <= -1.0 && (w.slope5N ?? 0) <= -0.7;
          const oiDropping = w.oi_chg < -0.005;
@@ -1668,13 +1795,19 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 4b. MFE GIVEBACK EXIT (v3.1): never surrender most of a good move.
    // Research showed avg giveback of 0.42R with fixed TPs almost never hit.
-   if (t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * 0.55) {
+   // v3.2 ICE: in RIDE MODE (latched: نستمر حتى الانعكاس المؤكد) the giveback
+   // bar relaxes — explosions breathe, retracements are noise, and the ICE
+   // reversal signatures remain the true exit (user mandate: ride the collapse,
+   // leave at the REAL turn, not at the first bounce).
+   const givebackFactor = (iceRideMode || isIceRiding(t.symbol)) ? 0.35 : 0.55;
+   const spikeFadeFactor = (iceRideMode || isIceRiding(t.symbol)) ? 0.30 : 0.45;
+   if (t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * givebackFactor) {
       addLog(`🎯 [GIVEBACK EXIT] ${t.symbol} | peak +${t.peak_r.toFixed(2)}R → now +${profitR.toFixed(2)}R. Locking remaining gains.`, 'success');
       closeTradeFull(t, `MFE Giveback (peak ${t.peak_r.toFixed(2)}R)`);
       return;
    }
    // Pre-TP1 spike fade: price tagged +0.8R between polls then collapsed back
-   if (!t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * 0.45 && profitR > 0.1) {
+   if (!t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * spikeFadeFactor && profitR > 0.1) {
       addLog(`🎯 [SPIKE FADE EXIT] ${t.symbol} | tagged +${t.peak_r.toFixed(2)}R then faded to +${profitR.toFixed(2)}R — banking the spike.`, 'success');
       closeTradeFull(t, `Spike Fade (peak ${t.peak_r.toFixed(2)}R given back)`);
       return;
@@ -1767,6 +1900,9 @@ function closeTradeFull(t: any, reason: string = "") {
    // reduced risk) must count as REAL losses — the live ETH loop exploited
    // the USDT scratch hole.
    if (symbolCooldownEnabled) recordSymbolResult(t.symbol, t.finalPnl, Date.now(), t.profitR);
+
+   // v3.2 ICE: clear any pending reversal debounce for this symbol
+   resetIceState(t.symbol);
 
    // Neutral Breakeven threshold: avoid counting fee-friction scratches as distorted losses or false big wins
    const rThreshold = 0.05;
@@ -1879,6 +2015,7 @@ export async function runApexLoop() {
          pruneFlowStores(new Set(WATCHLIST));
          pruneRegistry(new Set(WATCHLIST));
          pruneSymbolGuard(new Set(WATCHLIST));
+         pruneIceStore(new Set(WATCHLIST));   // v3.2 ICE pending-state cleanup
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
