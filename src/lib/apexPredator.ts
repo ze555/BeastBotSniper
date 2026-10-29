@@ -27,8 +27,13 @@ let WATCHLIST: string[] = [
    "LINKUSDT", "INJUSDT", "ARBUSDT", "CRVUSDT",
    "AAVEUSDT", "OPUSDT"
 ];
+let HOT_WATCHLIST: string[] = [
+   "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
+   "SUIUSDT", "NEARUSDT", "AVAXUSDT", "DOGEUSDT"
+];
 let currentBatchIndex = 0;
 let lastWatchlistUpdate = 0;
+let lastHotWatchlistUpdate = 0;
 
 
 const MIN_RR_REQUIRED = 2.5;
@@ -185,6 +190,8 @@ export function getStats() {
     freeTradesCount,
     riskedTradesCount,
     watchlistLength: WATCHLIST.length,
+    hotWatchlistLength: HOT_WATCHLIST.length,
+    hotWatchlist: HOT_WATCHLIST.slice(0, 8),
     currentBatchProgress: `${Math.min(currentBatchIndex, WATCHLIST.length)} / ${WATCHLIST.length}`,
     scheduleEnabled,
     libyaOpen1,
@@ -249,36 +256,69 @@ export function isActive() { return botActive; }
 async function updateDynamicWatchlist() {
    try {
       const now = Date.now();
-      // Update watchlist every 6 hours
-      if (now - lastWatchlistUpdate < 6 * 60 * 60 * 1000 && WATCHLIST.length > 20) {
+      const needsFullUpdate = now - lastWatchlistUpdate >= 2 * 60 * 60 * 1000 || WATCHLIST.length < 20;
+      const needsHotUpdate = now - lastHotWatchlistUpdate >= 60 * 1000 || HOT_WATCHLIST.length < 5;
+
+      if (!needsFullUpdate && !needsHotUpdate) {
          return;
       }
 
-      addLog(`🔄 جلب قائمة العملات من بينانس وتصفية الأقوى سيولة...`, "info");
-      const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
+      const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 8000 });
+      if (!Array.isArray(res.data) || res.data.length === 0) return;
       
       const excludedBases = [
          'USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT',
-         'AMZN', 'AAPL', 'TSLA', 'GOOGL', 'GOOG', 'MSFT', 'NVDA', 'META', 'NFLX', 'BABA', 'COIN', 'MSTR'
+         'AMZN', 'AAPL', 'TSLA', 'GOOGL', 'GOOG', 'MSFT', 'NVDA', 'META', 'NFLX', 'BABA', 'COIN', 'MSTR',
+         'EWY', 'MINIMAX', 'SAMSUNG', 'AVGO', 'INTC', 'COPPER', 'KORU', 'XAG', 'NATGAS', 'BZ', 'DRAM'
       ];
       
-      let symbols = res.data
-         .filter((s: any) => s.symbol.endsWith('USDT'))
-         .filter((s: any) => !excludedBases.some(base => s.symbol.replace('USDT', '') === base))
-         .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)); // Sort by USDT volume
+      const validTickers = res.data.filter((s: any) => {
+         if (!s.symbol || !s.symbol.endsWith('USDT')) return false;
+         const base = s.symbol.replace('USDT', '');
+         if (excludedBases.includes(base)) return false;
+         const quoteVol = parseFloat(s.quoteVolume) || 0;
+         return quoteVol >= 15_000_000; // Require at least 15M USDT 24h volume
+      });
 
-      // Take top 150 symbols to avoid low liquidity garbage
-      symbols = symbols.slice(0, 150).map((s: any) => s.symbol);
+      // 1. Dynamic Fast Momentum Queue (HOT_WATCHLIST)
+      if (needsHotUpdate) {
+         const coreCryptoMajors = [
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
+            "SUIUSDT", "NEARUSDT", "AVAXUSDT", "DOGEUSDT"
+         ];
 
-      if (symbols.length > 0) {
-         // Keep BTC out of the rotation if we want, or just let it rotate. Let's make sure BTC is there? Actually it's fine.
-         WATCHLIST = symbols;
-         lastWatchlistUpdate = now;
-         currentBatchIndex = 0;
-         addLog(`✅ تم تحديث قائمة العملات بنجاح. العدد الكلي: ${WATCHLIST.length} عملة ذهبية سيتم فحصها على دفعات.`, "success");
+         const activeMovers = [...validTickers]
+            .filter((s: any) => Math.abs(parseFloat(s.priceChangePercent) || 0) >= 2.0)
+            .sort((a: any, b: any) => {
+               const scoreA = Math.abs(parseFloat(a.priceChangePercent) || 0) * Math.log10(parseFloat(a.quoteVolume) || 1);
+               const scoreB = Math.abs(parseFloat(b.priceChangePercent) || 0) * Math.log10(parseFloat(b.quoteVolume) || 1);
+               return scoreB - scoreA;
+            })
+            .map((s: any) => s.symbol);
+
+         const combinedHot = Array.from(new Set([...activeMovers.slice(0, 14), ...coreCryptoMajors])).slice(0, 20);
+         if (combinedHot.length >= 5) {
+            HOT_WATCHLIST = combinedHot;
+            lastHotWatchlistUpdate = now;
+         }
+      }
+
+      // 2. Full WATCHLIST (Broader Liquid Universe)
+      if (needsFullUpdate) {
+         const sortedByVol = [...validTickers]
+            .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+            .slice(0, 120)
+            .map((s: any) => s.symbol);
+
+         if (sortedByVol.length > 0) {
+            WATCHLIST = sortedByVol;
+            lastWatchlistUpdate = now;
+            currentBatchIndex = 0;
+            addLog(`✅ تم تحديث قوائم العملات: ${HOT_WATCHLIST.length} عملة بالقائمة الساخنة الفورية (HOT) و ${WATCHLIST.length} عملة بالقائمة الموسعة.`, "success");
+         }
       }
    } catch (e: any) {
-      addLog(`⚠️ فشل تحديث قائمة العملات: ${e.message}`, "error");
+      console.warn(`Watchlist update notice: ${e.message}`);
    }
 }
 
@@ -1515,12 +1555,15 @@ export async function runApexLoop() {
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
-      const riskedTrades = activeTrades.filter(t => !t.be_done);
-      const isCapacityFull = freeTradeSlotEnabled
-         ? (riskedTrades.length >= maxOpenTradesConfig || activeTrades.length >= maxOpenTradesConfig + 2)
-         : (activeTrades.length >= maxOpenTradesConfig);
+      const canOpenMore = () => {
+         const currentRisked = activeTrades.filter(t => !t.be_done).length;
+         if (freeTradeSlotEnabled) {
+            return currentRisked < maxOpenTradesConfig && activeTrades.length < (maxOpenTradesConfig + 2);
+         }
+         return activeTrades.length < maxOpenTradesConfig;
+      };
 
-      if (isCapacityFull) {
+      if (!canOpenMore()) {
          isLoopRunning = false;
          return;
       }
@@ -1531,38 +1574,15 @@ export async function runApexLoop() {
          return;
       }
 
-      // Ensure index is valid
-      if (currentBatchIndex >= WATCHLIST.length) {
-         currentBatchIndex = 0;
-      }
-
-      const batchSize = scanBatchSize;
-      const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
-      const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex);
-      
-      addLog(`🦅 SCANNING TURBO BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة...`, "info");
-      
-      // Advance index for next run
-      currentBatchIndex = endBatchIndex;
-      if (currentBatchIndex >= WATCHLIST.length) {
-         currentBatchIndex = 0; // Reset
-      }
-
-      const canOpenMore = () => {
-         const currentRisked = activeTrades.filter(t => !t.be_done).length;
-         if (freeTradeSlotEnabled) {
-            return currentRisked < maxOpenTradesConfig && activeTrades.length < (maxOpenTradesConfig + 2);
-         }
-         return activeTrades.length < maxOpenTradesConfig;
-      };
-
-      // Process batch symbols in fast concurrent chunks of 5
-      const chunkSize = 5;
-      for (let i = 0; i < batchSymbols.length; i += chunkSize) {
+      // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
+      // Examines top active movers & crypto majors instantly to catch breakout candle inception
+      const hotCandidates = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym));
+      const hotChunkSize = 5;
+      for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
          if (!canOpenMore()) break;
-         const chunk = batchSymbols.slice(i, i + chunkSize);
+         const chunk = hotCandidates.slice(i, i + hotChunkSize);
          const promises = chunk.map(async (sym: string) => {
-            if (activeTrades.find(t => t.symbol === sym)) return null;
+            if (activeTrades.some(t => t.symbol === sym)) return null;
             try {
                const dec = await scoreEntry(sym, ctx);
                return { sym, dec };
@@ -1576,7 +1596,57 @@ export async function runApexLoop() {
             if (res.status === "fulfilled" && res.value) {
                const { sym, dec } = res.value;
                if (!canOpenMore()) break;
-               if (activeTrades.find(t => t.symbol === sym)) continue;
+               if (activeTrades.some(t => t.symbol === sym)) continue;
+               if (dec.signal === "LONG" || dec.signal === "SHORT") {
+                  executeTrade(sym, dec);
+               }
+            }
+         }
+      }
+
+      // If available capacity was filled by hot momentum mover, end cycle
+      if (!canOpenMore()) {
+         isLoopRunning = false;
+         return;
+      }
+
+      // ═══ STAGE 2: BROADER UNIVERSE ROTATION (Round-Robin Batch) ═══
+      if (currentBatchIndex >= WATCHLIST.length) {
+         currentBatchIndex = 0;
+      }
+
+      const batchSize = scanBatchSize;
+      const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
+      const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex)
+         .filter(sym => !hotCandidates.includes(sym));
+      
+      // Advance index for next run
+      currentBatchIndex = endBatchIndex;
+      if (currentBatchIndex >= WATCHLIST.length) {
+         currentBatchIndex = 0; // Reset
+      }
+
+      // Process batch symbols in fast concurrent chunks of 5
+      const chunkSize = 5;
+      for (let i = 0; i < batchSymbols.length; i += chunkSize) {
+         if (!canOpenMore()) break;
+         const chunk = batchSymbols.slice(i, i + chunkSize);
+         const promises = chunk.map(async (sym: string) => {
+            if (activeTrades.some(t => t.symbol === sym)) return null;
+            try {
+               const dec = await scoreEntry(sym, ctx);
+               return { sym, dec };
+            } catch {
+               return null;
+            }
+         });
+
+         const results = await Promise.allSettled(promises);
+         for (const res of results) {
+            if (res.status === "fulfilled" && res.value) {
+               const { sym, dec } = res.value;
+               if (!canOpenMore()) break;
+               if (activeTrades.some(t => t.symbol === sym)) continue;
                if (dec.signal === "LONG" || dec.signal === "SHORT") {
                   executeTrade(sym, dec);
                }
@@ -1592,7 +1662,7 @@ export async function runApexLoop() {
 
 export function startEngine() {
    if (watcherInterval) clearInterval(watcherInterval);
-   watcherInterval = setInterval(runApexLoop, 30 * 1000); // Check every 30 seconds for turbo responsiveness
+   watcherInterval = setInterval(runApexLoop, 15 * 1000); // Check every 15 seconds for ultra-responsive breakout inception
    runApexLoop();
-   addLog("Apex Predator Engine Started with Turbo Scanner & Pullback Sniper", "success");
+   addLog("Apex Predator Engine Started with Fast Momentum Scanner (15s Cadence) & Pullback Sniper", "success");
 }

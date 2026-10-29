@@ -10,18 +10,36 @@
 
 import fs from "fs";
 import path from "path";
+import os from "os";
 
 const SCHEMA_VERSION = "2.4.0";
 const BOT_VERSION = "BeastBot-Apex-v2.4";
-const RESEARCH_DIR = path.resolve(process.cwd(), "data", "research");
 
-try {
-   if (!fs.existsSync(RESEARCH_DIR)) {
-      fs.mkdirSync(RESEARCH_DIR, { recursive: true });
+function getWritableResearchDir(): string {
+   const defaultPath = path.resolve(process.cwd(), "data", "research");
+   try {
+      if (!fs.existsSync(defaultPath)) {
+         fs.mkdirSync(defaultPath, { recursive: true });
+      }
+      const testFile = path.join(defaultPath, `.write_test_${Date.now()}`);
+      fs.writeFileSync(testFile, "ok", "utf8");
+      fs.unlinkSync(testFile);
+      return defaultPath;
+   } catch {
+      // In read-only container environments (e.g. Cloud Run, Hostless /app mount), fall back to /tmp
+      const tmpPath = path.join(os.tmpdir(), "beastbot_research");
+      try {
+         if (!fs.existsSync(tmpPath)) {
+            fs.mkdirSync(tmpPath, { recursive: true });
+         }
+      } catch (err) {
+         // Silently handle
+      }
+      return tmpPath;
    }
-} catch (e) {
-   console.error("Failed to initialize research directory:", e);
 }
+
+const RESEARCH_DIR = getWritableResearchDir();
 
 const TRADING_DECISIONS_FILE = path.join(RESEARCH_DIR, "trading_decisions.jsonl");
 const REJECTED_SIGNALS_FILE = path.join(RESEARCH_DIR, "rejected_signals.jsonl");
@@ -37,16 +55,22 @@ const memoryJourneys: any[] = [];
 const pendingRejectedMap = new Map<string, any>();
 const activeTradesDirectionMap = new Map<string, any>();
 
-let cachedSummary: any = null;
+let hasLoggedWriteError = false;
 
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
       const line = JSON.stringify(obj) + "\n";
       fs.appendFile(filePath, line, "utf8", (err) => {
-         if (err) console.error(`Research Log error on ${path.basename(filePath)}:`, err.message);
+         if (err && !hasLoggedWriteError) {
+            hasLoggedWriteError = true;
+            console.warn(`Research Log notice: File write skipped (${err.message})`);
+         }
       });
    } catch (err: any) {
-      console.error(`Research Log synchronous exception:`, err?.message);
+      if (!hasLoggedWriteError) {
+         hasLoggedWriteError = true;
+         console.warn(`Research Log notice: (${err?.message})`);
+      }
    }
 }
 
@@ -54,10 +78,16 @@ function rewriteJsonlSafe(filePath: string, items: any[]) {
    try {
       const content = items.map(item => JSON.stringify(item)).join("\n") + "\n";
       fs.writeFile(filePath, content, "utf8", (err) => {
-         if (err) console.error(`Research Log rewrite error on ${path.basename(filePath)}:`, err.message);
+         if (err && !hasLoggedWriteError) {
+            hasLoggedWriteError = true;
+            console.warn(`Research Log notice: File rewrite skipped (${err.message})`);
+         }
       });
    } catch (err: any) {
-      console.error(`Research Log rewrite exception:`, err?.message);
+      if (!hasLoggedWriteError) {
+         hasLoggedWriteError = true;
+         console.warn(`Research Log notice: (${err?.message})`);
+      }
    }
 }
 
@@ -1063,7 +1093,10 @@ function updateSummaries(lastTrade: any) {
       try {
          fs.writeFileSync(PERFORMANCE_SUMMARY_FILE, JSON.stringify(summary, null, 2), "utf8");
       } catch (err: any) {
-         console.error("Error writing performance_summary.json:", err.message);
+         if (!hasLoggedWriteError) {
+            hasLoggedWriteError = true;
+            console.warn("Performance summary write skipped:", err?.message);
+         }
       }
 
       if (lastTrade) {
