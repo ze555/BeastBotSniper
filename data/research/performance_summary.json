@@ -1,55 +1,55 @@
 {
   "schema_version": "2.4.0",
   "bot_version": "BeastBot-Apex-v2.4",
-  "updated_at": "2026-10-15T09:17:32.765Z",
+  "updated_at": "2026-10-29T11:29:16.755Z",
   "executed_trades_summary": {
     "total_trades": 1,
     "wins": 1,
     "losses": 0,
     "breakeven": 0,
     "win_rate_percent": 100,
-    "total_pnl": 88.5,
-    "average_win": 88.5,
+    "total_pnl": 50,
+    "average_win": 50,
     "average_loss": 0,
     "profit_factor": 99.9,
-    "average_holding_time_seconds": 3600,
+    "average_holding_time_seconds": 600,
     "by_direction": {
       "LONG": {
-        "trades": 1,
-        "pnl": 88.5,
-        "wins": 1
-      },
-      "SHORT": {
         "trades": 0,
         "pnl": 0,
         "wins": 0
+      },
+      "SHORT": {
+        "trades": 1,
+        "pnl": 50,
+        "wins": 1
       }
     },
     "by_market_regime": {
-      "TREND_UP": {
+      "UNKNOWN": {
         "trades": 1,
-        "pnl": 88.5,
+        "pnl": 50,
         "wins": 1
       }
     },
     "by_session": {
       "LONDON": {
         "trades": 1,
-        "pnl": 88.5,
+        "pnl": 50,
         "wins": 1
       }
     },
     "by_hour_bucket": {
-      "08:00-08:59": {
+      "11:00-11:59": {
         "trades": 1,
-        "pnl": 88.5,
+        "pnl": 50,
         "wins": 1
       }
     },
     "by_volatility_state": {
       "NORMAL": {
         "trades": 1,
-        "pnl": 88.5,
+        "pnl": 50,
         "wins": 1
       }
     },
@@ -57,20 +57,20 @@
     "by_entry_quality": {
       "GOOD_ENTRY": {
         "count": 1,
-        "pnl": 88.5,
+        "pnl": 50,
         "wins": 1
       }
     },
     "by_exit_reason": {
-      "TP2 Reached": {
+      "TP1": {
         "count": 1,
-        "pnl": 88.5
+        "pnl": 50
       }
     },
     "by_symbol": {
-      "ETHUSDT": {
+      "BTCUSDT": {
         "trades": 1,
-        "pnl": 88.5,
+        "pnl": 50,
         "wins": 1
       }
     }
@@ -89,17 +89,17 @@
     "short_accuracy_15m": 0
   },
   "rejected_signals_summary": {
-    "total_rejected": 1,
+    "total_rejected": 0,
     "rejected_with_outcome": 0,
     "favorable_rejections": 0,
     "adverse_rejections": 0,
-    "unknown_rejections": 1,
+    "unknown_rejections": 0,
     "by_direction": {
       "LONG": {
-        "total": 1,
+        "total": 0,
         "favorable": 0,
         "adverse": 0,
-        "unknown": 1
+        "unknown": 0
       },
       "SHORT": {
         "total": 0,
@@ -108,8 +108,6 @@
         "unknown": 0
       }
     },
-    "by_timing_gate_state": {
-      "LATE_EXPANSION": 1
-    }
+    "by_timing_gate_state": {}
   }
 }

@@ -56,6 +56,7 @@ const pendingRejectedMap = new Map<string, any>();
 const activeTradesDirectionMap = new Map<string, any>();
 
 let hasLoggedWriteError = false;
+let cachedSummary: any = null;
 
 function appendJsonlSafe(filePath: string, obj: any) {
    try {

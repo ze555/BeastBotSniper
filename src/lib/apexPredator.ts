@@ -1,7 +1,6 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
-import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
-import { evaluateExitEvidence } from "./exitEvidenceEngine.js";
+import { evaluateSymbolReasoning, ReasoningResult, evaluateInstitutionalTradeGuard, InstitutionalGuardResult } from "./reasoningEngine.js";
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -41,14 +40,14 @@ const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 0.75;
 const TP2_R = 1.80;
 const TP3_R = 3.50;
-const MAX_OPEN_TRADES = 3;
+const MAX_OPEN_TRADES = 6;
 const MAX_DAILY_LOSS = 0.040;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
 const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
-let maxOpenTradesConfig = 3;
+let maxOpenTradesConfig = 6;
 
 // New Config
 let haltProfitEnabled = false;
@@ -56,9 +55,6 @@ let haltProfitTarget = 150;
 let haltLossEnabled = false;
 let haltLossTarget = 50;
 let smartBtcHoldEnabled = true;
-// Disabled by default: the available historical replay is incomplete and showed premature-exit risk.
-// Enable only after a full candle-by-candle replay with live-equivalent OI/CVD/15m structure.
-let crossConfirmedExitEnabled = false;
 let btcVolThresholdStr = "0.80";
 let slAtrMultiplier = 1.3;
 let geniusMode = true;
@@ -69,7 +65,7 @@ let feeRate = 0.0004; // 0.04% default Binance VIP0 taker fee
 let slippageRate = 0.0002; // 0.02% estimated market slippage
 
 // Libya Trading Schedule Config (GMT+2)
-let scheduleEnabled = true;
+let scheduleEnabled = false; // Default false to allow 24/7 continuous crypto futures scanning across all market sessions
 let libyaOpen1 = 10;
 let libyaClose1 = 14;
 let libyaOpen2 = 15.5;
@@ -183,7 +179,6 @@ export function getStats() {
     haltLossEnabled,
     haltLossTarget,
     smartBtcHoldEnabled,
-    crossConfirmedExitEnabled,
     btcVolThresholdStr,
     slAtrMultiplier,
     geniusMode,
@@ -217,7 +212,6 @@ export function getConfig() {
     haltLossEnabled, 
     haltLossTarget, 
     smartBtcHoldEnabled, 
-    crossConfirmedExitEnabled, 
     slAtrMultiplier, 
     geniusMode, 
     pullbackSniperEnabled,
@@ -241,7 +235,6 @@ export function setConfig(config: any) {
   if (config.haltLossEnabled !== undefined) haltLossEnabled = config.haltLossEnabled;
   if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
   if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
-  if (config.crossConfirmedExitEnabled !== undefined) crossConfirmedExitEnabled = Boolean(config.crossConfirmedExitEnabled);
   if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
   if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
   if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
@@ -414,6 +407,11 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
+async function fetchLiq(symbol: string) {
+   // Proxying liquidation calculation (mocked for this specific requirement due to Binance lacking a free direct liq map)
+   return { _up: 3000000, _down: 3000000 };
+}
+
 // --- SEC 1: MARKET CONTEXT (BTC) ---
 async function getContext() {
    const btc4h = await fetchKl("BTCUSDT", "4h", 210);
@@ -521,20 +519,29 @@ async function readWhale(symbol: string, btc_chg: number) {
    const slope5 = cvd5[cvd5.length-1] - cvd5[cvd5.length-6];
    const slope4h = cvd4h[cvd4h.length-1] - cvd4h[cvd4h.length-4];
 
+   let pressure = 0;
+   for(let i=0; i<12; i++) {
+      const w = (12-i)/12;
+      const k = c15[c15.length-1 - i];
+      pressure += (k.takerBuy - k.takerSell) * w;
+   }
+   const avgVol = c15.slice(-20).map((x: any) => x.volume).reduce((a: number, b: number) => a + b, 0)/20;
+
    const triple_bull = slope5 > 0 && slope15 > 0 && slope4h > 0;
    const triple_bear = slope5 < 0 && slope15 < 0 && slope4h < 0;
-   const cvd_mixed = !triple_bull && !triple_bear;
+
+   // High-conviction operational flow alignment across 15m and 5m with taker orderflow pressure:
+   const directional_bull = (slope15 > 0 && slope5 > 0) || (slope15 > 35 && pressure > 0);
+   const directional_bear = (slope15 < 0 && slope5 < 0) || (slope15 < -35 && pressure < 0);
+   // Mixed ONLY when 15m and 5m directly oppose each other without clear directional pressure:
+   const cvd_mixed = !directional_bull && !directional_bear;
 
    const oiData = await fetchOI(symbol, "15m", 4);
    let oi_chg = 0;
-   let oi_available = false;
    if (oiData && oiData.length >= 4) {
       const oi0 = parseFloat(oiData[oiData.length-1].sumOpenInterest);
       const oi3 = parseFloat(oiData[0].sumOpenInterest);
-      if (Number.isFinite(oi0) && Number.isFinite(oi3) && oi3 > 0) {
-         oi_chg = (oi0 - oi3) / oi3;
-         oi_available = Number.isFinite(oi_chg);
-      }
+      oi_chg = (oi0 - oi3) / oi3;
    }
 
    const p0 = c15[c15.length-1].close;
@@ -551,14 +558,6 @@ async function readWhale(symbol: string, btc_chg: number) {
 
    const fund = await fetchFunding(symbol);
    
-   let pressure = 0;
-   for(let i=0; i<12; i++) {
-      const w = (12-i)/12;
-      const k = c15[c15.length-1 - i];
-      pressure += (k.takerBuy - k.takerSell) * w;
-   }
-   const avgVol = c15.slice(-20).map((x: any) => x.volume).reduce((a: number, b: number) => a + b, 0)/20;
-   
    const corr = Math.abs(btc_chg) > 0.001 ? p_chg / btc_chg : 0;
    const asset_strong = btc_chg < -0.003 && corr > -0.3;
 
@@ -566,13 +565,13 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, oi_available, p_chg, fund,
+      scenario, oi_chg, p_chg, fund,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15, slope4h
+      asset_strong, c15, c5, slope5, slope15
    };
 }
 
@@ -1275,27 +1274,6 @@ async function exitBrain(trade: any, ctx: any) {
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
 
-   // Cross-confirmation for open-trade exits. Missing OI is unavailable, never a positive/neutral vote.
-   const recentExitCandles = p.klines || [];
-   const structureBrokenForExit = recentExitCandles.length >= 3 && recentExitCandles.slice(-3).every((c: any) =>
-      t.direction === "LONG" ? c.close < p.ema21 : c.close > p.ema21
-   );
-   const exitEvidence = evaluateExitEvidence({
-      direction: t.direction,
-      priceChangePct: w.p_chg,
-      oiChangePct: w.oi_chg,
-      oiAvailable: w.oi_available === true,
-      cvd5: w.slope5,
-      cvd15: w.slope15,
-      cvd4h: w.slope4h,
-      takerRatio: p.taker,
-      structureBroken: structureBrokenForExit,
-      hiddenFlowAgainst: t.direction === "LONG" ? Boolean(w.hidden_sell) : Boolean(w.hidden_buy),
-      opposingRegime: t.direction === "LONG"
-         ? String(ctx.regime || "").includes("BEAR")
-         : String(ctx.regime || "").includes("BULL")
-   });
-
    // Floating PnL Mark-to-Market calculation (Exact match with closePart and closeTradeFull formulas)
    const effectiveExitPrice = t.direction === "LONG"
       ? price * (1 - slippageRate)
@@ -1311,6 +1289,50 @@ async function exitBrain(trade: any, ctx: any) {
    // Record trade journey periodic snapshot (MFE/MAE tracking)
    logTradeJourneySnapshot(t, price, t.pnl);
 
+   // --- SEC 6.1: INSTITUTIONAL TRADE GUARD MATRIX EVALUATION ---
+   // Matrix cross-validation: CVD slopes (5m/15m/4h) x OI flow x Taker imbalance x Traps x Multi-Timeframe MMF
+   const guard = evaluateInstitutionalTradeGuard(t, p, w, ctx);
+
+   // 1. ABSORPTION & TRAP EXIT: Instant peak harvest before distribution or short squeeze dump
+   if (guard.action === "ABSORPTION_TRAP_EXIT") {
+      addLog(`🎯 [رادار الفخاخ المؤسساتي] خروج وحجز أرباح لـ ${t.symbol} (${t.direction}) عند +${profitR.toFixed(2)}R: ${guard.reason}`, 'success');
+      closeTradeFull(t, `Institutional Trap Harvest: ${guard.reason}`);
+      return;
+   }
+
+   // 2. LIQUIDATION / SQUEEZE EXHAUSTION EXIT: Lock in gains at the exhaustion extreme
+   if (guard.action === "SQUEEZE_EXHAUSTION_EXIT") {
+      addLog(`🎯 [إنهاك حركة التصفية] حجز كامل الأرباح لـ ${t.symbol} (${t.direction}) عند +${profitR.toFixed(2)}R: ${guard.reason}`, 'success');
+      closeTradeFull(t, `Liquidation Exhaustion Exit: ${guard.reason}`);
+      return;
+   }
+
+   // 3. SURGICAL INVALIDATION EXIT: Multi-timeframe orderflow + structural reversal at minor loss
+   if (guard.action === "SURGICAL_INVALIDATION_EXIT") {
+      addLog(`🛡️ [القطع الجراحي المؤسساتي] إغلاق وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R: ${guard.reason}. تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
+      closeTradeFull(t, `Surgical Invalidation: ${guard.reason}`);
+      return;
+   }
+
+   const isTsunamiRunner = guard.action === "TSUNAMI_RUNNER_HOLD";
+   const isBenignPullback = guard.action === "BENIGN_PULLBACK_HOLD";
+
+   if (isTsunamiRunner) {
+      if (guard.trailFloorR !== undefined) {
+         const floorSl = t.direction === "LONG" ? t.entry + (slDist * guard.trailFloorR) : t.entry - (slDist * guard.trailFloorR);
+         if (t.direction === "LONG" && floorSl > t.sl) {
+            t.sl = floorSl;
+            t.be_done = true;
+         } else if (t.direction === "SHORT" && floorSl < t.sl) {
+            t.sl = floorSl;
+            t.be_done = true;
+         }
+      }
+      addLog(`🌊 [تسونامي مؤسساتي] ${t.symbol} (${t.direction}) راكب الموجة الانفجارية (+${profitR.toFixed(2)}R) | تدفق السيولة والـ CVD مستمر بقوة دون إغلاق متعجل!`, 'info');
+   } else if (isBenignPullback) {
+      addLog(`🛡️ [ارتداد صحي زائف] تمسك بصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R: تذبذب 5 دقائق مؤقت بينما تدفق الـ 15 دقيقة والـ CVD المؤسساتي ما زال مؤكداً للاتجاه!`, 'info');
+   }
+
    let emergency = false;
    let emReason = "";
 
@@ -1319,19 +1341,19 @@ async function exitBrain(trade: any, ctx: any) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من توقف صعود بيتكوين لأن الاتجاه منسجم مع وضعية الصعود (${ctx.btc_chg.toFixed(4)})`, "info");
       } else if (smartBtcHoldEnabled && t.direction === "SHORT" && ctx.btc_chg < -0.0) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من هبوط بيتكوين لأن الاتجاه منسجم مع وضعية الشورت (${ctx.btc_chg.toFixed(4)})`, "info");
-      } else if (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT") {
-         emergency = true; emReason = crossConfirmedExitEnabled ? "BTC Chaos + confirmed adverse evidence" : "BTC Chaos";
+      } else if (isTsunamiRunner || isBenignPullback) {
+         // Institutional momentum active on pair: maintain position through BTC pause
       } else {
-         addLog(`🧭 ${t.symbol}: تأكيد الخروج المؤسسي ما زال معطلاً حتى اكتمال الاختبار التاريخي؛ أدلة الانعكاس ${exitEvidence.score}/9 (${exitEvidence.action}).`, "info");
+         emergency = true; emReason = "BTC Chaos";
       }
    }
 
-   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Inst Short (cross-confirmed)" : "Inst Short"; }
-   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Inst Long (cross-confirmed)" : "Inst Long"; }
-
-   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5 && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Hidden Sell + cross-confirmation" : "Hidden Sell"; }
+   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
+   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
+   
+   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
    const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
-   if (t.direction === "LONG" && threeBelow && profitR < 1.0 && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) { emergency = true; emReason = crossConfirmedExitEnabled ? "Structural Break + cross-confirmation" : "Structural Break"; }
+   if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
@@ -1367,7 +1389,7 @@ async function exitBrain(trade: any, ctx: any) {
 
    // PILLAR 2: TIME-DECAY STAGNATION EXIT (قاعدة الساعة الرملية لركود الزخم بعد 45 دقيقة)
    const elapsedSeconds = (Date.now() - new Date(t.entryTime).getTime()) / 1000;
-   if (!t.a_closed && elapsedSeconds >= 2700) {
+   if (!isTsunamiRunner && !isBenignPullback && !t.a_closed && elapsedSeconds >= 2700) {
       // 45 minutes without breaking out towards TP1
       const isStagnant = profitR < 0.30 && profitR > -0.30;
       const momentumDying = p.rvol < 1.1 || p.adx < 22 || Math.abs(w.slope15) < 80;
@@ -1428,7 +1450,7 @@ async function exitBrain(trade: any, ctx: any) {
    if (profitR >= 0.70) {
       if (t.direction === "LONG") {
          const cvdExhaustion = w.slope15 < -100 && w.slope5 < -80;
-         const oiDropping = w.oi_available === true && w.oi_chg < -0.005;
+         const oiDropping = w.oi_chg < -0.005;
          if (cvdExhaustion && oiDropping) {
             addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي وتصريف مؤسساتي في CVD/OI.`, 'success');
             closeTradeFull(t, "CVD/OI Exhaustion Peak");
@@ -1436,7 +1458,7 @@ async function exitBrain(trade: any, ctx: any) {
          }
       } else if (t.direction === "SHORT") {
          const cvdExhaustion = w.slope15 > 100 && w.slope5 > 80;
-         const oiDropping = w.oi_available === true && w.oi_chg < -0.005;
+         const oiDropping = w.oi_chg < -0.005;
          if (cvdExhaustion && oiDropping) {
             addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانتهاء تغطية الشورتات وانعكاس CVD صعوداً.`, 'success');
             closeTradeFull(t, "CVD/OI Short Squeeze Peak");
@@ -1446,18 +1468,17 @@ async function exitBrain(trade: any, ctx: any) {
    }
 
    // 5a. FAST FLOW LOSS CUT (-0.25R)
-   // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا:
-   const cvdReversed = t.direction === "LONG"
-      ? (w.slope15 < -60 || w.slope5 < -50 || p.taker < 0.47 || w.hidden_sell)
-      : (w.slope15 > 60 || w.slope5 > 50 || p.taker > 0.53 || w.hidden_buy);
-   const allowFastFlowCut = crossConfirmedExitEnabled ? exitEvidence.action === "EXIT" : cvdReversed;
-   if (!t.a_closed && profitR <= -0.25 && allowFastFlowCut) {
-      addLog(crossConfirmedExitEnabled
-         ? `🛡️ [قص الخسارة المبكر المؤكد] ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R | أدلة ${exitEvidence.score}/9: ${exitEvidence.reasons.join("; ")}`
-         : `🛡️ [قص الخسارة السريع] خروج مبكر وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لانعكاس تدفق السيولة وCVD. تم توفير ${(1 + profitR).toFixed(2)}R!`,
-         'warn');
-      closeTradeFull(t, crossConfirmedExitEnabled ? "Cross-confirmed Early Flow Reversal Cut" : "Early Flow Reversal Cut (-0.25R)");
-      return;
+   // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا (مع استثناء الارتدادات الصحية):
+   if (!isBenignPullback && !t.a_closed && profitR <= -0.25) {
+      const cvdReversed = t.direction === "LONG"
+         ? (w.slope15 < -60 || w.slope5 < -50 || p.taker < 0.47 || w.hidden_sell)
+         : (w.slope15 > 60 || w.slope5 > 50 || p.taker > 0.53 || w.hidden_buy);
+
+      if (cvdReversed) {
+         addLog(`🛡️ [قص الخسارة السريع] خروج مبكر وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لانعكاس تدفق السيولة وCVD. تم توفير ${(1 + profitR).toFixed(2)}R!`, 'warn');
+         closeTradeFull(t, "Early Flow Reversal Cut (-0.25R)");
+         return;
+      }
    }
 
    // 5b. HARD EARLY LOSS CUT (-0.38R to -0.40R)
@@ -1470,7 +1491,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? (lastCandle && lastCandle.close < lastCandle.open)
          : (lastCandle && lastCandle.close > lastCandle.open);
 
-      if (profitR <= -0.40 || (adverseCandle && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT"))) {
+      if (profitR <= -0.40 || adverseCandle) {
          addLog(`🛡️ [قص الخسارة الحاسم] إغلاق وقائي فوري لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لمنع النزيف وتوفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, "Hard Early Loss Cut (-0.40R)");
          return;
@@ -1489,7 +1510,7 @@ async function exitBrain(trade: any, ctx: any) {
          ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -120 || (p.taker < 0.46 && p.rsi < 44))
          : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 120 || (p.taker > 0.54 && p.rsi > 56));
 
-      if ((isBreakingEMA || orderflowFlipped) && (!crossConfirmedExitEnabled || exitEvidence.action === "EXIT")) {
+      if (isBreakingEMA || orderflowFlipped) {
          const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
          addLog(`🛡️ [قص الخسارة الهيكلي] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
          closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);

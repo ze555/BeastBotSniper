@@ -10,3 +10,4 @@
 {"date":"2026-10-11","timestamp":"2026-10-11T20:41:10.090Z","trades_count":1,"wins_count":1,"losses_count":0,"daily_pnl":88.5,"win_rate":100,"last_trade_symbol":"ETHUSDT","last_trade_result":"WIN"}
 {"date":"2026-10-11","timestamp":"2026-10-11T20:50:57.768Z","trades_count":1,"wins_count":1,"losses_count":0,"daily_pnl":88.5,"win_rate":100,"last_trade_symbol":"ETHUSDT","last_trade_result":"WIN"}
 {"date":"2026-10-15","timestamp":"2026-10-15T09:17:32.782Z","trades_count":1,"wins_count":1,"losses_count":0,"daily_pnl":88.5,"win_rate":100,"last_trade_symbol":"ETHUSDT","last_trade_result":"WIN"}
+{"date":"2026-10-29","timestamp":"2026-10-29T11:29:16.771Z","trades_count":1,"wins_count":1,"losses_count":0,"daily_pnl":50,"win_rate":100,"last_trade_symbol":"BTCUSDT","last_trade_result":"WIN"}

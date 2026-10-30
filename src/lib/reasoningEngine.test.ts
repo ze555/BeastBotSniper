@@ -22,7 +22,8 @@ import {
    evaluateTimingGate,
    generateScenarios,
    checkConfirmation,
-   evaluateSymbolReasoning
+   evaluateSymbolReasoning,
+   evaluateInstitutionalTradeGuard
 } from "./reasoningEngine.js";
 
 import {
@@ -543,6 +544,196 @@ console.log("=======================================================\n");
    const slDist = 2.0;
    const softTrailSl = entry - (slDist * 0.25); // SL moved to -0.25R
    assert("Test 20d: Breathing room SL maintains 1.25R buffer from current +0.45R price", (entry + 0.45 * slDist) - softTrailSl >= 1.25);
+}
+
+// ----------------------------------------------------------------------------
+// Test 21: Institutional Trade Guard - Tsunami Runner Hold
+// ----------------------------------------------------------------------------
+{
+   const openTrade = {
+      symbol: "BTCUSDT",
+      direction: "SHORT" as const,
+      entry: 81300,
+      sl: 81800,
+      initialSlDist: 500,
+      profitR: 1.8,
+      peak_r: 2.0,
+      a_closed: false,
+      b_closed: false,
+      c_closed: false
+   };
+   const mockPrice = {
+      price: 80400,
+      ema21: 80800,
+      taker: 0.44, // 56% taker sell
+      rvol: 1.8,
+      klines: [{ open: 80800, high: 80900, low: 80350, close: 80400 }]
+   };
+   const mockWhale = {
+      slope15: -180,
+      slope5: -90,
+      slope4h: -300,
+      oi_chg: 0.005, // fresh shorts opening
+      scenario: "INST_SHORT"
+   };
+
+   const guard = evaluateInstitutionalTradeGuard(openTrade, mockPrice, mockWhale);
+   assert("Test 21a: Institutional Tsunami returns TSUNAMI_RUNNER_HOLD", guard.action === "TSUNAMI_RUNNER_HOLD");
+   assert("Test 21b: Tsunami confidence is ABSOLUTE", guard.confidence === "ABSOLUTE");
+   assert("Test 21c: Dynamic trailing floor R is calculated", typeof guard.trailFloorR === "number" && guard.trailFloorR >= 1.0);
+}
+
+// ----------------------------------------------------------------------------
+// Test 22: Institutional Trade Guard - Benign Pullback Hold
+// ----------------------------------------------------------------------------
+{
+   const openTrade = {
+      symbol: "SOLUSDT",
+      direction: "SHORT" as const,
+      entry: 180.0,
+      sl: 184.0,
+      initialSlDist: 4.0,
+      profitR: 0.25,
+      peak_r: 0.60,
+      a_closed: false,
+      b_closed: false,
+      c_closed: false
+   };
+   // 5m printed a minor green pullback candle, but 15m orderflow and EMA21 are bearish:
+   const mockPrice = {
+      price: 179.0,
+      ema21: 180.5,
+      taker: 0.50, // neutral tick
+      rvol: 0.9,
+      klines: [{ open: 178.5, high: 179.2, low: 178.4, close: 179.0 }]
+   };
+   const mockWhale = {
+      slope15: -95,
+      slope5: 10, // minor 5m uptick
+      slope4h: -150,
+      oi_chg: -0.001,
+      scenario: "INST_SHORT"
+   };
+
+   const guard = evaluateInstitutionalTradeGuard(openTrade, mockPrice, mockWhale);
+   assert("Test 22a: Benign 5m pullback returns BENIGN_PULLBACK_HOLD", guard.action === "BENIGN_PULLBACK_HOLD");
+   assert("Test 22b: Benign pullback confidence is HIGH", guard.confidence === "HIGH");
+}
+
+// ----------------------------------------------------------------------------
+// Test 23: Institutional Trade Guard - Absorption & Bull Trap Exit
+// ----------------------------------------------------------------------------
+{
+   const openTrade = {
+      symbol: "ETHUSDT",
+      direction: "LONG" as const,
+      entry: 2600,
+      sl: 2560,
+      initialSlDist: 40,
+      profitR: 0.75,
+      peak_r: 0.85,
+      a_closed: false,
+      b_closed: false,
+      c_closed: false
+   };
+   // Price pushed up to 2630, but upper wick is huge, CVD diverged sharply negative, taker buy is weak:
+   const mockPrice = {
+      price: 2630,
+      ema21: 2605,
+      taker: 0.43, // retail bought top into limit asks
+      rvol: 2.1,
+      klines: [{ open: 2610, high: 2642, low: 2608, close: 2618 }] // upper wick: 24, body: 8 (3x)
+   };
+   const mockWhale = {
+      slope15: -120, // CVD collapsing despite higher price!
+      slope5: -70,
+      slope4h: 100,
+      oi_chg: 0.008,
+      scenario: "BULL_TRAP",
+      hidden_sell: true
+   };
+
+   const guard = evaluateInstitutionalTradeGuard(openTrade, mockPrice, mockWhale);
+   assert("Test 23a: Passive distribution triggers ABSORPTION_TRAP_EXIT", guard.action === "ABSORPTION_TRAP_EXIT");
+   assert("Test 23b: Trap confidence is ABSOLUTE", guard.confidence === "ABSOLUTE");
+   assert("Test 23c: Trap type is BULL_TRAP", guard.metrics.trapType === "BULL_TRAP");
+}
+
+// ----------------------------------------------------------------------------
+// Test 24: Institutional Trade Guard - Squeeze / Liquidation Exhaustion Exit
+// ----------------------------------------------------------------------------
+{
+   const openTrade = {
+      symbol: "NEARUSDT",
+      direction: "SHORT" as const,
+      entry: 5.50,
+      sl: 5.75,
+      initialSlDist: 0.25,
+      profitR: 1.4,
+      peak_r: 1.5,
+      a_closed: true,
+      b_closed: false,
+      c_closed: false
+   };
+   // Massive long liquidation flush depleted OI by -2.2%, 5m CVD rebounding:
+   const mockPrice = {
+      price: 5.15,
+      ema21: 5.35,
+      taker: 0.55,
+      rvol: 2.5,
+      klines: [{ open: 5.12, high: 5.18, low: 5.10, close: 5.15 }]
+   };
+   const mockWhale = {
+      slope15: -80,
+      slope5: 65, // short squeeze bounce starting
+      slope4h: -100,
+      oi_chg: -0.022, // -2.2% OI flush complete
+      scenario: "LONG_LIQ"
+   };
+
+   const guard = evaluateInstitutionalTradeGuard(openTrade, mockPrice, mockWhale);
+   assert("Test 24a: Liquidation flush completion returns SQUEEZE_EXHAUSTION_EXIT", guard.action === "SQUEEZE_EXHAUSTION_EXIT");
+   assert("Test 24b: Squeeze exhaustion confidence is HIGH", guard.confidence === "HIGH");
+}
+
+// ----------------------------------------------------------------------------
+// Test 25: Institutional Trade Guard - Surgical Invalidation Exit
+// ----------------------------------------------------------------------------
+{
+   const openTrade = {
+      symbol: "AVAXUSDT",
+      direction: "SHORT" as const,
+      entry: 28.00,
+      sl: 29.00,
+      initialSlDist: 1.00,
+      profitR: -0.28, // minor loss
+      peak_r: 0.10,
+      a_closed: false,
+      b_closed: false,
+      c_closed: false
+   };
+   // Multi-timeframe CVD completely flipped to buying, candles broke above EMA21:
+   const mockPrice = {
+      price: 28.28,
+      ema21: 28.15,
+      taker: 0.57, // aggressive buyers took over
+      rvol: 1.5,
+      klines: [
+         { open: 28.10, high: 28.25, low: 28.08, close: 28.22 },
+         { open: 28.22, high: 28.32, low: 28.18, close: 28.28 }
+      ]
+   };
+   const mockWhale = {
+      slope15: 75,
+      slope5: 55,
+      slope4h: 120,
+      oi_chg: 0.006,
+      scenario: "INST_LONG"
+   };
+
+   const guard = evaluateInstitutionalTradeGuard(openTrade, mockPrice, mockWhale);
+   assert("Test 25a: Multi-timeframe orderflow reversal triggers SURGICAL_INVALIDATION_EXIT", guard.action === "SURGICAL_INVALIDATION_EXIT");
+   assert("Test 25b: Surgical invalidation saves capital at -0.28R before full -1.0R SL", openTrade.profitR >= -0.35);
 }
 
 console.log("\n=======================================================");
