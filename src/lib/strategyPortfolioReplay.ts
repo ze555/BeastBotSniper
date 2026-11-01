@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { evaluateStrategyPortfolio, simulatePartialExitTrade, summarizeReplay, DEFAULT_REPLAY_CONFIG, StrategyCandle, ReplayCandle, ReplayTrade, StrategyId } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, simulatePartialExitTrade, summarizeReplay, DEFAULT_REPLAY_CONFIG, StrategyCandle, ReplayCandle, ReplayTrade, ReplayResult, StrategyId } from "./strategyPortfolioEngine.js";
 
 interface ResearchTrade extends ReplayTrade {
  symbol:string;market_regime:string;market_context?:{btc_regime?:string;volatility_state?:string;funding_rate?:number};
@@ -23,7 +23,7 @@ for(const t of trades){
   if(candidate.accepted){s.accepted++;if(candidate.side===t.side){s.matchedDirection++;candidateTradeIds[candidate.strategy].add(t.trade_id);}}
  }
 }
-const replayResults=[];
+const replayResults:ReplayResult[]=[];
 for(const t of trades){
  const candles=streams[t.trade_id];
  if(!candles)continue;
