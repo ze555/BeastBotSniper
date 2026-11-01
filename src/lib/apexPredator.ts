@@ -414,9 +414,9 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
-async function fetchLiq(symbol: string) {
-   // Proxying liquidation calculation (mocked for this specific requirement due to Binance lacking a free direct liq map)
-   return { _up: 3000000, _down: 3000000 };
+async function fetchLiq(_symbol: string) {
+   // Binance public REST does not provide this aggregate liquidation map; never fabricate institutional liquidity.
+   return { _up: null, _down: null, available: false, source: "unavailable" as const };
 }
 
 // --- SEC 1: MARKET CONTEXT (BTC) ---
@@ -737,6 +737,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          return { signal: "WAIT", reason: "Price moved through the candidate invalidation level before execution" };
       }
       const stopDistancePct = Math.abs(executionPrice-candidate.stopReference)/executionPrice;
+      if (!Number.isFinite(stopDistancePct) || stopDistancePct < 0.001 || stopDistancePct > 0.04) return { signal: "WAIT", reason: "Live price moved the stop outside the permitted 0.10%-4.00% risk band" };
       const currentOpenRiskFraction = activeTrades.reduce((sum: number,t: any) => sum+(Math.abs(t.initialSlDist||0)*Math.max(0,Number(t.pos)||0))/Math.max(virtualBalance,1),0);
       const openFloating = activeTrades.reduce((sum: number,t: any) => sum+(Number(t.pnl)||0),0);
       const risk = evaluateRiskGuardian({
