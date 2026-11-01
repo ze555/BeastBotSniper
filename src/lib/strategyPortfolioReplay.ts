@@ -53,6 +53,7 @@ const result={
   "The 1m candle streams cover only a subset of trades and stop at the recorded exit. Replay therefore compares a new partial-exit policy inside each historical trade's observed holding window.",
   "The simulator uses recorded position_size and reconstructs initial risk distance from TP1 at 0.75R when available; otherwise it falls back to configured 0.5% risk sizing. It models 0.04% fee and 0.02% slippage on entry and each exit; historical account fee tier, spread, queue position and actual partial fill records are not present.",
   "If a 1m candle touches both the active stop and a target, stop-first ordering is applied conservatively. Intrabar order is unknown.",
+  "The simulator models the +0.45R/-0.25R soft protection and TP1/TP2 stop progression, but not the live institutional guard exits, 45-minute time-decay exit, or ATR runner trailing after TP2 because the export lacks the complete intrabar/orderflow context.",
   "This replay does not model concurrent portfolio fills, funding payments, exchange liquidation, websocket latency, or the rejected-signal opportunity set."
  ],
  decision:"Research diagnostic only. No candidate is promoted or connected to live entry/exit execution."
