@@ -120,7 +120,8 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  if(!Array.isArray(candles)||!candles.length)return invalid("NO_CANDLES","No 1m candles");
  const entryMs=Date.parse(trade.timestamp_entry),exitMs=Date.parse(trade.timestamp_exit),riskDist=Math.abs(trade.entry_price-trade.stop_loss);
  if(!finite(entryMs)||!finite(exitMs)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0)return invalid("INVALID","Invalid entry/exit/stop data");
- // Only use fully closed 1m bars after entry and before recorded exit; never inspect the partial exit minute.\n const timeline=candles.filter(c=>c.time>=entryMs&&c.time+60_000<=exitMs).sort((a,b)=>a.time-b.time);
+ // Only use fully closed 1m bars after entry and before recorded exit; never inspect the partial exit minute.
+ const timeline=candles.filter(c=>c.time>=entryMs&&c.time+60_000<=exitMs).sort((a,b)=>a.time-b.time);
  if(!timeline.length)return invalid("NO_CANDLES","No candles inside recorded trade interval");
  const isLong=trade.side==="LONG",qty=(cfg.equity*cfg.riskFraction)/riskDist;
  const entryFill=trade.entry_price*(isLong?1+cfg.slippageRate:1-cfg.slippageRate);
