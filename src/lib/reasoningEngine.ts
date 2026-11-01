@@ -4,6 +4,13 @@
 // REGIME -> FLOW (with Persistence) -> SCENARIO -> LOCATION -> TIMING GATE -> CONFIRMATION -> ENTRY
 // ============================================================================
 
+import { 
+   detectMacroRegime, 
+   evaluateTriRegimeExecution, 
+   MacroRegimeType, 
+   TriRegimeEvaluationResult 
+} from "./triRegimeEngine.js";
+
 export type MarketRegimeType = 
    | "TREND_UP" 
    | "TREND_DOWN" 
@@ -157,6 +164,8 @@ export interface ConfirmationResult {
 
 export interface ReasoningResult {
    regime: MarketRegimeType;
+   macroRegime?: MacroRegimeType;
+   triRegime?: TriRegimeEvaluationResult;
    flow: FlowAnalysis;
    location: LocationAnalysis;
    scenario: ScenarioPlan;
@@ -1156,6 +1165,7 @@ export function evaluateSymbolReasoning(
 ): ReasoningResult {
    // 1. Market Regime
    const regime = detectMarketRegime(ctx, p);
+   const macroRegime = detectMacroRegime(ctx, p, w);
 
    // 2. Flow Interpretation & Persistence
    const flow = interpretFlow(p, w);
@@ -1170,10 +1180,13 @@ export function evaluateSymbolReasoning(
    const preferredBias: "LONG" | "SHORT" = supportingScore.sl >= supportingScore.ss ? "LONG" : "SHORT";
    const timingGate = evaluateTimingGate(preferredBias, p, w, location, flow);
 
-   // 6. Confirmation
+   // 6. Institutional Tri-Regime Modular Evaluation
+   const triRegime = evaluateTriRegimeExecution(preferredBias, ctx, p, w, location);
+
+   // 7. Confirmation
    const confirmation = checkConfirmation(regime, flow, location, scenario, timingGate, p, w, supportingScore, ctx);
 
-   // 7. State Machine Lifecycle
+   // 8. State Machine Lifecycle
    let lifecycleState: LifecycleState = "OBSERVING";
    if (confirmation.isConfirmed) {
       lifecycleState = "CONFIRMED";
@@ -1185,6 +1198,8 @@ export function evaluateSymbolReasoning(
 
    return {
       regime,
+      macroRegime,
+      triRegime,
       flow,
       location,
       scenario,

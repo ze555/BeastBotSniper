@@ -13,6 +13,10 @@ import {
    updateDirectionTracking
 } from "./researchLogger.js";
 
+import { evaluateExecutionFilter } from "./executionFilter.js";
+import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
+export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
+
 const BINANCE_FAPI = "https://fapi.binance.com";
 let watcherInterval: NodeJS.Timeout | null = null;
 let activeTrades: any[] = [];
@@ -20,6 +24,31 @@ let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
+
+// ═══ ANTI-CHURN COOLDOWN SYSTEM ═══
+// Prevents rapid repetitive entries and micro-churn fee burn on the same symbol
+const closedSymbolCooldown = new Map<string, number>();
+const SYMBOL_COOLDOWN_LOSS_MS = 10 * 60 * 1000; // 10 minutes mandatory cooldown after a loss / early exit
+const SYMBOL_COOLDOWN_WIN_MS = 5 * 60 * 1000;   // 5 minutes cooldown after a take profit win
+
+export function isSymbolInCooldown(symbol: string): boolean {
+   const expireAt = closedSymbolCooldown.get(symbol);
+   if (!expireAt) return false;
+   if (Date.now() >= expireAt) {
+      closedSymbolCooldown.delete(symbol);
+      return false;
+   }
+   return true;
+}
+
+export function setSymbolCooldown(symbol: string, isWin: boolean, durationMs?: number) {
+   const duration = durationMs ?? (isWin ? SYMBOL_COOLDOWN_WIN_MS : SYMBOL_COOLDOWN_LOSS_MS);
+   closedSymbolCooldown.set(symbol, Date.now() + duration);
+}
+
+export function clearSymbolCooldowns() {
+   closedSymbolCooldown.clear();
+}
 
 // ═══ CONFIGURATION ═══
 let WATCHLIST: string[] = [
@@ -94,9 +123,10 @@ export function resetAccountState() {
   virtualBalance = 1000;
   initialVirtualBalance = 1000;
   todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+  clearSymbolCooldowns();
   closedTrades = closedTrades.filter(t => t.symbol !== 'AMZNUSDT' && !((t.pos || t.initialPos) > 100));
   activeTrades = activeTrades.filter(t => t.symbol !== 'AMZNUSDT');
-  addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وإلغاء قفل الخسارة اليومية.`, 'success');
+  addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
 }
 
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
@@ -445,16 +475,20 @@ async function getContext() {
    // Analyze BTC 15m candle structure to distinguish directional dump/pump from erratic 2-way whipsaw
    const btc_body = Math.abs(c15_0.close - c15_0.open);
    const btc_range = c15_0.high - c15_0.low;
-   const btc_body_ratio = btc_range > 0 ? btc_body / btc_range : 0.5;
+   const upperWick = c15_0.high - Math.max(c15_0.open, c15_0.close);
+   const lowerWick = Math.min(c15_0.open, c15_0.close) - c15_0.low;
+   const upperWickRatio = btc_range > 0 ? upperWick / btc_range : 0;
+   const lowerWickRatio = btc_range > 0 ? lowerWick / btc_range : 0;
 
-   // Directional Dump: BTC is plunging with bearish body and strong volume (Prime SHORT regime!)
-   const btc_dump = btc_15m_chg < -volThreshold && c15_0.close < c15_0.open && btc_body_ratio > 0.40;
+   // Directional Dump: BTC is plunging with significant negative change and volume expansion (Prime SHORT regime!)
+   // Does NOT block dump if there is an intraday lower wick during a violent cascade!
+   const btc_dump = btc_15m_chg < -volThreshold || (btc_15m_chg < -(volThreshold * 0.75) && c15_0.close < c15_0.open);
 
-   // Directional Pump: BTC is exploding upward with bullish body and strong volume (Prime LONG regime!)
-   const btc_pump = btc_15m_chg > volThreshold && c15_0.close > c15_0.open && btc_body_ratio > 0.40;
+   // Directional Pump: BTC is exploding upward with significant positive change and volume expansion (Prime LONG regime!)
+   const btc_pump = btc_15m_chg > volThreshold || (btc_15m_chg > (volThreshold * 0.75) && c15_0.close > c15_0.open);
 
-   // Erratic whipsaw: high volatility but indecisive body with large 2-way wicks (liquidation chop)
-   const btc_whipsaw = isExtremeVol && !btc_dump && !btc_pump;
+   // True erratic whipsaw: high volatility but indecisive net direction with large opposing 2-way wicks on both sides
+   const btc_whipsaw = isExtremeVol && !btc_dump && !btc_pump && upperWickRatio > 0.30 && lowerWickRatio > 0.30;
 
    // Calculate 24h momentum for BTC to distinguish between true trends and sideways consolidation:
    const c4h_start = btc4h[Math.max(0, btc4h.length - 6)]; // 24h ago (6 * 4h candles)
@@ -863,6 +897,23 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
+         // INSTITUTIONAL TRI-REGIME EVALUATION:
+         if (reasoning.triRegime && !reasoning.triRegime.allowed) {
+            addLog(`🛡️ [TRI-REGIME] تم منع صفقة LONG على ${symbol}: ${reasoning.triRegime.reason}`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "LONG",
+               signal_score: sl,
+               rejection_reason: reasoning.triRegime.reason,
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          // REGIME LOCK: مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market)
          if (ctx.regime.includes("BEAR")) {
             addLog(`🛡️ [REGIME LOCK] تم منع صفقة LONG على ${symbol} لأن نظام البيتكوين هابط (${ctx.regime}).`, "warn");
@@ -961,6 +1012,23 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
+         // INSTITUTIONAL TRI-REGIME EVALUATION:
+         if (reasoning.triRegime && !reasoning.triRegime.allowed) {
+            addLog(`🛡️ [TRI-REGIME] تم منع صفقة SHORT على ${symbol}: ${reasoning.triRegime.reason}`, "warn");
+            logRejectedSignal({
+               symbol,
+               timeframe: "15m",
+               direction: "SHORT",
+               signal_score: ss,
+               rejection_reason: reasoning.triRegime.reason,
+               p,
+               w,
+               ctx,
+               reasoning
+            });
+            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
          // REGIME LOCK: مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market)
          if (ctx.regime.includes("BULL")) {
             addLog(`🛡️ [REGIME LOCK] تم منع صفقة SHORT على ${symbol} لأن نظام البيتكوين صاعد (${ctx.regime}).`, "warn");
@@ -1101,6 +1169,11 @@ async function scoreEntry(symbol: string, ctx: any) {
 
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
+   if (isSymbolInCooldown(symbol)) {
+      addLog(`⏳ [تبريد رمزي] تم تخطي تنفيذ صفقة على ${symbol} لأن الرمز يخضع لفترة تهدئة بعد إغلاق سابق لمنع التكرار وحرق الرسوم.`, 'info');
+      return;
+   }
+
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
    // Dynamic Risk Sizing based on Market Regime:
@@ -1343,21 +1416,24 @@ async function exitBrain(trade: any, ctx: any) {
          addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من هبوط بيتكوين لأن الاتجاه منسجم مع وضعية الشورت (${ctx.btc_chg.toFixed(4)})`, "info");
       } else if (isTsunamiRunner || isBenignPullback) {
          // Institutional momentum active on pair: maintain position through BTC pause
-      } else {
-         emergency = true; emReason = "BTC Chaos";
+      } else if (profitR > 0.20) {
+         // Trade is running in profit with independent pair strength: do not panic exit on BTC range
+      } else if (ctx.btc_whipsaw) {
+         emergency = true; emReason = "BTC Violent Whipsaw";
       }
    }
 
-   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear) { emergency = true; emReason = "Inst Short"; }
-   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull) { emergency = true; emReason = "Inst Long"; }
-   
-   if (t.direction === "LONG" && w.hidden_sell && profitR < 0.5) { emergency = true; emReason = "Hidden Sell"; }
-   const threeBelow = p.klines.slice(-3).every((c: any) => c.close < p.ema21);
-   if (t.direction === "LONG" && threeBelow && profitR < 1.0) { emergency = true; emReason = "Structural Break"; }
+   // Strict high-conviction orderflow reversal across multiple timeframes:
+   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear && p.taker < 0.44) {
+      emergency = true; emReason = "Inst Short Triple Bear Reversal";
+   }
+   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull && p.taker > 0.56) {
+      emergency = true; emReason = "Inst Long Triple Bull Reversal";
+   }
 
    if (emergency) {
       addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
-      closeTradeFull(t);
+      closeTradeFull(t, `Emergency Exit: ${emReason}`);
       return;
    }
 
@@ -1467,53 +1543,39 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 5a. FAST FLOW LOSS CUT (-0.25R)
-   // خروج مبكر إذا تراجعت الصفقة إلى ما دون -0.25R وانعكس تدفق الحيتان/CVD ضدنا (مع استثناء الارتدادات الصحية):
-   if (!isBenignPullback && !t.a_closed && profitR <= -0.25) {
+   // 5. INSTITUTIONAL CONFLUENCE INVALIDATION MATRIX
+   // Replaces brittle premature cuts with true multi-indicator confluence.
+   // An early exit before hard SL requires ALL 3 institutional confirmations:
+   // (1) Minimum trade duration (elapsedSeconds >= 180s to filter entry spread/noise)
+   // (2) Position is in adverse territory (-0.30R to -0.85R)
+   // (3) Confluence of:
+   //     a) Structural break confirmed by candles closed AFTER entry
+   //     b) Dual-timeframe CVD reversal (both 15m and 5m slopes adverse)
+   //     c) Taker aggression definitively against position (< 0.44 for LONG, > 0.56 for SHORT)
+   const elapsedSec = (Date.now() - new Date(t.entryTime).getTime()) / 1000;
+   const entryTimeMs = new Date(t.entryTime).getTime();
+   const postEntryCandles = (p.klines || []).filter((c: any) => c.openTime >= entryTimeMs);
+   const postEntryBroken = postEntryCandles.length >= 2 && postEntryCandles.slice(-2).every((c: any) =>
+      t.direction === "LONG" ? c.close < p.ema21 : c.close > p.ema21
+   );
+
+   if (!isBenignPullback && !t.a_closed && elapsedSec >= 180 && profitR <= -0.30 && profitR > -0.90) {
       const cvdReversed = t.direction === "LONG"
-         ? (w.slope15 < -60 || w.slope5 < -50 || p.taker < 0.47 || w.hidden_sell)
-         : (w.slope15 > 60 || w.slope5 > 50 || p.taker > 0.53 || w.hidden_buy);
-
-      if (cvdReversed) {
-         addLog(`🛡️ [قص الخسارة السريع] خروج مبكر وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لانعكاس تدفق السيولة وCVD. تم توفير ${(1 + profitR).toFixed(2)}R!`, 'warn');
-         closeTradeFull(t, "Early Flow Reversal Cut (-0.25R)");
-         return;
-      }
-   }
-
-   // 5b. HARD EARLY LOSS CUT (-0.38R to -0.40R)
-   // سقف حديدي صارم للخسارة: يُمنع منعاً باتاً ترك أي صفقة تنزف إلى -1.0R!
-   // إذا بلغت الصفقة -0.38R مع شمعة 15m معاكسة أو لامست -0.40R، تُغلق فوراً وتوفر 60% إلى 65% من الستوب لوس:
-   if (!t.a_closed && profitR <= -0.38) {
-      const c = p.klines || [];
-      const lastCandle = c[c.length - 1];
-      const adverseCandle = t.direction === "LONG"
-         ? (lastCandle && lastCandle.close < lastCandle.open)
-         : (lastCandle && lastCandle.close > lastCandle.open);
-
-      if (profitR <= -0.40 || adverseCandle) {
-         addLog(`🛡️ [قص الخسارة الحاسم] إغلاق وقائي فوري لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لمنع النزيف وتوفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
-         closeTradeFull(t, "Hard Early Loss Cut (-0.40R)");
-         return;
-      }
-   }
-
-   // 5c. STRUCTURAL BREAK CUT (-0.30R)
-   if (!t.a_closed && profitR < -0.30) {
-      const c = p.klines || [];
-      const recentCloses = c.slice(-2).map((k: any) => k.close);
-      const isBreakingEMA = t.direction === "LONG" 
-         ? recentCloses.every((cl: number) => cl < p.ema21) 
-         : recentCloses.every((cl: number) => cl > p.ema21);
+         ? (w.slope15 < -60 && w.slope5 < -40)
+         : (w.slope15 > 60 && w.slope5 > 40);
       
-      const orderflowFlipped = t.direction === "LONG"
-         ? (w.hidden_sell || w.scenario === "INST_SHORT" || w.triple_bear || w.slope15 < -120 || (p.taker < 0.46 && p.rsi < 44))
-         : (w.hidden_buy || w.scenario === "INST_LONG" || w.triple_bull || w.slope15 > 120 || (p.taker > 0.54 && p.rsi > 56));
+      const takerReversed = t.direction === "LONG"
+         ? p.taker < 0.44
+         : p.taker > 0.56;
 
-      if (isBreakingEMA || orderflowFlipped) {
-         const reasonDetail = isBreakingEMA ? "Structural EMA21 Break" : "Whale Orderflow/CVD Reversal";
-         addLog(`🛡️ [قص الخسارة الهيكلي] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R بسبب (${reasonDetail}). تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
-         closeTradeFull(t, `Early Invalidation: ${reasonDetail}`);
+      const structuralInvalidation = postEntryBroken || (
+         t.direction === "LONG" ? (price < (t.entry - slDist * 0.60) && p.price < p.ema21)
+                                : (price > (t.entry + slDist * 0.60) && p.price > p.ema21)
+      );
+
+      if (cvdReversed && takerReversed && structuralInvalidation) {
+         addLog(`🛡️ [القطع الجراحي المؤسساتي المندمج] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لتأكيد انعكاس متزامن في الهيكل وCVD والـ Taker. تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
+         closeTradeFull(t, "Institutional Confluence Invalidation Cut");
          return;
       }
    }
@@ -1575,6 +1637,13 @@ function closeTradeFull(t: any, reason: string = "") {
 
    todaysStats.pnl += t.finalPnl;
    activeTrades = activeTrades.filter(tr => tr !== t);
+
+   // Anti-Churn Protection: enforce mandatory cooldown before symbol can be traded again
+   const isProfitWin = (t.finalPnl > 0.15 && t.profitR > 0.05);
+   setSymbolCooldown(t.symbol, isProfitWin);
+   const cooldownMins = isProfitWin ? 5 : 10;
+   addLog(`⏳ [مانع الدوران والتكرار - Anti-Churn] تم تفعيل فترة تهدئة ${cooldownMins} دقائق على ${t.symbol} لمنع التكرار السريع وحرق الرسوم.`, 'info');
+
    if (reason) addLog(`🛑 Full Exit ${t.symbol}: ${reason} | Net PnL: $${t.finalPnl.toFixed(2)} (${t.profitR.toFixed(2)}R)`, t.finalPnl >= 0 ? 'success' : 'warn');
 
    // Record full post-trade diagnostic analysis in Research Logger
@@ -1672,7 +1741,7 @@ export async function runApexLoop() {
 
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
-      const hotCandidates = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym));
+      const hotCandidates = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
       const hotChunkSize = 5;
       for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
          if (!canOpenMore()) break;
@@ -1714,7 +1783,7 @@ export async function runApexLoop() {
       const batchSize = scanBatchSize;
       const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
       const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex)
-         .filter(sym => !hotCandidates.includes(sym));
+         .filter(sym => !hotCandidates.includes(sym) && !isSymbolInCooldown(sym));
       
       // Advance index for next run
       currentBatchIndex = endBatchIndex;
