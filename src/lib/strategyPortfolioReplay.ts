@@ -9,7 +9,8 @@ const trades=JSON.parse(fs.readFileSync("study_all_trades_master.json","utf8")) 
 const streams=JSON.parse(fs.readFileSync("master_candles_1m.json","utf8")) as Record<string,ReplayCandle[]>;
 const ids:StrategyId[]=["TREND_RIDER","BREAKOUT_RETEST","LIQUIDITY_REVERSAL","MOMENTUM_EXPANSION"];
 const candidateStats:Record<string,{evaluated:number;accepted:number;matchedDirection:number;scoreSum:number}>={};
-for(const id of ids)candidateStats[id]={evaluated:0,accepted:0,matchedDirection:0,scoreSum:0};
+const candidateTradeIds:Record<string,Set<string>>={};
+for(const id of ids){candidateStats[id]={evaluated:0,accepted:0,matchedDirection:0,scoreSum:0};candidateTradeIds[id]=new Set<string>();}
 let featureCoverage=0;
 for(const t of trades){
  const c=t.candles_before_entry;
@@ -19,7 +20,7 @@ for(const t of trades){
  const evaluated=evaluateStrategyPortfolio(c,context);
  for(const side of evaluated)for(const candidate of side.candidates){
   const s=candidateStats[candidate.strategy];s.evaluated++;s.scoreSum+=candidate.score;
-  if(candidate.accepted){s.accepted++;if(candidate.side===t.side)s.matchedDirection++;}
+  if(candidate.accepted){s.accepted++;if(candidate.side===t.side){s.matchedDirection++;candidateTradeIds[candidate.strategy].add(t.trade_id);}}
  }
 }
 const replayResults=[];
@@ -30,6 +31,12 @@ for(const t of trades){
  replayResults.push(simulatePartialExitTrade(t,candles,cfg));
 }
 const summary=summarizeReplay(replayResults);
+const conditionalOutcomes=Object.fromEntries(ids.map(id=>{
+ const idsForStrategy=candidateTradeIds[id];
+ const subset=replayResults.filter(r=>idsForStrategy.has(r.trade_id));
+ const stats=summarizeReplay(subset);
+ return [id,{acceptedExecutedTrades:idsForStrategy.size,replayedTrades:stats.trades,winRatePct:Number((stats.winRate*100).toFixed(1)),netPnl:Number(stats.netPnl.toFixed(2)),netR:Number(stats.netR.toFixed(3)),profitFactor:stats.profitFactor===null?null:Number(stats.profitFactor.toFixed(3)),maxDrawdownUsd:Number(stats.maxDrawdownUsd.toFixed(2))}];
+}));
 const replayedIds=new Set(replayResults.map(r=>r.trade_id));
 const recorded=trades.filter(t=>replayedIds.has(t.trade_id)&&Number.isFinite(t.pnl_r));
 const recordedPnl=recorded.reduce((s,t)=>s+(Number(t.pnl)||0),0);
