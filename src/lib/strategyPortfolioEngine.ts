@@ -5,8 +5,13 @@
 export type Side = "LONG" | "SHORT";
 export type StrategyId = "TREND_RIDER" | "BREAKOUT_RETEST" | "LIQUIDITY_REVERSAL" | "MOMENTUM_EXPANSION";
 export interface StrategyCandle { time?: number | string; open:number; high:number; low:number; close:number; volume:number; takerBuyBase?:number }
-export interface StrategyContext { btcRegime?:string; btcChangePct?:number; fundingRate?:number; oiChangePct?:number; oiAvailable?:boolean }
-export interface StrategyCandidate { strategy:StrategyId; side:Side; score:number; accepted:boolean; reasons:string[]; entryReference:number; stopReference:number; targetR:number }
+export interface StrategyContext {
+ btcRegime?:string; btcChangePct?:number; fundingRate?:number;
+ oiChangePct?:number; oiAvailable?:boolean; priceChangePct?:number;
+ cvdSlope5?:number; cvdSlope15?:number; cvdAvailable?:boolean;
+ orderBookImbalance?:number; orderBookAvailable?:boolean; orderBookAgeMs?:number;
+}
+export interface StrategyCandidate { strategy:StrategyId; side:Side; accepted:boolean; reasons:string[]; missingEvidence:string[]; entryReference:number; stopReference:number; targetR:number }
 export interface StrategyEvaluation { side:Side; candidates:StrategyCandidate[]; selected:StrategyCandidate|null }
 export interface StrategyExitPlan { tp1R:number; tp2R:number; tp3R:number; partA:number; partB:number; partC:number; minRRRequired:number }
 export function applyRegimeRiskMultiplier(riskUsd:number,assetRegime:string):number { return assetRegime==="RANGE"||assetRegime==="TRANSITION"?riskUsd*0.5:riskUsd; }
@@ -27,81 +32,88 @@ function ema(values:number[],period:number):number { if(!values.length)return 0;
 function atr(c:StrategyCandle[],period=14):number { if(c.length<2)return 0; const tr:number[]=[]; for(let i=1;i<c.length;i++)tr.push(Math.max(c[i].high-c[i].low,Math.abs(c[i].high-c[i-1].close),Math.abs(c[i].low-c[i-1].close))); return tr.slice(-period).reduce((a,b)=>a+b,0)/Math.min(period,tr.length); }
 function rsi(closes:number[],period=14):number { if(closes.length<=period)return 50; let up=0,down=0; for(let i=closes.length-period;i<closes.length;i++){const d=closes[i]-closes[i-1];if(d>0)up+=d;else down-=d;} return down===0?100:100-100/(1+(up/period)/(down/period)); }
 function flowRatio(c:StrategyCandle[]):number { const valid=c.filter(x=>finite(x.takerBuyBase??NaN)); if(valid.length===c.length&&c.length){const v=c.reduce((s,x)=>s+x.volume,0);return v>0?c.reduce((s,x)=>s+(x.takerBuyBase||0),0)/v:0.5;} const v=c.reduce((s,x)=>s+x.volume,0); if(v<=0)return 0.5; return c.reduce((s,x)=>s+x.volume*(x.high>x.low?(x.close-x.low)/(x.high-x.low):0.5),0)/v; }
-function scoreCandidate(strategy:StrategyId,side:Side,c:StrategyCandle[],ctx:StrategyContext):StrategyCandidate {
- const last=c[c.length-1],prev=c[c.length-2],cl=c.map(x=>x.close),highs=c.slice(0,-1).map(x=>x.high),lows=c.slice(0,-1).map(x=>x.low);
+function evaluateConfluenceCandidate(strategy:StrategyId,side:Side,c:StrategyCandle[],ctx:StrategyContext):StrategyCandidate {
+ const last=c[c.length-1],prev=c[c.length-2],cl=c.map(x=>x.close);
  const price=last.close,a=atr(c),e9=ema(cl.slice(-60),9),e21=ema(cl.slice(-80),21),e50=ema(cl.slice(-120),50);
- const r=rsi(cl),flow=flowRatio(c.slice(-5)),avgVol=c.slice(-21,-1).reduce((s,x)=>s+x.volume,0)/Math.max(1,Math.min(20,c.length-1)),rvol=last.volume/(avgVol||1);
- const priorHigh=Math.max(...highs.slice(-20)),priorLow=Math.min(...lows.slice(-20));
+ const flow=flowRatio(c.slice(-5)),avgVol=c.slice(-21,-1).reduce((s,x)=>s+x.volume,0)/Math.max(1,Math.min(20,c.length-1));
+ const rvol=last.volume/(avgVol||1),priorHigh=Math.max(...c.slice(0,-1).map(x=>x.high).slice(-20)),priorLow=Math.min(...c.slice(0,-1).map(x=>x.low).slice(-20));
  const range=Math.max(last.high-last.low,1e-12),body=Math.abs(last.close-last.open),bodyRatio=body/range;
  const lowerWick=Math.min(last.open,last.close)-last.low,upperWick=last.high-Math.max(last.open,last.close);
- const bull=side==="LONG", trendAligned=bull?(price>e21&&e21>e50):(price<e21&&e21<e50);
- const directionalFlow=bull?flow>=0.54:flow<=0.46;
- const opposingBtc=Boolean(ctx.btcRegime?.includes(bull?"BEAR":"BULL"));
- const reasons:string[]=[];let score=0,entry=price,stop=bull?Math.min(last.low,price-a):Math.max(last.high,price+a),targetR=3.5;
- const add=(ok:boolean,points:number,reason:string)=>{if(ok){score+=points;reasons.push(reason);}};
- if(!finite(price)||!finite(a)||a<=0||c.length<25)return {strategy,side,score:0,accepted:false,reasons:["Insufficient or invalid candle history"],entryReference:price,stopReference:stop,targetR};
+ const bull=side==="LONG",dir=bull?1:-1,reasons:string[]=[],missing:string[]=[];
+ const add=(ok:boolean,reason:string,missingReason:string)=>{if(ok)reasons.push(reason);else missing.push(missingReason);};
+ const invalid=(reason:string)=>({strategy,side,accepted:false,reasons,missingEvidence:[reason],entryReference:price,stopReference:bull?last.low:last.high,targetR:0});
+ if(!finite(price)||!finite(a)||a<=0||c.length<25)return invalid("At least 25 valid completed candles and positive ATR are required");
+ if(!c.every(x=>[x.open,x.high,x.low,x.close,x.volume].every(finite)&&x.volume>=0&&x.high>=Math.max(x.open,x.close)&&x.low<=Math.min(x.open,x.close)&&x.high>=x.low))return invalid("Malformed OHLCV input");
+ // Independent market-data confirmations. Missing/stale sources are blockers, never neutral votes.
+ const oiFresh=ctx.oiAvailable===true&&finite(ctx.oiChangePct??NaN)&&finite(ctx.priceChangePct??NaN);
+ const cvdFresh=ctx.cvdAvailable===true&&finite(ctx.cvdSlope5??NaN)&&finite(ctx.cvdSlope15??NaN);
+ const bookFresh=ctx.orderBookAvailable===true&&finite(ctx.orderBookImbalance??NaN)&&finite(ctx.orderBookAgeMs??NaN)&&Number(ctx.orderBookAgeMs)<=5000;
+ const flowAligned=bull?flow>=0.54:flow<=0.46;
+ const cvdAligned=cvdFresh&&(bull?Number(ctx.cvdSlope5)>0&&Number(ctx.cvdSlope15)>0:Number(ctx.cvdSlope5)<0&&Number(ctx.cvdSlope15)<0);
+ const oiBuildAligned=oiFresh&&Number(ctx.oiChangePct)>=0.001&&(bull?Number(ctx.priceChangePct)>0:Number(ctx.priceChangePct)<0);
+ const oiFlushCompatible=oiFresh&&Number(ctx.oiChangePct)<=-0.001&&(bull?Number(ctx.priceChangePct)>0:Number(ctx.priceChangePct)<0);
+ const fundingSafe=finite(ctx.fundingRate??NaN)&&(bull?Number(ctx.fundingRate)<0.0005:Number(ctx.fundingRate)>-0.0005);
+ const bookAligned=bookFresh&&(bull?Number(ctx.orderBookImbalance)>=0.10:Number(ctx.orderBookImbalance)<=-0.10);
+ const trendAligned=bull?price>e21&&e21>e50:price<e21&&e21<e50;
+ const directionalCandle=bull?last.close>last.open&&last.close>prev.close:last.close<last.open&&last.close<prev.close;
+ const riskStop=(stop:number)=>{const pct=Math.abs(price-stop)/price;return (bull?stop<price:stop>price)&&pct>=0.001&&pct<=0.04;};
+ // Every strategy must pass data integrity, exchange flow, CVD, OI/price relationship,
+ // funding crowding and a fresh order-book imbalance gate. No additive score or compensating votes.
+ add(cvdFresh,"5m and 15m CVD are available","CVD data missing or stale");
+ add(cvdAligned,"5m and 15m CVD slopes agree with the trade direction","CVD timeframes conflict or oppose direction");
+ add(oiFresh,"Open interest and price-change observations are available","Open-interest/price data unavailable");
+ add(oiBuildAligned||oiFlushCompatible,"Price/OI relationship is compatible with directional positioning or covering","Price/OI relationship does not confirm direction");
+ add(flowAligned,"Taker-buy/sell flow agrees with direction","Taker flow is neutral or opposing");
+ add(fundingSafe,"Funding is not excessively crowded against the trade","Funding unavailable or crowding risk detected");
+ add(bookAligned,"Fresh order-book depth imbalance agrees with direction","Fresh order-book imbalance unavailable, stale or opposing");
+ let entry=price,stop=bull?Math.min(...c.slice(-4).map(x=>x.low))-a*0.25:Math.max(...c.slice(-4).map(x=>x.high))+a*0.25,targetR=3.5;
  switch(strategy){
-  case "TREND_RIDER":{
-   add(trendAligned,2,"EMA21/EMA50 trend alignment");
-   add(bull?e9>e21:e9<e21,1,"EMA9 confirms trend resumption");
-   add(bull?last.close>prev.close:last.close<prev.close,1,"latest closed candle resumes direction");
-   add(directionalFlow,1.5,"directional taker-flow proxy");
-   add(rvol>=0.8&&rvol<=3.5,0.75,"participation is not dead or climactic");
-   add(bull?r>=45&&r<=68:r>=32&&r<=55,0.75,"RSI is not materially extended");
-   stop=bull?Math.min(...c.slice(-4).map(x=>x.low))-a*0.25:Math.max(...c.slice(-4).map(x=>x.high))+a*0.25;
+  case "TREND_RIDER":
+   add(trendAligned,"15m EMA21/EMA50 structure aligned","15m trend structure not aligned");
+   add(bull?e9>e21:e9<e21,"EMA9 confirms resumption","EMA9 does not confirm resumption");
+   add(directionalCandle,"Completed candle resumes direction","No directional close confirmation");
+   add(rvol>=0.8&&rvol<=3.5,"Participation is adequate and not climactic","Relative volume outside permitted band");
+   add(bull? rsi(cl)>=45&&rsi(cl)<=68:rsi(cl)>=32&&rsi(cl)<=55,"RSI is not extended","RSI is extended or inconsistent");
    targetR=3.5;break;
-  }
   case "BREAKOUT_RETEST":{
-   const clearance=bull?price>priorHigh:price<priorLow;
    const level=bull?priorHigh:priorLow;
-   const retest=bull?(last.low<=level+a*0.25&&price>=level):(last.high>=level-a*0.25&&price<=level);
-   const strongClose=bull?(last.close>last.open&&bodyRatio>=0.45):(last.close<last.open&&bodyRatio>=0.45);
-   add(clearance,2.5,"closed candle clears prior 20-candle boundary");
-   add(retest,1.5,"breakout level retest holds");
-   add(strongClose,1,"directional close");
-   add(rvol>=1.2,1,"relative volume confirms participation");
-   add(directionalFlow,1,"taker-flow proxy agrees");
-   entry=price;stop=bull?Math.min(last.low,level-a*0.2):Math.max(last.high,level+a*0.2);targetR=3.5;break;
+   const breakout=bull?price>level:price<level;
+   const retest=bull?last.low<=level+a*0.25&&price>=level:last.high>=level-a*0.25&&price<=level;
+   add(breakout,"Completed candle closes beyond prior 20-candle boundary","No confirmed close beyond structure");
+   add(retest,"Broken level is retested and held","No successful retest/hold");
+   add(bodyRatio>=0.45,"Breakout candle body confirms acceptance","Breakout close lacks body conviction");
+   add(rvol>=1.2,"Breakout participation expands","Breakout volume expansion missing");
+   stop=bull?Math.min(last.low,level-a*0.2):Math.max(last.high,level+a*0.2);targetR=3.5;break;
   }
   case "LIQUIDITY_REVERSAL":{
    const sweep=bull?last.low<priorLow&&price>priorLow:last.high>priorHigh&&price<priorHigh;
    const wick=bull?lowerWick>=Math.max(body*1.5,a*0.25):upperWick>=Math.max(body*1.5,a*0.25);
-   const reclaim=bull?price>last.open:price<last.open;
-   add(sweep,2.5,"liquidity sweep beyond prior range then reclaim");
-   add(wick,1.5,"rejection wick at swept extreme");
-   add(reclaim,1,"close returns in reversal direction");
-   add(rvol>=1.2,1,"volume expansion at sweep");
-   add(directionalFlow,1,"taker-flow proxy confirms absorption");
+   add(sweep,"Prior liquidity boundary swept and reclaimed","No confirmed sweep-and-reclaim");
+   add(wick,"Rejection wick confirms failed auction","No material rejection wick");
+   add(bull?price>last.open:price<last.open,"Reclaim candle closes in reversal direction","Reclaim close does not confirm reversal");
+   add(rvol>=1.2,"Volume expands at swept liquidity","No volume expansion at sweep");
+   // Reversal may be powered by position reduction (covering/liquidation), not new OI.
+   add(oiFlushCompatible||oiBuildAligned,"OI/price behavior supports covering or fresh directional build","OI/price behavior does not support reversal");
    stop=bull?last.low-a*0.15:last.high+a*0.15;targetR=2.5;break;
   }
   case "MOMENTUM_EXPANSION":{
-   const expansion=range>=a*1.1&&bodyRatio>=0.6;
-   const momentum=bull?(last.close>last.open&&price>e9):(last.close<last.open&&price<e9);
-   add(expansion,2,"range expands above ATR baseline");
-   add(momentum,1.5,"directional momentum candle");
-   add(rvol>=1.5&&rvol<=4,1.5,"volume expansion");
-   add(directionalFlow,1,"taker-flow proxy confirms");
-   add(bull?e9>e21:e9<e21,1,"short-term trend alignment");
-   // Avoid chasing a candle already too far from its fast average.
-   add(Math.abs(price-e9)<=a*1.8,0.75,"entry is not excessively extended");
+   add(range>=a*1.1&&bodyRatio>=0.6,"ATR expansion and directional body confirmed","No genuine range/body expansion");
+   add(directionalCandle,"Momentum candle closes directionally","Momentum candle direction unconfirmed");
+   add(rvol>=1.5&&rvol<=4,"Volume expansion confirms participation","Volume is insufficient or climactic");
+   add(bull?e9>e21:e9<e21,"Fast EMA structure agrees","Fast EMA structure conflicts");
+   add(Math.abs(price-e9)<=a*1.8,"Entry is not excessively extended","Entry is too far from EMA9");
    stop=bull?last.low-a*0.2:last.high+a*0.2;targetR=3;break;
+  }
  }
- }
- if(opposingBtc){score-=1;reasons.push("BTC regime conflicts (score penalty; not an absolute ban)");}
- const risk=Math.abs(entry-stop),riskPct=risk/(entry||1);
- const validStop=bull?stop<entry:stop>entry;
- const validRisk=riskPct>=0.001&&riskPct<=0.04;
- const threshold=strategy==="LIQUIDITY_REVERSAL"?5.5:5.75;
- const accepted=score>=threshold&&validStop&&validRisk;
- if(!validStop)reasons.push("Rejected: stop is on the wrong side of entry");
- if(!validRisk)reasons.push("Rejected: stop distance outside 0.10%-4.00% sanity band");
- return {strategy,side,score:Number(clamp(score,0,10).toFixed(2)),accepted,reasons,entryReference:entry,stopReference:stop,targetR};
+ const accepted=missing.length===0&&riskStop(stop);
+ if(!riskStop(stop))missing.push("Stop is on wrong side or outside 0.10%-4.00% risk band");
+ return {strategy,side,accepted,reasons,missingEvidence:missing,entryReference:entry,stopReference:stop,targetR};
 }
 export function evaluateStrategyPortfolio(candles:StrategyCandle[],ctx:StrategyContext={}):StrategyEvaluation[]{
  if(candles.length<25)return (["LONG","SHORT"] as Side[]).map(side=>({side,candidates:[],selected:null}));
  return (["LONG","SHORT"] as Side[]).map(side=>{
-  const candidates=(["TREND_RIDER","BREAKOUT_RETEST","LIQUIDITY_REVERSAL","MOMENTUM_EXPANSION"] as StrategyId[]).map(s=>scoreCandidate(s,side,candles,ctx));
-  const selected=candidates.filter(x=>x.accepted).sort((a,b)=>b.score-a.score)[0]||null;
+  const candidates=(["TREND_RIDER","BREAKOUT_RETEST","LIQUIDITY_REVERSAL","MOMENTUM_EXPANSION"] as StrategyId[]).map(s=>evaluateConfluenceCandidate(s,side,candles,ctx));
+  const selected=candidates.find(x=>x.accepted)||null;
   return {side,candidates,selected};
  });
 }
