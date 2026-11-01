@@ -88,7 +88,33 @@ export interface Trade {
   inverseBestPrice?: number; // Added for the new inverse trailing logic
   tickHistory?: number[]; // Live Data: Tracks every incoming price tick
   oiHistory?: number[]; // Open Interest history
+  
+  // Custom Data for APEX SNIPER v3
+  sonnetData?: {
+    tp1: number;
+    tp2: number;
+    tp1_hit: boolean;
+    be_moved: boolean;
+    size_tp1_mult: number;
+    size_tp2_mult: number;
+  };
+  
+  // Custom Data for APEX PREDATOR
+  predatorData?: {
+    tp1: number;
+    tp2: number;
+    tp3: number;
+    part_a: number;
+    part_b: number;
+    part_c: number;
+    a_closed: boolean;
+    b_closed: boolean;
+    c_closed: boolean;
+    be_done: boolean;
+    entry_score: number;
+  };
   volHistory?: number[]; // Volume history
+  reportHistory?: any[]; // Full report history for Groq AI
   latestAdaptiveResult?: {
     time: number;
     decision: string;
@@ -127,6 +153,13 @@ export interface Trade {
   partial1Taken?: boolean;
   partial2Taken?: boolean;
   takenPartials?: number[];
+  metricsSnapshot?: {
+    adx?: number;
+    rvol?: number;
+    oiChange24h?: number;
+    takerBuySellRatio?: number;
+    oiRising?: boolean;
+  };
 }
 
 export interface MarketCondition {
@@ -161,6 +194,18 @@ export interface MarketCondition {
   rsi?: number;              // Real-time RSI relative strength
   ema50?: number;            // 50 EMA Trend filter
   isAdxRising?: boolean;     // Whether ADX is currently rising or decreasing
+  slopes?: {
+    oiSlope: number;
+    cvdSlope: number;
+    spotCvdSlope: number;
+    volumeSlope: number;
+    priceSlope: number;
+    deltaVolume?: number;
+    bidAbsorption?: number;
+    askAbsorption?: number;
+    hhHl?: number;
+    lhLl?: number;
+  };
 }
 
 export interface MarketMetrics {
@@ -181,6 +226,18 @@ export interface MarketMetrics {
   isChop: boolean;
   volCoefVar?: number;
   isAdxRising?: boolean;     // Whether ADX is currently rising
+  slopes?: {
+    oiSlope: number;
+    cvdSlope: number;
+    spotCvdSlope: number;
+    volumeSlope: number;
+    priceSlope: number;
+    deltaVolume?: number;
+    bidAbsorption?: number;
+    askAbsorption?: number;
+    hhHl?: number;
+    lhLl?: number;
+  };
 }
 
 export interface GlobalContext {
@@ -189,6 +246,45 @@ export interface GlobalContext {
   bullishRatio: number; // Percentage of coins in HH
   totalVolume24h: number;
   marketSentiment: 'EXTREME_GREED' | 'GREED' | 'NEUTRAL' | 'FEAR' | 'EXTREME_FEAR';
+}
+
+export interface SovereignRuleStat {
+  passed: number;
+  failed: number;
+}
+
+export interface SonnetStats {
+  totalEvaluations: number;
+  totalLongScanned: number;
+  totalShortScanned: number;
+  acceptedLongs: number;
+  acceptedShorts: number;
+  rules: {
+    btc_guard: SovereignRuleStat;
+    htf_trend: SovereignRuleStat;
+    microstructure: SovereignRuleStat;
+    volume_dna: SovereignRuleStat;
+    candle_quality: SovereignRuleStat;
+    false_breakout: SovereignRuleStat;
+    momentum: SovereignRuleStat;
+  }
+}
+
+export interface SovereignStats {
+  totalEvaluations: number;
+  totalLongScanned: number;
+  totalShortScanned: number;
+  acceptedLongs: number;
+  acceptedShorts: number;
+  rules: {
+    ema50_trend: SovereignRuleStat;
+    ema_alignment: SovereignRuleStat;
+    rvol: SovereignRuleStat;
+    oi_rising: SovereignRuleStat;
+    taker_ratio: SovereignRuleStat;
+    adx: SovereignRuleStat;
+    price_breakout: SovereignRuleStat;
+  }
 }
 
 export interface SystemStats {
@@ -244,7 +340,16 @@ export interface BotSettings {
   useWiseExit?: boolean;            // 🔥 Wise Exit: Institutional & Structural Exit
   useWiseEntry?: boolean;           // 🛡️ Wise Entry: Institutional Breakout & SMC Reversals
   
-  // Smart Control (التحكم الذكي الفائق)
+  // Smart Exit Scoring Logic Dashboard
+  smartScoreExit?: {
+    enabled: boolean;
+    msBreakPoints: number;
+    oiWeakPoints: number;
+    cvdPoints: number;
+    threshold: number;
+    applyToAll: boolean;
+    selectedTawleefas?: string[];
+  };
   useSmartControl?: boolean;        // تفعيل التحكم الذكي
   enableInverseExecution?: boolean; // تفعيل الصفقات المعاكسة في بايننس
   smartTpUsd?: number;              // هدف الربح السريع بالدولار (مثال 1$)
@@ -388,8 +493,21 @@ export interface BotSettings {
   activeTawleefaJson?: string;          // ملف التوليفة النشطة المشفر بصيغة JSON
   useBeastAuditorEngine?: boolean;      // تفعيل مدقق الوحش العملاق (خمس شروط مطلقة)
 
+  // 🤖 Groq LLM Assistant (المساعد الذكي للقرار)
+  useGroqAI?: boolean;                  // تفعيل المساعد للقرار
+  groqApiKey?: string;                  // مفتاح الاستخدام
+
   // 🦅 Savage & Fierce Exit Engine (محرك الخروج الشرس المستقل)
   useFierceExitEngine?: boolean;        // تفعيل محرك الخروج الشرس المستقل لأي محرك دخول
   fierceTakeProfitValue?: number;       // هدف جني الأرباح المأمول لمحرك الخروج الشرس (مثل 1.5%)
   fierceTakeProfitMode?: 'FUSION_CASCADE' | 'TRAILING_MOMENTUM'; // وضعية ملاحقة السقف وجني الأرباح للتثبيت الشرس
+  
+  // 👑 The Sovereign Engine (المحرك الشامل)
+  useSovereignEngine?: boolean;
+  
+  // 📚 The Sonnet Engine (محرك APEX SNIPER v3)
+  useSonnetEngine?: boolean;
+  
+  // 🦅 The Apex Predator Engine
+  useApexPredatorEngine?: boolean;
 }

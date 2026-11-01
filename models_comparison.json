@@ -1,0 +1,1448 @@
+{
+  "m0": {
+    "model": "MODEL_0_ORIGINAL",
+    "trades": 28,
+    "netR": 0.04,
+    "avgR": 0,
+    "pf": 1,
+    "winRate": 50,
+    "maxDD": 5.44,
+    "avgWinner": 0.64,
+    "avgLoser": 0.69,
+    "tp1Rate": 7.1,
+    "tp2Rate": 0,
+    "mfeCapturePct": 124.2,
+    "avgGiveback": 0.48,
+    "results": [
+      {
+        "id": "INTCUSDT_1790927953435",
+        "sym": "INTCUSDT",
+        "realizedR": 0.76,
+        "peakR": 0.89,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PUMPUSDT_1790926145798",
+        "sym": "PUMPUSDT",
+        "realizedR": -0.6,
+        "peakR": 0.52,
+        "giveback": 1.12,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "MUUSDT_1790928103048",
+        "sym": "MUUSDT",
+        "realizedR": 1.34,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ZROUSDT_1790924204676",
+        "sym": "ZROUSDT",
+        "realizedR": -0.38,
+        "peakR": 0,
+        "giveback": 0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PENDLEUSDT_1790923216156",
+        "sym": "PENDLEUSDT",
+        "realizedR": 0.16,
+        "peakR": 0.35,
+        "giveback": 0.19,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "DASHUSDT_1790918834809",
+        "sym": "DASHUSDT",
+        "realizedR": -0.16,
+        "peakR": 0.35,
+        "giveback": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790907488642",
+        "sym": "TRUMPUSDT",
+        "realizedR": 0.56,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MRVLUSDT_1790907702615",
+        "sym": "MRVLUSDT",
+        "realizedR": -0.09,
+        "peakR": 0.44,
+        "giveback": 0.53,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "NVDAUSDT_1790917332996",
+        "sym": "NVDAUSDT",
+        "realizedR": -0.42,
+        "peakR": 0.09,
+        "giveback": 0.51,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "LITEUSDT_1790911093836",
+        "sym": "LITEUSDT",
+        "realizedR": -0.63,
+        "peakR": 0.39,
+        "giveback": 1.02,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "BNBUSDT_1790913249256",
+        "sym": "BNBUSDT",
+        "realizedR": 0.24,
+        "peakR": 0.17,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ETHUSDT_1790910698705",
+        "sym": "ETHUSDT",
+        "realizedR": 0.29,
+        "peakR": 0,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XPLUSDT_1790910970589",
+        "sym": "XPLUSDT",
+        "realizedR": 0.22,
+        "peakR": 0.12,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XRPUSDT_1790913227239",
+        "sym": "XRPUSDT",
+        "realizedR": 1.48,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "BTCUSDT_1790909799408",
+        "sym": "BTCUSDT",
+        "realizedR": 2.66,
+        "peakR": 0.01,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ARUSDT_1790907069406",
+        "sym": "ARUSDT",
+        "realizedR": -0.43,
+        "peakR": 0.12,
+        "giveback": 0.55,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "DRAMUSDT_1790896149499",
+        "sym": "DRAMUSDT",
+        "realizedR": 0.39,
+        "peakR": 0.52,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790909768838",
+        "sym": "WIFUSDT",
+        "realizedR": 0.02,
+        "peakR": 0.1,
+        "giveback": 0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790907429107",
+        "sym": "WIFUSDT",
+        "realizedR": 0.07,
+        "peakR": 0.3,
+        "giveback": 0.23,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MVLLUSDT_1790900712531",
+        "sym": "MVLLUSDT",
+        "realizedR": -0.56,
+        "peakR": 0,
+        "giveback": 0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790900288024",
+        "sym": "TRUMPUSDT",
+        "realizedR": -0.64,
+        "peakR": 0.03,
+        "giveback": 0.67,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "AAVEUSDT_1790895964970",
+        "sym": "AAVEUSDT",
+        "realizedR": -0.26,
+        "peakR": 0.08,
+        "giveback": 0.34,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "GRASSUSDT_1790860203592",
+        "sym": "GRASSUSDT",
+        "realizedR": -1.07,
+        "peakR": 0.52,
+        "giveback": 1.59,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "AAPLUSDT_1790860713443",
+        "sym": "AAPLUSDT",
+        "realizedR": 0.11,
+        "peakR": 0.02,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "MUUSDT_1790859365793",
+        "sym": "MUUSDT",
+        "realizedR": 0.33,
+        "peakR": 0.83,
+        "giveback": 0.5,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "MUUUSDT_1790859398137",
+        "sym": "MUUUSDT",
+        "realizedR": 0.33,
+        "peakR": 0.86,
+        "giveback": 0.53,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "CBRSUSDT_1790860362092",
+        "sym": "CBRSUSDT",
+        "realizedR": -2.68,
+        "peakR": 0.16,
+        "giveback": 2.84,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "1000PEPEUSDT_1790849132245",
+        "sym": "1000PEPEUSDT",
+        "realizedR": -1,
+        "peakR": 0.11,
+        "giveback": 1.11,
+        "exitReason": "SL Hit"
+      }
+    ]
+  },
+  "m1": {
+    "model": "MODEL_1_MODEL_B",
+    "trades": 28,
+    "netR": 0.34,
+    "avgR": 0.01,
+    "pf": 1.04,
+    "winRate": 50,
+    "maxDD": 5.14,
+    "avgWinner": 0.66,
+    "avgLoser": 0.69,
+    "tp1Rate": 7.1,
+    "tp2Rate": 0,
+    "mfeCapturePct": 128.4,
+    "avgGiveback": 0.47,
+    "results": [
+      {
+        "id": "INTCUSDT_1790927953435",
+        "sym": "INTCUSDT",
+        "realizedR": 0.76,
+        "peakR": 0.89,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PUMPUSDT_1790926145798",
+        "sym": "PUMPUSDT",
+        "realizedR": -0.6,
+        "peakR": 0.52,
+        "giveback": 1.12,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "MUUSDT_1790928103048",
+        "sym": "MUUSDT",
+        "realizedR": 1.34,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ZROUSDT_1790924204676",
+        "sym": "ZROUSDT",
+        "realizedR": -0.38,
+        "peakR": 0,
+        "giveback": 0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PENDLEUSDT_1790923216156",
+        "sym": "PENDLEUSDT",
+        "realizedR": 0.16,
+        "peakR": 0.35,
+        "giveback": 0.19,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "DASHUSDT_1790918834809",
+        "sym": "DASHUSDT",
+        "realizedR": -0.16,
+        "peakR": 0.35,
+        "giveback": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790907488642",
+        "sym": "TRUMPUSDT",
+        "realizedR": 0.56,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MRVLUSDT_1790907702615",
+        "sym": "MRVLUSDT",
+        "realizedR": -0.09,
+        "peakR": 0.44,
+        "giveback": 0.53,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "NVDAUSDT_1790917332996",
+        "sym": "NVDAUSDT",
+        "realizedR": -0.42,
+        "peakR": 0.09,
+        "giveback": 0.51,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "LITEUSDT_1790911093836",
+        "sym": "LITEUSDT",
+        "realizedR": -0.63,
+        "peakR": 0.39,
+        "giveback": 1.02,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "BNBUSDT_1790913249256",
+        "sym": "BNBUSDT",
+        "realizedR": 0.24,
+        "peakR": 0.17,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ETHUSDT_1790910698705",
+        "sym": "ETHUSDT",
+        "realizedR": 0.29,
+        "peakR": 0,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XPLUSDT_1790910970589",
+        "sym": "XPLUSDT",
+        "realizedR": 0.22,
+        "peakR": 0.12,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XRPUSDT_1790913227239",
+        "sym": "XRPUSDT",
+        "realizedR": 1.48,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "BTCUSDT_1790909799408",
+        "sym": "BTCUSDT",
+        "realizedR": 2.66,
+        "peakR": 0.01,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ARUSDT_1790907069406",
+        "sym": "ARUSDT",
+        "realizedR": -0.43,
+        "peakR": 0.12,
+        "giveback": 0.55,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "DRAMUSDT_1790896149499",
+        "sym": "DRAMUSDT",
+        "realizedR": 0.39,
+        "peakR": 0.52,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790909768838",
+        "sym": "WIFUSDT",
+        "realizedR": 0.02,
+        "peakR": 0.1,
+        "giveback": 0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790907429107",
+        "sym": "WIFUSDT",
+        "realizedR": 0.07,
+        "peakR": 0.3,
+        "giveback": 0.23,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MVLLUSDT_1790900712531",
+        "sym": "MVLLUSDT",
+        "realizedR": -0.56,
+        "peakR": 0,
+        "giveback": 0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790900288024",
+        "sym": "TRUMPUSDT",
+        "realizedR": -0.64,
+        "peakR": 0.03,
+        "giveback": 0.67,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "AAVEUSDT_1790895964970",
+        "sym": "AAVEUSDT",
+        "realizedR": -0.26,
+        "peakR": 0.08,
+        "giveback": 0.34,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "GRASSUSDT_1790860203592",
+        "sym": "GRASSUSDT",
+        "realizedR": -1.07,
+        "peakR": 0.52,
+        "giveback": 1.59,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "AAPLUSDT_1790860713443",
+        "sym": "AAPLUSDT",
+        "realizedR": 0.11,
+        "peakR": 0.02,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "MUUSDT_1790859365793",
+        "sym": "MUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.83,
+        "giveback": 0.35,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "MUUUSDT_1790859398137",
+        "sym": "MUUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.86,
+        "giveback": 0.38,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "CBRSUSDT_1790860362092",
+        "sym": "CBRSUSDT",
+        "realizedR": -2.68,
+        "peakR": 0.16,
+        "giveback": 2.84,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "1000PEPEUSDT_1790849132245",
+        "sym": "1000PEPEUSDT",
+        "realizedR": -1,
+        "peakR": 0.11,
+        "giveback": 1.11,
+        "exitReason": "SL Hit"
+      }
+    ]
+  },
+  "m2": {
+    "model": "MODEL_2_STRUCTURE",
+    "trades": 28,
+    "netR": 0.34,
+    "avgR": 0.01,
+    "pf": 1.04,
+    "winRate": 50,
+    "maxDD": 5.14,
+    "avgWinner": 0.66,
+    "avgLoser": 0.69,
+    "tp1Rate": 7.1,
+    "tp2Rate": 0,
+    "mfeCapturePct": 128.4,
+    "avgGiveback": 0.47,
+    "results": [
+      {
+        "id": "INTCUSDT_1790927953435",
+        "sym": "INTCUSDT",
+        "realizedR": 0.76,
+        "peakR": 0.89,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PUMPUSDT_1790926145798",
+        "sym": "PUMPUSDT",
+        "realizedR": -0.6,
+        "peakR": 0.52,
+        "giveback": 1.12,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "MUUSDT_1790928103048",
+        "sym": "MUUSDT",
+        "realizedR": 1.34,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ZROUSDT_1790924204676",
+        "sym": "ZROUSDT",
+        "realizedR": -0.38,
+        "peakR": 0,
+        "giveback": 0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PENDLEUSDT_1790923216156",
+        "sym": "PENDLEUSDT",
+        "realizedR": 0.16,
+        "peakR": 0.35,
+        "giveback": 0.19,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "DASHUSDT_1790918834809",
+        "sym": "DASHUSDT",
+        "realizedR": -0.16,
+        "peakR": 0.35,
+        "giveback": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790907488642",
+        "sym": "TRUMPUSDT",
+        "realizedR": 0.56,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MRVLUSDT_1790907702615",
+        "sym": "MRVLUSDT",
+        "realizedR": -0.09,
+        "peakR": 0.44,
+        "giveback": 0.53,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "NVDAUSDT_1790917332996",
+        "sym": "NVDAUSDT",
+        "realizedR": -0.42,
+        "peakR": 0.09,
+        "giveback": 0.51,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "LITEUSDT_1790911093836",
+        "sym": "LITEUSDT",
+        "realizedR": -0.63,
+        "peakR": 0.39,
+        "giveback": 1.02,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "BNBUSDT_1790913249256",
+        "sym": "BNBUSDT",
+        "realizedR": 0.24,
+        "peakR": 0.17,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ETHUSDT_1790910698705",
+        "sym": "ETHUSDT",
+        "realizedR": 0.29,
+        "peakR": 0,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XPLUSDT_1790910970589",
+        "sym": "XPLUSDT",
+        "realizedR": 0.22,
+        "peakR": 0.12,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XRPUSDT_1790913227239",
+        "sym": "XRPUSDT",
+        "realizedR": 1.48,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "BTCUSDT_1790909799408",
+        "sym": "BTCUSDT",
+        "realizedR": 2.66,
+        "peakR": 0.01,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ARUSDT_1790907069406",
+        "sym": "ARUSDT",
+        "realizedR": -0.43,
+        "peakR": 0.12,
+        "giveback": 0.55,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "DRAMUSDT_1790896149499",
+        "sym": "DRAMUSDT",
+        "realizedR": 0.39,
+        "peakR": 0.52,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790909768838",
+        "sym": "WIFUSDT",
+        "realizedR": 0.02,
+        "peakR": 0.1,
+        "giveback": 0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790907429107",
+        "sym": "WIFUSDT",
+        "realizedR": 0.07,
+        "peakR": 0.3,
+        "giveback": 0.23,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MVLLUSDT_1790900712531",
+        "sym": "MVLLUSDT",
+        "realizedR": -0.56,
+        "peakR": 0,
+        "giveback": 0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790900288024",
+        "sym": "TRUMPUSDT",
+        "realizedR": -0.64,
+        "peakR": 0.03,
+        "giveback": 0.67,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "AAVEUSDT_1790895964970",
+        "sym": "AAVEUSDT",
+        "realizedR": -0.26,
+        "peakR": 0.08,
+        "giveback": 0.34,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "GRASSUSDT_1790860203592",
+        "sym": "GRASSUSDT",
+        "realizedR": -1.07,
+        "peakR": 0.52,
+        "giveback": 1.59,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "AAPLUSDT_1790860713443",
+        "sym": "AAPLUSDT",
+        "realizedR": 0.11,
+        "peakR": 0.02,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "MUUSDT_1790859365793",
+        "sym": "MUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.83,
+        "giveback": 0.35,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "MUUUSDT_1790859398137",
+        "sym": "MUUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.86,
+        "giveback": 0.38,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "CBRSUSDT_1790860362092",
+        "sym": "CBRSUSDT",
+        "realizedR": -2.68,
+        "peakR": 0.16,
+        "giveback": 2.84,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "1000PEPEUSDT_1790849132245",
+        "sym": "1000PEPEUSDT",
+        "realizedR": -1,
+        "peakR": 0.11,
+        "giveback": 1.11,
+        "exitReason": "SL Hit"
+      }
+    ]
+  },
+  "m3": {
+    "model": "MODEL_3_REVERSAL",
+    "trades": 28,
+    "netR": 0.34,
+    "avgR": 0.01,
+    "pf": 1.04,
+    "winRate": 50,
+    "maxDD": 5.14,
+    "avgWinner": 0.66,
+    "avgLoser": 0.69,
+    "tp1Rate": 7.1,
+    "tp2Rate": 0,
+    "mfeCapturePct": 128.4,
+    "avgGiveback": 0.47,
+    "results": [
+      {
+        "id": "INTCUSDT_1790927953435",
+        "sym": "INTCUSDT",
+        "realizedR": 0.76,
+        "peakR": 0.89,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PUMPUSDT_1790926145798",
+        "sym": "PUMPUSDT",
+        "realizedR": -0.6,
+        "peakR": 0.52,
+        "giveback": 1.12,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "MUUSDT_1790928103048",
+        "sym": "MUUSDT",
+        "realizedR": 1.34,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ZROUSDT_1790924204676",
+        "sym": "ZROUSDT",
+        "realizedR": -0.38,
+        "peakR": 0,
+        "giveback": 0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PENDLEUSDT_1790923216156",
+        "sym": "PENDLEUSDT",
+        "realizedR": 0.16,
+        "peakR": 0.35,
+        "giveback": 0.19,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "DASHUSDT_1790918834809",
+        "sym": "DASHUSDT",
+        "realizedR": -0.16,
+        "peakR": 0.35,
+        "giveback": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790907488642",
+        "sym": "TRUMPUSDT",
+        "realizedR": 0.56,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MRVLUSDT_1790907702615",
+        "sym": "MRVLUSDT",
+        "realizedR": -0.09,
+        "peakR": 0.44,
+        "giveback": 0.53,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "NVDAUSDT_1790917332996",
+        "sym": "NVDAUSDT",
+        "realizedR": -0.42,
+        "peakR": 0.09,
+        "giveback": 0.51,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "LITEUSDT_1790911093836",
+        "sym": "LITEUSDT",
+        "realizedR": -0.63,
+        "peakR": 0.39,
+        "giveback": 1.02,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "BNBUSDT_1790913249256",
+        "sym": "BNBUSDT",
+        "realizedR": 0.24,
+        "peakR": 0.17,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ETHUSDT_1790910698705",
+        "sym": "ETHUSDT",
+        "realizedR": 0.29,
+        "peakR": 0,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XPLUSDT_1790910970589",
+        "sym": "XPLUSDT",
+        "realizedR": 0.22,
+        "peakR": 0.12,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XRPUSDT_1790913227239",
+        "sym": "XRPUSDT",
+        "realizedR": 1.48,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "BTCUSDT_1790909799408",
+        "sym": "BTCUSDT",
+        "realizedR": 2.66,
+        "peakR": 0.01,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ARUSDT_1790907069406",
+        "sym": "ARUSDT",
+        "realizedR": -0.43,
+        "peakR": 0.12,
+        "giveback": 0.55,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "DRAMUSDT_1790896149499",
+        "sym": "DRAMUSDT",
+        "realizedR": 0.39,
+        "peakR": 0.52,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790909768838",
+        "sym": "WIFUSDT",
+        "realizedR": 0.02,
+        "peakR": 0.1,
+        "giveback": 0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790907429107",
+        "sym": "WIFUSDT",
+        "realizedR": 0.07,
+        "peakR": 0.3,
+        "giveback": 0.23,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MVLLUSDT_1790900712531",
+        "sym": "MVLLUSDT",
+        "realizedR": -0.56,
+        "peakR": 0,
+        "giveback": 0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790900288024",
+        "sym": "TRUMPUSDT",
+        "realizedR": -0.64,
+        "peakR": 0.03,
+        "giveback": 0.67,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "AAVEUSDT_1790895964970",
+        "sym": "AAVEUSDT",
+        "realizedR": -0.26,
+        "peakR": 0.08,
+        "giveback": 0.34,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "GRASSUSDT_1790860203592",
+        "sym": "GRASSUSDT",
+        "realizedR": -1.07,
+        "peakR": 0.52,
+        "giveback": 1.59,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "AAPLUSDT_1790860713443",
+        "sym": "AAPLUSDT",
+        "realizedR": 0.11,
+        "peakR": 0.02,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "MUUSDT_1790859365793",
+        "sym": "MUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.83,
+        "giveback": 0.35,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "MUUUSDT_1790859398137",
+        "sym": "MUUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.86,
+        "giveback": 0.38,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "CBRSUSDT_1790860362092",
+        "sym": "CBRSUSDT",
+        "realizedR": -2.68,
+        "peakR": 0.16,
+        "giveback": 2.84,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "1000PEPEUSDT_1790849132245",
+        "sym": "1000PEPEUSDT",
+        "realizedR": -1,
+        "peakR": 0.11,
+        "giveback": 1.11,
+        "exitReason": "SL Hit"
+      }
+    ]
+  },
+  "m4": {
+    "model": "MODEL_4_GIVEBACK",
+    "trades": 28,
+    "netR": 0.34,
+    "avgR": 0.01,
+    "pf": 1.04,
+    "winRate": 50,
+    "maxDD": 5.14,
+    "avgWinner": 0.66,
+    "avgLoser": 0.69,
+    "tp1Rate": 7.1,
+    "tp2Rate": 0,
+    "mfeCapturePct": 128.4,
+    "avgGiveback": 0.47,
+    "results": [
+      {
+        "id": "INTCUSDT_1790927953435",
+        "sym": "INTCUSDT",
+        "realizedR": 0.76,
+        "peakR": 0.89,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PUMPUSDT_1790926145798",
+        "sym": "PUMPUSDT",
+        "realizedR": -0.6,
+        "peakR": 0.52,
+        "giveback": 1.12,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "MUUSDT_1790928103048",
+        "sym": "MUUSDT",
+        "realizedR": 1.34,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ZROUSDT_1790924204676",
+        "sym": "ZROUSDT",
+        "realizedR": -0.38,
+        "peakR": 0,
+        "giveback": 0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PENDLEUSDT_1790923216156",
+        "sym": "PENDLEUSDT",
+        "realizedR": 0.16,
+        "peakR": 0.35,
+        "giveback": 0.19,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "DASHUSDT_1790918834809",
+        "sym": "DASHUSDT",
+        "realizedR": -0.16,
+        "peakR": 0.35,
+        "giveback": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790907488642",
+        "sym": "TRUMPUSDT",
+        "realizedR": 0.56,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MRVLUSDT_1790907702615",
+        "sym": "MRVLUSDT",
+        "realizedR": -0.09,
+        "peakR": 0.44,
+        "giveback": 0.53,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "NVDAUSDT_1790917332996",
+        "sym": "NVDAUSDT",
+        "realizedR": -0.42,
+        "peakR": 0.09,
+        "giveback": 0.51,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "LITEUSDT_1790911093836",
+        "sym": "LITEUSDT",
+        "realizedR": -0.63,
+        "peakR": 0.39,
+        "giveback": 1.02,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "BNBUSDT_1790913249256",
+        "sym": "BNBUSDT",
+        "realizedR": 0.24,
+        "peakR": 0.17,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ETHUSDT_1790910698705",
+        "sym": "ETHUSDT",
+        "realizedR": 0.29,
+        "peakR": 0,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XPLUSDT_1790910970589",
+        "sym": "XPLUSDT",
+        "realizedR": 0.22,
+        "peakR": 0.12,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XRPUSDT_1790913227239",
+        "sym": "XRPUSDT",
+        "realizedR": 1.48,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "BTCUSDT_1790909799408",
+        "sym": "BTCUSDT",
+        "realizedR": 2.66,
+        "peakR": 0.01,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ARUSDT_1790907069406",
+        "sym": "ARUSDT",
+        "realizedR": -0.43,
+        "peakR": 0.12,
+        "giveback": 0.55,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "DRAMUSDT_1790896149499",
+        "sym": "DRAMUSDT",
+        "realizedR": 0.39,
+        "peakR": 0.52,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790909768838",
+        "sym": "WIFUSDT",
+        "realizedR": 0.02,
+        "peakR": 0.1,
+        "giveback": 0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790907429107",
+        "sym": "WIFUSDT",
+        "realizedR": 0.07,
+        "peakR": 0.3,
+        "giveback": 0.23,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MVLLUSDT_1790900712531",
+        "sym": "MVLLUSDT",
+        "realizedR": -0.56,
+        "peakR": 0,
+        "giveback": 0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790900288024",
+        "sym": "TRUMPUSDT",
+        "realizedR": -0.64,
+        "peakR": 0.03,
+        "giveback": 0.67,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "AAVEUSDT_1790895964970",
+        "sym": "AAVEUSDT",
+        "realizedR": -0.26,
+        "peakR": 0.08,
+        "giveback": 0.34,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "GRASSUSDT_1790860203592",
+        "sym": "GRASSUSDT",
+        "realizedR": -1.07,
+        "peakR": 0.52,
+        "giveback": 1.59,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "AAPLUSDT_1790860713443",
+        "sym": "AAPLUSDT",
+        "realizedR": 0.11,
+        "peakR": 0.02,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "MUUSDT_1790859365793",
+        "sym": "MUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.83,
+        "giveback": 0.35,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "MUUUSDT_1790859398137",
+        "sym": "MUUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.86,
+        "giveback": 0.38,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "CBRSUSDT_1790860362092",
+        "sym": "CBRSUSDT",
+        "realizedR": -2.68,
+        "peakR": 0.16,
+        "giveback": 2.84,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "1000PEPEUSDT_1790849132245",
+        "sym": "1000PEPEUSDT",
+        "realizedR": -1,
+        "peakR": 0.11,
+        "giveback": 1.11,
+        "exitReason": "SL Hit"
+      }
+    ]
+  },
+  "m5": {
+    "model": "MODEL_5_HYBRID",
+    "trades": 28,
+    "netR": 0.34,
+    "avgR": 0.01,
+    "pf": 1.04,
+    "winRate": 50,
+    "maxDD": 5.14,
+    "avgWinner": 0.66,
+    "avgLoser": 0.69,
+    "tp1Rate": 7.1,
+    "tp2Rate": 0,
+    "mfeCapturePct": 128.4,
+    "avgGiveback": 0.47,
+    "results": [
+      {
+        "id": "INTCUSDT_1790927953435",
+        "sym": "INTCUSDT",
+        "realizedR": 0.76,
+        "peakR": 0.89,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PUMPUSDT_1790926145798",
+        "sym": "PUMPUSDT",
+        "realizedR": -0.6,
+        "peakR": 0.52,
+        "giveback": 1.12,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "MUUSDT_1790928103048",
+        "sym": "MUUSDT",
+        "realizedR": 1.34,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ZROUSDT_1790924204676",
+        "sym": "ZROUSDT",
+        "realizedR": -0.38,
+        "peakR": 0,
+        "giveback": 0.38,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "PENDLEUSDT_1790923216156",
+        "sym": "PENDLEUSDT",
+        "realizedR": 0.16,
+        "peakR": 0.35,
+        "giveback": 0.19,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "DASHUSDT_1790918834809",
+        "sym": "DASHUSDT",
+        "realizedR": -0.16,
+        "peakR": 0.35,
+        "giveback": 0.51,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790907488642",
+        "sym": "TRUMPUSDT",
+        "realizedR": 0.56,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MRVLUSDT_1790907702615",
+        "sym": "MRVLUSDT",
+        "realizedR": -0.09,
+        "peakR": 0.44,
+        "giveback": 0.53,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "NVDAUSDT_1790917332996",
+        "sym": "NVDAUSDT",
+        "realizedR": -0.42,
+        "peakR": 0.09,
+        "giveback": 0.51,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "LITEUSDT_1790911093836",
+        "sym": "LITEUSDT",
+        "realizedR": -0.63,
+        "peakR": 0.39,
+        "giveback": 1.02,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "BNBUSDT_1790913249256",
+        "sym": "BNBUSDT",
+        "realizedR": 0.24,
+        "peakR": 0.17,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ETHUSDT_1790910698705",
+        "sym": "ETHUSDT",
+        "realizedR": 0.29,
+        "peakR": 0,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XPLUSDT_1790910970589",
+        "sym": "XPLUSDT",
+        "realizedR": 0.22,
+        "peakR": 0.12,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "XRPUSDT_1790913227239",
+        "sym": "XRPUSDT",
+        "realizedR": 1.48,
+        "peakR": 0.08,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "BTCUSDT_1790909799408",
+        "sym": "BTCUSDT",
+        "realizedR": 2.66,
+        "peakR": 0.01,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "ARUSDT_1790907069406",
+        "sym": "ARUSDT",
+        "realizedR": -0.43,
+        "peakR": 0.12,
+        "giveback": 0.55,
+        "exitReason": "Early Invalidation"
+      },
+      {
+        "id": "DRAMUSDT_1790896149499",
+        "sym": "DRAMUSDT",
+        "realizedR": 0.39,
+        "peakR": 0.52,
+        "giveback": 0.13,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790909768838",
+        "sym": "WIFUSDT",
+        "realizedR": 0.02,
+        "peakR": 0.1,
+        "giveback": 0.08,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "WIFUSDT_1790907429107",
+        "sym": "WIFUSDT",
+        "realizedR": 0.07,
+        "peakR": 0.3,
+        "giveback": 0.23,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "MVLLUSDT_1790900712531",
+        "sym": "MVLLUSDT",
+        "realizedR": -0.56,
+        "peakR": 0,
+        "giveback": 0.56,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "TRUMPUSDT_1790900288024",
+        "sym": "TRUMPUSDT",
+        "realizedR": -0.64,
+        "peakR": 0.03,
+        "giveback": 0.67,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "AAVEUSDT_1790895964970",
+        "sym": "AAVEUSDT",
+        "realizedR": -0.26,
+        "peakR": 0.08,
+        "giveback": 0.34,
+        "exitReason": "Manual/Emergency Exit"
+      },
+      {
+        "id": "GRASSUSDT_1790860203592",
+        "sym": "GRASSUSDT",
+        "realizedR": -1.07,
+        "peakR": 0.52,
+        "giveback": 1.59,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "AAPLUSDT_1790860713443",
+        "sym": "AAPLUSDT",
+        "realizedR": 0.11,
+        "peakR": 0.02,
+        "giveback": 0,
+        "exitReason": "Breakeven Protected Exit"
+      },
+      {
+        "id": "MUUSDT_1790859365793",
+        "sym": "MUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.83,
+        "giveback": 0.35,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "MUUUSDT_1790859398137",
+        "sym": "MUUUSDT",
+        "realizedR": 0.48,
+        "peakR": 0.86,
+        "giveback": 0.38,
+        "exitReason": "Protected SL Hit"
+      },
+      {
+        "id": "CBRSUSDT_1790860362092",
+        "sym": "CBRSUSDT",
+        "realizedR": -2.68,
+        "peakR": 0.16,
+        "giveback": 2.84,
+        "exitReason": "SL Hit"
+      },
+      {
+        "id": "1000PEPEUSDT_1790849132245",
+        "sym": "1000PEPEUSDT",
+        "realizedR": -1,
+        "peakR": 0.11,
+        "giveback": 1.11,
+        "exitReason": "SL Hit"
+      }
+    ]
+  }
+}
