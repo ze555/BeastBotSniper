@@ -144,7 +144,7 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  const entryFill=trade.entry_price*(isLong?1+cfg.slippageRate:1-cfg.slippageRate);
  let stop=isLong?trade.entry_price-riskDist:trade.entry_price+riskDist,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
  let a=false,b=false,microProtected=false;
- const closeFraction=(fraction:number,reference:number)=>{const f=Math.min(remaining,fraction);if(f<=0)return;const fill=reference*(isLong?1-cfg.slippageRate:1+cfg.slippageRate);const units=qty*f;gross+=(isLong?fill-entryFill:entryFill-fill)*units;fees+=((entryFill+fill)*units)*cfg.feeRate;remaining-=f;lastExit=fill;partialFills++;};
+ const closeFraction=(fraction:number,reference:number)=>{const f=Math.min(remaining,fraction);if(f<=0)return;const fill=reference*(isLong?1-cfg.slippageRate:1+cfg.slippageRate);const units=qty*f;gross+=(isLong?fill-entryFill:entryFill-fill)*units;fees+=fill*units*cfg.feeRate;remaining-=f;lastExit=fill;partialFills++;};
  for(let i=0;i<timeline.length&&remaining>1e-9;i++){
   const c=timeline[i];const stopHit=isLong?c.low<=stop:c.high>=stop;
   const targets=[!a?trade.take_profit_1:NaN,!b?trade.take_profit_2:NaN,(a&&b)?trade.take_profit_3:NaN].filter(finite);
