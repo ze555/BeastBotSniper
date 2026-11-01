@@ -139,9 +139,6 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  if(!Array.isArray(candles)||!candles.length)return invalid("NO_CANDLES","No 1m candles");
  const entryMs=Date.parse(trade.timestamp_entry),exitMs=Date.parse(trade.timestamp_exit);
  const tp1R=finite(trade.tp1_r??NaN)&&Number(trade.tp1_r)>0?Number(trade.tp1_r):0.75; 
- const tp2Fraction=finite(trade.part_b??NaN)?Number(trade.part_b):cfg.tp2Fraction; 
- const tp1Fraction=finite(trade.part_a??NaN)?Number(trade.part_a):cfg.tp1Fraction; 
- const tp3Fraction=finite(trade.part_c??NaN)?Number(trade.part_c):cfg.tp3Fraction; 
  const tpRiskDistance=Math.abs(trade.take_profit_1-trade.entry_price)/tp1R;
  const storedRiskDistance=Number(trade.initial_sl_dist);
  const riskDist=finite(storedRiskDistance)&&storedRiskDistance>0?storedRiskDistance:(finite(tpRiskDistance)&&tpRiskDistance>0?tpRiskDistance:Math.abs(trade.entry_price-trade.stop_loss));
