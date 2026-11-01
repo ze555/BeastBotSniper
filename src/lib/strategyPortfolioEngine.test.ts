@@ -60,7 +60,7 @@ const confirmedLongContext={oiAvailable:true,oiChangePct:0.002,priceChangePct:0.
  const reversalLong=evaluateStrategyPortfolio(reversal,confirmedLongContext)[0].candidates.find(x=>x.strategy==="LIQUIDITY_REVERSAL");
  assert.equal(reversalLong?.accepted,true,"liquidity reversal candidate should pass a sweep and reclaim");
  const momentum=flatCandles();
- momentum.push({time:40,open:100,high:101.7,low:99.9,close:101.5,volume:2200,takerBuyBase:1500});
+ momentum.push({time:40,open:100,high:101.0,low:99.8,close:100.9,volume:2200,takerBuyBase:1500});
  const momentumLong=evaluateStrategyPortfolio(momentum,confirmedLongContext)[0].candidates.find(x=>x.strategy==="MOMENTUM_EXPANSION");
  assert.equal(momentumLong?.accepted,true,"momentum expansion candidate should pass directional range and volume expansion");
  const noBook=evaluateStrategyPortfolio(trend,{...confirmedLongContext,orderBookAvailable:false})[0].candidates.find(x=>x.strategy==="TREND_RIDER");
