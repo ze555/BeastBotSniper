@@ -1392,7 +1392,7 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
             strongAcc: w.strong_acc ? "حركة مستويات السيولة العالية" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (مفتوحة)" : "تصريف عقود",
+            institutionalBias: w.oi_available ? (w.oi_chg > 0 ? "تراكم عقود (مفتوحة)" : "تصريف عقود") : "بيانات OI غير متاحة",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
@@ -1464,7 +1464,7 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
             strongAcc: w.strong_dis ? "تفريغ السيولة المؤسساتي" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (شورت)" : "إغلاق صفقات",
+            institutionalBias: w.oi_available ? (w.oi_chg > 0 ? "تراكم عقود (شورت)" : "إغلاق صفقات") : "بيانات OI غير متاحة",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
