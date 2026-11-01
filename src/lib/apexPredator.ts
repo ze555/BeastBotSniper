@@ -772,6 +772,28 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
       const stopDistancePct = Math.abs(executionPrice-candidate.stopReference)/executionPrice;
       if (!Number.isFinite(stopDistancePct) || stopDistancePct < 0.001 || stopDistancePct > 0.04) return { signal: "WAIT", reason: "Live price moved the stop outside the permitted 0.10%-4.00% risk band" };
+
+      // Preserve the repository's tri-regime and execution safety layers around the new strategy portfolio.
+      const assetRegime = p.bull_align ? "TREND_UP" : p.bear_align ? "TREND_DOWN" : "RANGE";
+      const candidateSetupType = candidate.strategy === "TREND_RIDER" ? "PULLBACK_SNIPER"
+         : candidate.strategy === "LIQUIDITY_REVERSAL" ? "BOUNCE_SNIPER" : "BREAKOUT_MOMENTUM";
+      const candidatePriceData = { ...p, price: executionPrice, setupType: candidateSetupType };
+      const candidateLocation = {
+         nearSupport: Math.abs(executionPrice-p.sup10)/executionPrice < 0.004,
+         nearResistance: Math.abs(p.res10-executionPrice)/executionPrice < 0.004,
+         distanceToSupportPct: (executionPrice-p.sup10)/executionPrice,
+         distanceToResistancePct: (p.res10-executionPrice)/executionPrice
+      };
+      const triRegimeGate = evaluateTriRegimeExecution(
+         candidate.side, ctx, candidatePriceData, w, candidateLocation,
+         candidate.strategy === "LIQUIDITY_REVERSAL" ? "MEAN_REVERSION" : "CAPITAL_DEFENSE"
+      );
+      if (!triRegimeGate.allowed) return { signal: "WAIT", reason: triRegimeGate.reason, triRegimeGate };
+      const executionGate = evaluateExecutionFilter(candidate.side, ctx.regime, assetRegime, {
+         rvol: p.rvol, adx: p.adx, hourUtc: new Date().getUTCHours()
+      });
+      if (!executionGate.allowed) return { signal: "WAIT", reason: executionGate.reason || "Execution filter blocked candidate", executionGate };
+
       const currentOpenRiskFraction = activeTrades.reduce((sum: number,t: any) => sum+(Math.abs(t.initialSlDist||0)*Math.max(0,Number(t.pos)||0))/Math.max(virtualBalance,1),0);
       const openFloating = activeTrades.reduce((sum: number,t: any) => sum+(Number(t.pnl)||0),0);
       const risk = evaluateRiskGuardian({
@@ -782,7 +804,6 @@ async function scoreEntry(symbol: string, ctx: any) {
       });
       if (!risk.allowed) return { signal: "WAIT", reason: `Portfolio risk guardian: ${risk.reason}` };
 
-      const assetRegime = p.bull_align ? "TREND_UP" : p.bear_align ? "TREND_DOWN" : "TRANSITION";
       const strategyReasoning = {
          regime: assetRegime, flow: { state: w.scenario, persistenceState: w.cvd_mixed ? "CONFLICTED" : "OBSERVED" },
          scenario: { primary: { type: candidate.strategy, bias: candidate.side } },
@@ -794,7 +815,7 @@ async function scoreEntry(symbol: string, ctx: any) {
       const closedLow = closedKlines.map((k: any) => k.low);
       const closedClose = closedKlines.map((k: any) => k.close);
       const closedAtr14 = calcATR(closedHigh, closedLow, closedClose, 14).pop() || p.atr14;
-      const executionPriceData = { ...p, price: executionPrice, atr14: closedAtr14, klines: closedKlines };
+      const executionPriceData = { ...p, price: executionPrice, atr14: closedAtr14, klines: closedKlines, setupType: candidateSetupType };
       const strategyLabels: Record<string,string> = { TREND_RIDER: "Trend Rider", BREAKOUT_RETEST: "Breakout Retest", LIQUIDITY_REVERSAL: "Liquidity Reversal", MOMENTUM_EXPANSION: "Momentum Expansion" };
       addLog(`🧭 [PORTFOLIO CANDIDATE] ${candidate.strategy} ${candidate.side} ${symbol} | score ${candidate.score}/10 | risk ${risk.riskUsd.toFixed(2)} | ${candidate.reasons.join("; ")}`, "info");
       if (candidate.side === "LONG") apexPredatorStats.acceptedLongs++; else apexPredatorStats.acceptedShorts++;
