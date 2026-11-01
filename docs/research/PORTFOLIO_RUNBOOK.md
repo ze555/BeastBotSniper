@@ -44,11 +44,18 @@ The replay reads `study_all_trades_master.json` and `master_candles_1m.json` fro
 The API route `POST /api/predator/config` accepts a minimal body such as `{"strategyPortfolioEnabled":true}`; balance and max-trade settings are preserved when omitted. It is intended only for isolated virtual/paper evaluation. The flag is false by default and should be explicitly set back to false after a test. The portfolio path:
 - uses closed BTC 4h/15m and asset 15m/5m/4h candles for signal formation;
 - obtains a fresh ticker price before sizing;
-- tries accepted candidates in score order and falls through to the next strategy if a higher-scored candidate fails a safety gate;\n- applies the existing tri-regime evaluator and execution filter;
-- checks the portfolio risk guardian;
+- evaluates the four strategy families in deterministic order with no score or ranking; each accepted candidate still passes the existing tri-regime evaluator and execution filter;\n- tries the next accepted candidate if an earlier candidate fails a safety gate;\n- checks the portfolio risk guardian;
 - uses the existing virtual-trade executor and existing `exitBrain`.
 
 The portfolio path uses the existing `exitBrain`, but its target R levels and partial allocations are now stored per trade and honored by that exit manager. Current plans are: trend/breakout 0.75R/1.8R/3.5R at 40/35/25; momentum 0.75R/1.5R/3.0R at 40/35/25; liquidity reversal outside range 0.75R/1.5R/2.5R at 40/35/25; tri-regime range scalp 0.8R/1.0R/1.0R at 50/50/0. Common stop progression remains +0.45R to -0.25R protection, then +0.30R after TP1, then to the trade-specific TP1-R level after TP2. The existing institutional guard, time-decay logic and ATR runner trail still apply. The historical partial-exit simulator models the soft-protection and fixed stop progression but does not fully reproduce the institutional guard, time-decay or ATR runner exits.
+
+## Deployment caveats (read before hosting)
+- Build output is served by the long-running Node/Express process: `npm run build`, then `npm run start` (the server listens on `PORT`). This is not a static-site-only deployment; the engine uses a persistent 15-second interval and in-memory runtime state.
+- Use one persistent Node web-service instance for isolated paper testing. A serverless/static preview can validate the frontend bundle but does not prove that the trading engine or API is running continuously.
+- Research logs are written under `data/research` when writable; otherwise the logger falls back to the operating system temporary directory. A persistent host volume must be mounted at the app's `data` directory or the logs may disappear after restart/redeploy.
+- Active/closed virtual trades, virtual balance, cooldowns and daily in-memory counters are process memory, not durable account state. A process restart resets runtime trading state; do not treat this build as restart-safe until state persistence and recovery are implemented and tested.
+- The current Express API exposes bot controls, configuration/reset routes and Gemini analysis without application-level authentication; CORS is permissive. Do not expose the backend publicly until an access-control layer/rate limit is configured or these routes are protected. Keep `GEMINI_API_KEY` server-side and protect the analysis endpoint against quota abuse.
+- The research feature flag remains `false` by default. Enable it only in an isolated paper environment after confirming that live Binance CVD/OI/funding/depth fields are present and fresh. No live exchange order execution is implemented by this research path.
 
 ## Promotion requirements
 A strategy is not promoted unless it has:
