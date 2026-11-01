@@ -290,6 +290,7 @@ const decK = engineK.processCandle(goodEvidenceCandle);
 assert(decK.state === "FORMING_LONG", "Test K: State is FORMING_LONG");
 assert(decK.canEnter === true, "Test K: canEnter is TRUE for FORMING_LONG with complete evidence chain");
 assert(decK.entryType === "FORMING_EARLY", "Test K: entryType is FORMING_EARLY");
+assert(decK.latestTransition?.oi === "NEUTRAL", "Test K: unavailable OI remains NEUTRAL, not falsely SUPPORTIVE");
 
 // -----------------------------------------------------------------------------
 // Test L: FORMING_LONG مع evidence غير كافية (Volume DRY) → WAIT
