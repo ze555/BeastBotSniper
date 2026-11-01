@@ -77,6 +77,10 @@ function flatCandles():StrategyCandle[]{
  assert.equal(malformedRisk.allowed,false,"NaN open-risk state must fail closed");
  const malformedDaily=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:Number.NaN,openPositions:0,correlatedOpenPositions:0});
  assert.equal(malformedDaily.allowed,false,"unknown daily PnL must fail closed");
+ const microscopicStop=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.0001,currentOpenRiskFraction:0,dailyRealizedPnl:0,openPositions:0,correlatedOpenPositions:0});
+ assert.equal(microscopicStop.allowed,false,"microscopic stops must not create unbounded position size");
+ const oversizedStop=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.05,currentOpenRiskFraction:0,dailyRealizedPnl:0,openPositions:0,correlatedOpenPositions:0});
+ assert.equal(oversizedStop.allowed,false,"stop distances outside the permitted band must fail closed");
 }
 {
  const trade={trade_id:"WIN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:03:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:2};
