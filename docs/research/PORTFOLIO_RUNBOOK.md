@@ -40,7 +40,7 @@ The API route `POST /api/predator/config` accepts a minimal body such as `{"stra
 - checks the portfolio risk guardian;
 - uses the existing virtual-trade executor and existing `exitBrain`.
 
-The portfolio path uses the existing `exitBrain`, but its target R levels and partial allocations are now stored per trade and honored by that exit manager. Current plans are: trend/breakout 0.75R/1.8R/3.5R at 40/35/25; momentum 0.75R/1.5R/3.0R at 40/35/25; liquidity reversal outside range 0.75R/1.5R/2.5R at 40/35/25; tri-regime range scalp 0.8R/1.0R/1.0R at 50/50/0. The existing institutional guard, time-decay logic and ATR runner trail still apply. The historical partial-exit simulator remains a simplified research model and does not fully reproduce those dynamic exits.
+The portfolio path uses the existing `exitBrain`, but its target R levels and partial allocations are now stored per trade and honored by that exit manager. Current plans are: trend/breakout 0.75R/1.8R/3.5R at 40/35/25; momentum 0.75R/1.5R/3.0R at 40/35/25; liquidity reversal outside range 0.75R/1.5R/2.5R at 40/35/25; tri-regime range scalp 0.8R/1.0R/1.0R at 50/50/0. Common stop progression remains +0.45R to -0.25R protection, then +0.30R after TP1, then to the trade-specific TP1-R level after TP2. The existing institutional guard, time-decay logic and ATR runner trail still apply. The historical partial-exit simulator models the soft-protection and fixed stop progression but does not fully reproduce the institutional guard, time-decay or ATR runner exits.
 
 ## Promotion requirements
 A strategy is not promoted unless it has:
