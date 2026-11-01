@@ -76,6 +76,7 @@ function flatCandles():StrategyCandle[]{
  assert.equal(r.exitReason,"TP3");
  assert.ok(r.netPnl>15,"simulator uses the recorded 10-unit position size rather than a synthetic half-size");
  assert.ok(r.fees>0);
+ assert.ok(r.fees<1,"entry fee is charged once and exit fees are charged on each partial fill");
 }
 {
  const trade={trade_id:"AMBIG",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:01:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,pnl_r:-1};
