@@ -133,13 +133,15 @@ export function resetAccountState() {
   addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
 }
 
-export function updateConfig(balance: number, maxTrades: number, opts?: any) {
-  initialVirtualBalance = balance;
-  if (opts?.resetAccount || (closedTrades.length === 0 && activeTrades.length === 0)) {
-     virtualBalance = balance;
-     todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+export function updateConfig(balance?: number, maxTrades?: number, opts?: any) {
+  if (Number.isFinite(balance) && Number(balance) > 0) {
+     initialVirtualBalance = Number(balance);
+     if (opts?.resetAccount || (closedTrades.length === 0 && activeTrades.length === 0)) {
+        virtualBalance = Number(balance);
+        todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+     }
   }
-  maxOpenTradesConfig = maxTrades;
+  if (Number.isFinite(maxTrades) && Number(maxTrades) >= 1) maxOpenTradesConfig = Number(maxTrades);
   if (opts) {
       if (opts.haltProfitEnabled !== undefined) haltProfitEnabled = opts.haltProfitEnabled;
       if (opts.haltProfitTarget !== undefined) haltProfitTarget = opts.haltProfitTarget;
