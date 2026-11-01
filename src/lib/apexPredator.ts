@@ -543,10 +543,15 @@ async function getContext() {
 }
 
 // --- SEC 2: WHALE READER ---
-async function readWhale(symbol: string, btc_chg: number) {
-   const c15 = await fetchKl(symbol, "15m", 210);
-   const c5 = await fetchKl(symbol, "5m", 30);
-   const c4h = await fetchKl(symbol, "4h", 20);
+async function readWhale(symbol: string, btc_chg: number, closedOnly: boolean = false) {
+   const raw15 = await fetchKl(symbol, "15m", 210);
+   const raw5 = await fetchKl(symbol, "5m", 30);
+   const raw4h = await fetchKl(symbol, "4h", 20);
+   const closedAt = Date.now();
+   // Portfolio mode is deliberately based only on completed exchange candles.
+   const c15 = closedOnly ? raw15.filter((k: any) => Number(k.closeTime) < closedAt) : raw15;
+   const c5 = closedOnly ? raw5.filter((k: any) => Number(k.closeTime) < closedAt) : raw5;
+   const c4h = closedOnly ? raw4h.filter((k: any) => Number(k.closeTime) < closedAt) : raw4h;
 
    if (c15.length < 20 || c5.length < 15 || c4h.length < 10) {
       throw new Error("Insufficient klines for whale reader");
@@ -577,7 +582,8 @@ async function readWhale(symbol: string, btc_chg: number) {
    // Mixed ONLY when 15m and 5m directly oppose each other without clear directional pressure:
    const cvd_mixed = !directional_bull && !directional_bear;
 
-   const oiData = await fetchOI(symbol, "15m", 4);
+   const rawOiData = await fetchOI(symbol, "15m", 4);
+   const oiData = closedOnly ? rawOiData.filter((item: any) => Number(item.timestamp) + 15 * 60_000 <= closedAt) : rawOiData;
    let oi_chg = 0;
    let oi_available = false;
    if (oiData && oiData.length >= 4) {
@@ -735,7 +741,7 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
 async function scoreEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
 
-   const w = await readWhale(symbol, ctx.btc_chg);
+   const w = await readWhale(symbol, ctx.btc_chg, strategyPortfolioEnabled);
    const p = await readPrice(symbol, w.c15, w.c5);
 
    // Passively update in-flight rejected signal future outcomes using candles and price already in memory
