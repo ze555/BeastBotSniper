@@ -82,7 +82,7 @@ function flatCandles():StrategyCandle[]{
  const trade={trade_id:"WIN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:03:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:2};
  const t=Date.parse(trade.timestamp_entry);
  const candles:ReplayCandle[]=[
-  {time:t,open:100,high:101.2,low:100.4,close:101,volume:1000},
+  {time:t,open:100,high:101.2,low:99.9,close:101,volume:1000},
   {time:t+60000,open:101,high:102.2,low:100.9,close:102,volume:1000},
   {time:t+120000,open:102,high:103.6,low:101.1,close:103.4,volume:1000}
  ];
@@ -113,7 +113,7 @@ function flatCandles():StrategyCandle[]{
  const trade={trade_id:"RANGE_SCALP_PLAN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:02:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.8,take_profit_2:101,take_profit_3:101,position_size:10,tp1_r:0.8,tp2_r:1,tp3_r:1,part_a:0.5,part_b:0.5,part_c:0,pnl_r:0.8};
  const t=Date.parse(trade.timestamp_entry);
  const r=simulatePartialExitTrade(trade,[
-  {time:t,open:100,high:100.9,low:100.5,close:100.8,volume:1000},
+  {time:t,open:100,high:100.9,low:99.9,close:100.8,volume:1000},
   {time:t+60000,open:100.8,high:101.2,low:100.5,close:101.1,volume:1000}
  ]);
  assert.equal(r.exitReason,"TP3");
