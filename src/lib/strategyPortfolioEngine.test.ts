@@ -47,12 +47,12 @@ function flatCandles():StrategyCandle[]{
  assert.equal(concentration.allowed,false,"same-direction concentration proxy blocks excess exposure");
 }
 {
- const trade={trade_id:"WIN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:03:00.000Z",entry_price:100,stop_loss:99,take_profit_1:101,take_profit_2:102,take_profit_3:103,pnl_r:2};
+ const trade={trade_id:"WIN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:03:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:2};
  const t=Date.parse(trade.timestamp_entry);
  const candles:ReplayCandle[]=[
   {time:t,open:100,high:101.2,low:100.4,close:101,volume:1000},
   {time:t+60000,open:101,high:102.2,low:100.9,close:102,volume:1000},
-  {time:t+120000,open:102,high:103.2,low:101.1,close:103,volume:1000}
+  {time:t+120000,open:102,high:103.6,low:101.1,close:103.4,volume:1000}
  ];
  const r=simulatePartialExitTrade(trade,candles);
  assert.equal(r.status,"REPLAYED");
@@ -62,7 +62,7 @@ function flatCandles():StrategyCandle[]{
  assert.ok(r.fees>0);
 }
 {
- const trade={trade_id:"AMBIG",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:01:00.000Z",entry_price:100,stop_loss:99,take_profit_1:101,take_profit_2:102,take_profit_3:103,pnl_r:-1};
+ const trade={trade_id:"AMBIG",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:01:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,pnl_r:-1};
  const t=Date.parse(trade.timestamp_entry);
  const r=simulatePartialExitTrade(trade,[{time:t,open:100,high:101.2,low:98.8,close:100,volume:1000}]);
  assert.equal(r.exitReason,"STOP_OR_AMBIGUOUS_STOP_FIRST","same-candle stop/target collision resolves conservatively");
