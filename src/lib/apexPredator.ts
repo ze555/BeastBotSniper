@@ -769,12 +769,28 @@ async function scoreEntry(symbol: string, ctx: any) {
          time: k.openTime, open: k.open, high: k.high, low: k.low, close: k.close,
          volume: k.volume, takerBuyBase: k.takerBuy
       }));
-      const evaluations = evaluateStrategyPortfolio(candidateInput, {
+      // Snapshot Binance USD-M depth. This is visible resting liquidity, not proof of institutional intent.
+      let bookContext: any = { orderBookAvailable: false, orderBookAgeMs: Number.POSITIVE_INFINITY };
+      try {
+         const bookStartedAt = Date.now();
+         const depth = await axios.get(`${BINANCE_FAPI}/fapi/v1/depth`, { params: { symbol, limit: 20 }, timeout: 2500 });
+         const bids = (depth.data?.bids || []).reduce((sum: number, level: any[]) => sum + Number(level[0])*Number(level[1]), 0);
+         const asks = (depth.data?.asks || []).reduce((sum: number, level: any[]) => sum + Number(level[0])*Number(level[1]), 0);
+         const total = bids + asks;
+         const imbalance = total > 0 ? (bids-asks)/total : Number.NaN;
+         bookContext = { orderBookAvailable: Number.isFinite(imbalance), orderBookImbalance: imbalance, orderBookAgeMs: Date.now()-bookStartedAt };
+      } catch { /* Missing depth is a hard no-trade condition in the confluence engine. */ }
+      const confluenceContext = {
          btcRegime: ctx.regime, btcChangePct: ctx.btc_chg, fundingRate: w.fund,
-         oiChangePct: w.oi_chg, oiAvailable: Boolean(w.oi_available)
-      });
-      const acceptedCandidates = evaluations.flatMap((x: any) => x.candidates)
-         .filter((x: any) => x.accepted).sort((a: any,b: any) => b.score-a.score);
+         oiChangePct: w.oi_chg, oiAvailable: Boolean(w.oi_available), priceChangePct: w.p_chg,
+         cvdSlope5: w.slope5, cvdSlope15: w.slope15,
+         cvdAvailable: Number.isFinite(w.slope5) && Number.isFinite(w.slope15) && !w.cvd_mixed,
+         ...bookContext
+      };
+      const evaluations = evaluateStrategyPortfolio(candidateInput, confluenceContext);
+      // No score/ranking: only explicit AND-gates. Candidate order is deterministic and each
+      // accepted setup still passes the existing tri-regime, execution and risk guardians.
+      const acceptedCandidates = evaluations.flatMap((x: any) => x.candidates).filter((x: any) => x.accepted);
       const logCandidateOutcome = (item: any, rejectionReason: string) => {
          const key = `${symbol}:${item.strategy}:${item.side}`;
          const now = Date.now();
@@ -782,23 +798,23 @@ async function scoreEntry(symbol: string, ctx: any) {
          if (now-lastLogged < 15*60_000) return;
          strategyCandidateLogCooldown.set(key,now);
          logRejectedSignal({
-            symbol, timeframe: "15m", direction: item.side, signal_score: item.score,
+            symbol, timeframe: "15m", direction: item.side, signal_score: 0,
             rejection_reason: `[${item.strategy}] ${rejectionReason}`, p, w, ctx,
             reasoning: {
                regime: p.bull_align ? "TREND_UP" : p.bear_align ? "TREND_DOWN" : "RANGE",
                scenario: { primary: { type: item.strategy, bias: item.side } },
                flow: { state: w.scenario, persistenceState: w.cvd_mixed ? "CONFLICTED" : "OBSERVED" },
                location: { nearestSupport: p.sup10, nearestResistance: p.res10 },
-               confirmation: { isConfirmed: item.accepted, reason: rejectionReason, evidence: item.reasons, missingItems: item.accepted ? [] : item.reasons },
+               confirmation: { isConfirmed: item.accepted, reason: rejectionReason, evidence: item.reasons, missingItems: item.missingEvidence },
                timingGate: { state: "CLOSED_CANDLE_EVALUATED", evidence: ["Completed 15m candle snapshot"] },
-               strategyPortfolio: { strategy: item.strategy, score: item.score, accepted: item.accepted }
+               strategyPortfolio: { strategy: item.strategy, accepted: item.accepted, requiredEvidence: item.reasons, missingEvidence: item.missingEvidence }
             }
          });
       };
       for (const sideEvaluation of evaluations) {
          for (const item of sideEvaluation.candidates) {
-            if (!item.accepted && item.score >= 4.5) {
-               logCandidateOutcome(item, item.reasons.filter((x: string) => x.startsWith("Rejected:")).join("; ") || "Evidence score below acceptance threshold");
+            if (!item.accepted) {
+               logCandidateOutcome(item, item.missingEvidence.join("; ") || "Confluence chain not complete");
             }
          }
       }
@@ -909,10 +925,10 @@ async function scoreEntry(symbol: string, ctx: any) {
       const closedAtr14 = calcATR(closedHigh, closedLow, closedClose, 14).pop() || p.atr14;
       const executionPriceData = { ...p, price: executionPrice, atr14: closedAtr14, klines: closedKlines, setupType: candidateSetupType };
       const strategyLabels: Record<string,string> = { TREND_RIDER: "Trend Rider", BREAKOUT_RETEST: "Breakout Retest", LIQUIDITY_REVERSAL: "Liquidity Reversal", MOMENTUM_EXPANSION: "Momentum Expansion" };
-      addLog(`🧭 [PORTFOLIO CANDIDATE] ${candidate.strategy} ${candidate.side} ${symbol} | score ${candidate.score}/10 | risk ${finalRiskUsd.toFixed(2)} | ${candidate.reasons.join("; ")}`, "info");
+      addLog(`🧭 [PORTFOLIO CONFLUENCE] ${candidate.strategy} ${candidate.side} ${symbol} | risk ${finalRiskUsd.toFixed(2)} | confirmed: ${candidate.reasons.join("; ")}`, "info");
       if (candidate.side === "LONG") apexPredatorStats.acceptedLongs++; else apexPredatorStats.acceptedShorts++;
       return {
-         signal: candidate.side, score: candidate.score, grade: { label: `PORTFOLIO ${candidate.strategy}`, risk: finalRiskUsd/Math.max(virtualBalance,1), mult: 1 },
+         signal: candidate.side, score: 0, grade: { label: `PORTFOLIO ${candidate.strategy}`, risk: finalRiskUsd/Math.max(virtualBalance,1), mult: 1 },
          riskAmount: finalRiskUsd, stopReference: candidate.stopReference, strategyId: candidate.strategy,
          tp1R: exitPlan.tp1R, tp2R: exitPlan.tp2R, tp3R: exitPlan.tp3R,
          partA: exitPlan.partA, partB: exitPlan.partB, partC: exitPlan.partC, minRRRequired: exitPlan.minRRRequired,
