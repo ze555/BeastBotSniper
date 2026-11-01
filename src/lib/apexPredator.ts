@@ -610,7 +610,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, oi_available, p_chg, fund,
+      scenario, oi_chg: oi_available ? oi_chg : Number.NaN, oi_available, p_chg, fund,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
