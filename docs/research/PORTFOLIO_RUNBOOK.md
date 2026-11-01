@@ -12,7 +12,9 @@
 3. `LIQUIDITY_REVERSAL`: sweep of a prior boundary, reclaim, rejection wick, volume expansion and taker-flow proxy.
 4. `MOMENTUM_EXPANSION`: ATR range expansion, directional body, volume expansion, trend alignment and an extension guard.
 
-The flow feature is based on exchange kline taker-buy information when present, otherwise close-location-in-range weighted by volume. It is not order-book depth, liquidation flow, or proof of institutional positioning.\n\nThe portfolio path also logs high-scoring rejected and superseded candidates (score >= 4.5) into the rejected-signal research stream, deduplicated per symbol/strategy/side for 15 minutes. The existing passive outcome tracker records forward snapshots and MFE/MAE for up to 120 minutes. This is the collection mechanism needed to build a future non-traded opportunity dataset.
+The flow feature is based on exchange kline taker-buy information when present, otherwise close-location-in-range weighted by volume. It is not order-book depth, liquidation flow, or proof of institutional positioning.
+
+The portfolio path also logs high-scoring rejected and superseded candidates (score >= 4.5) into the rejected-signal research stream, deduplicated per symbol/strategy/side for 15 minutes. The existing passive outcome tracker records forward snapshots and MFE/MAE for up to 120 minutes. This is the collection mechanism needed to build a future non-traded opportunity dataset.
 
 ## Risk guardian defaults
 - 0.5% equity risk per new position.
