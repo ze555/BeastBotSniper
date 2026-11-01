@@ -118,14 +118,19 @@ export interface ReplayResult {trade_id:string;status:"REPLAYED"|"NO_CANDLES"|"I
 export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[],cfg:ReplayConfig=DEFAULT_REPLAY_CONFIG):ReplayResult{
  const invalid=(status:ReplayResult["status"],reason:string):ReplayResult=>({trade_id:trade.trade_id,status,exitReason:reason,exitPrice:trade.entry_price,grossPnl:0,fees:0,netPnl:0,netR:0,partialFills:0,bars:0,ambiguousBars:0,recordedR:finite(trade.pnl_r??NaN)?trade.pnl_r!:null});
  if(!Array.isArray(candles)||!candles.length)return invalid("NO_CANDLES","No 1m candles");
- const entryMs=Date.parse(trade.timestamp_entry),exitMs=Date.parse(trade.timestamp_exit),riskDist=Math.abs(trade.entry_price-trade.stop_loss);
- if(!finite(entryMs)||!finite(exitMs)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0)return invalid("INVALID","Invalid entry/exit/stop data");
+ const entryMs=Date.parse(trade.timestamp_entry),exitMs=Date.parse(trade.timestamp_exit);
+ const tpRiskDistance=Math.abs(trade.take_profit_1-trade.entry_price)/0.75;
+ const riskDist=finite(tpRiskDistance)&&tpRiskDistance>0?tpRiskDistance:Math.abs(trade.entry_price-trade.stop_loss);
+ if(!finite(entryMs)||!finite(exitMs)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0)return invalid("INVALID","Invalid entry/exit/initial risk data");
  // Only use fully closed 1m bars after entry and before recorded exit; never inspect the partial exit minute.
  const timeline=candles.filter(c=>c.time>=entryMs&&c.time+60_000<=exitMs).sort((a,b)=>a.time-b.time);
  if(!timeline.length)return invalid("NO_CANDLES","No candles inside recorded trade interval");
- const isLong=trade.side==="LONG",qty=(cfg.equity*cfg.riskFraction)/riskDist;
+ const isLong=trade.side==="LONG";
+ // Prefer the original recorded quantity. TP1 is anchored at 0.75R in the production entry schema,
+ // so it reconstructs the initial stop distance even when stop_loss was later trailed.
+ const qty=finite(trade.position_size??NaN)&&Number(trade.position_size)>0?Number(trade.position_size):(cfg.equity*cfg.riskFraction)/riskDist;
  const entryFill=trade.entry_price*(isLong?1+cfg.slippageRate:1-cfg.slippageRate);
- let stop=trade.stop_loss,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
+ let stop=isLong?trade.entry_price-riskDist:trade.entry_price+riskDist,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
  let a=false,b=false;
  const closeFraction=(fraction:number,reference:number)=>{const f=Math.min(remaining,fraction);if(f<=0)return;const fill=reference*(isLong?1-cfg.slippageRate:1+cfg.slippageRate);const units=qty*f;gross+=(isLong?fill-entryFill:entryFill-fill)*units;fees+=((entryFill+fill)*units)*cfg.feeRate;remaining-=f;lastExit=fill;partialFills++;};
  for(let i=0;i<timeline.length&&remaining>1e-9;i++){
@@ -150,7 +155,7 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
   }
   if(i===timeline.length-1){closeFraction(remaining,c.close);reason="RECORDED_WINDOW_CLOSE";}
  }
- const net=gross-fees,riskUsd=cfg.equity*cfg.riskFraction;
+ const net=gross-fees,riskUsd=qty*riskDist;
  return {trade_id:trade.trade_id,status:"REPLAYED",exitReason:reason,exitPrice:lastExit,grossPnl:gross,fees,netPnl:net,netR:net/riskUsd,partialFills,bars:timeline.length,ambiguousBars:ambiguous,recordedR:finite(trade.pnl_r??NaN)?trade.pnl_r!:null};
 }
 export function summarizeReplay(results:ReplayResult[]){
