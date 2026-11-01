@@ -135,10 +135,14 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
   // Conservative intrabar ordering: if stop and any target can both have traded, stop is first.
   if(stopHit){closeFraction(remaining,stop);reason="STOP_OR_AMBIGUOUS_STOP_FIRST";break;}
   if(!a&&(isLong?c.high>=trade.take_profit_1:c.low<=trade.take_profit_1)){
-   closeFraction(cfg.tp1Fraction,trade.take_profit_1);a=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp1R:trade.entry_price-riskDist*cfg.moveStopAfterTp1R;continue;
+   closeFraction(cfg.tp1Fraction,trade.take_profit_1);a=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp1R:trade.entry_price-riskDist*cfg.moveStopAfterTp1R;
+   const movedStopHit=isLong?c.low<=stop:c.high>=stop;
+   if(movedStopHit&&remaining>1e-9){ambiguous++;closeFraction(remaining,stop);reason="SAME_BAR_TP1_THEN_MOVED_STOP_CONSERVATIVE";break;}
   }
   if(a&&!b&&(isLong?c.high>=trade.take_profit_2:c.low<=trade.take_profit_2)){
-   closeFraction(cfg.tp2Fraction,trade.take_profit_2);b=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp2R:trade.entry_price-riskDist*cfg.moveStopAfterTp2R;continue;
+   closeFraction(cfg.tp2Fraction,trade.take_profit_2);b=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp2R:trade.entry_price-riskDist*cfg.moveStopAfterTp2R;
+   const movedStopHit=isLong?c.low<=stop:c.high>=stop;
+   if(movedStopHit&&remaining>1e-9){ambiguous++;closeFraction(remaining,stop);reason="SAME_BAR_TP2_THEN_MOVED_STOP_CONSERVATIVE";break;}
   }
   if(a&&b&&(isLong?c.high>=trade.take_profit_3:c.low<=trade.take_profit_3)){
    closeFraction(cfg.tp3Fraction,trade.take_profit_3);reason="TP3";break;
