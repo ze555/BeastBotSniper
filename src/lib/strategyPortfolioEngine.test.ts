@@ -69,6 +69,14 @@ function flatCandles():StrategyCandle[]{
  assert.equal(r.ambiguousBars,1);
  assert.ok(r.netPnl<0);
 }
+
+{
+ const trade={trade_id:"TRAILING_STOP_RECORD",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:01:00.000Z",entry_price:100,stop_loss:99.8,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:0.1};
+ const t=Date.parse(trade.timestamp_entry);
+ const r=simulatePartialExitTrade(trade,[{time:t,open:100,high:100.9,low:99.5,close:100.8,volume:1000}]);
+ assert.equal(r.partialFills,2,"initial stop is reconstructed from TP1 rather than the later trailed stop field");
+ assert.equal(r.exitReason,"SAME_BAR_TP1_THEN_MOVED_STOP_CONSERVATIVE");
+}
 {
  const s=summarizeReplay([]);
  assert.equal(s.trades,0);
