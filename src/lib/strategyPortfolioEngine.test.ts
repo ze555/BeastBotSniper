@@ -25,9 +25,9 @@ function makeCandles():StrategyCandle[]{
  const trade={trade_id:"WIN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:03:00.000Z",entry_price:100,stop_loss:99,take_profit_1:101,take_profit_2:102,take_profit_3:103,pnl_r:2};
  const t=Date.parse(trade.timestamp_entry);
  const candles:ReplayCandle[]=[
-  {time:t,open:100,high:101.2,low:99.5,close:101,volume:1000},
-  {time:t+60000,open:101,high:102.2,low:100.4,close:102,volume:1000},
-  {time:t+120000,open:102,high:103.2,low:101,close:103,volume:1000}
+  {time:t,open:100,high:101.2,low:100.4,close:101,volume:1000},
+  {time:t+60000,open:101,high:102.2,low:100.9,close:102,volume:1000},
+  {time:t+120000,open:102,high:103.2,low:101.1,close:103,volume:1000}
  ];
  const r=simulatePartialExitTrade(trade,candles);
  assert.equal(r.status,"REPLAYED");
