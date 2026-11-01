@@ -109,7 +109,7 @@ export interface RiskRequest { equity:number; entryPrice:number; stopDistancePct
 export interface RiskDecision { allowed:boolean; riskUsd:number; quantity:number; reason:string }
 export function evaluateRiskGuardian(req:RiskRequest,cfg:RiskGuardianConfig=DEFAULT_RISK_GUARDIAN):RiskDecision{
  const fail=(reason:string):RiskDecision=>({allowed:false,riskUsd:0,quantity:0,reason});
- if(!finite(req.equity)||req.equity<=0||!finite(req.entryPrice)||req.entryPrice<=0||!finite(req.stopDistancePct)||req.stopDistancePct<=0)return fail("Invalid equity, entry price or stop distance");
+ if(!finite(req.equity)||req.equity<=0||!finite(req.entryPrice)||req.entryPrice<=0||!finite(req.stopDistancePct)||req.stopDistancePct<0.001||req.stopDistancePct>0.04)return fail("Invalid equity, entry price or stop distance outside 0.10%-4.00%");
  if(!finite(req.currentOpenRiskFraction)||req.currentOpenRiskFraction<0||req.currentOpenRiskFraction>1||
     !finite(req.dailyRealizedPnl)||!Number.isInteger(req.openPositions)||req.openPositions<0||
     !Number.isInteger(req.correlatedOpenPositions)||req.correlatedOpenPositions<0||
