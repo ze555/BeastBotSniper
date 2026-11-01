@@ -14,7 +14,7 @@
 
 The flow feature is based on exchange kline taker-buy information when present, otherwise close-location-in-range weighted by volume. It is not order-book depth, liquidation flow, or proof of institutional positioning.
 
-The portfolio path also logs high-scoring rejected and superseded candidates (score >= 4.5) into the rejected-signal research stream, deduplicated per symbol/strategy/side for 15 minutes. The existing passive outcome tracker records forward snapshots and MFE/MAE for up to 120 minutes. This is the collection mechanism needed to build a future non-traded opportunity dataset.
+The portfolio path also logs high-scoring rejected and superseded candidates (score >= 4.5) into the rejected-signal research stream, deduplicated per symbol/strategy/side for 15 minutes. The passive outcome tracker records a snapshot only when it is actually observed inside the corresponding time window; each snapshot includes `target_window_minutes` and `observed_after_minutes`. A missed 120-minute window is marked `LATE`/`UNKNOWN` rather than silently treated as an exact 120-minute outcome. This is the collection mechanism needed to build a future non-traded opportunity dataset.
 
 ## Risk guardian defaults
 - 0.5% equity risk per new position.
@@ -30,7 +30,7 @@ These values are protective starting defaults for paper evaluation, not empirica
 - `npm run replay:portfolio`: run the portfolio candidate diagnostics and fill-aware partial-exit replay.
 - `npm run build`: build the application and server bundle.
 
-The replay reads `study_all_trades_master.json` and `master_candles_1m.json` from the repository root. Candidate outcome slices are conditional on already-executed trades; they are not an unbiased estimate of strategy expectancy.
+The replay reads `study_all_trades_master.json` and `master_candles_1m.json` from the repository root. It excludes 15m snapshot candles that were still forming at entry, uses completed 1m candles only, prefers recorded initial stop/risk/quantity fields, and falls back to TP1-based initial-risk reconstruction for the legacy export. Candidate outcome slices are conditional on already-executed trades; they are not an unbiased estimate of strategy expectancy. Missing or unchanged OI is labeled neutral/unavailable, not supportive evidence.
 
 ## Optional paper-only runtime evaluation
 The API route `POST /api/predator/config` accepts `strategyPortfolioEnabled: true`. It is intended only for isolated virtual/paper evaluation. The flag is false by default and should be explicitly set back to false after a test. The portfolio path:
