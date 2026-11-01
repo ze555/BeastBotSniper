@@ -451,8 +451,11 @@ async function fetchLiq(_symbol: string) {
 
 // --- SEC 1: MARKET CONTEXT (BTC) ---
 async function getContext() {
-   const btc4h = await fetchKl("BTCUSDT", "4h", 210);
-   const btc15m = await fetchKl("BTCUSDT", "15m", 30);
+   const rawBtc4h = await fetchKl("BTCUSDT", "4h", 210);
+   const rawBtc15m = await fetchKl("BTCUSDT", "15m", 30);
+   const btcClosedAt = Date.now();
+   const btc4h = strategyPortfolioEnabled ? rawBtc4h.filter((k: any) => Number(k.closeTime) < btcClosedAt) : rawBtc4h;
+   const btc15m = strategyPortfolioEnabled ? rawBtc15m.filter((k: any) => Number(k.closeTime) < btcClosedAt) : rawBtc15m;
    
    if (btc4h.length < 200 || btc15m.length < 20) {
       throw new Error("Insufficient BTC context");
