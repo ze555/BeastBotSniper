@@ -15,6 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, resolveStrategyExitPlan, applyRegimeRiskMultiplier, isCandleClosed } from "./strategyPortfolioEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -88,6 +89,9 @@ let btcVolThresholdStr = "0.80";
 let slAtrMultiplier = 1.3;
 let geniusMode = true;
 let pullbackSniperEnabled = true;
+// Research strategy portfolio remains OFF until independent out-of-sample promotion criteria pass.
+let strategyPortfolioEnabled = false;
+const strategyCandidateLogCooldown = new Map<string, number>();
 let freeTradeSlotEnabled = true;
 let scanBatchSize = 25;
 let feeRate = 0.0004; // 0.04% default Binance VIP0 taker fee
@@ -129,13 +133,15 @@ export function resetAccountState() {
   addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
 }
 
-export function updateConfig(balance: number, maxTrades: number, opts?: any) {
-  initialVirtualBalance = balance;
-  if (opts?.resetAccount || (closedTrades.length === 0 && activeTrades.length === 0)) {
-     virtualBalance = balance;
-     todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+export function updateConfig(balance?: number, maxTrades?: number, opts?: any) {
+  if (Number.isFinite(balance) && Number(balance) > 0) {
+     initialVirtualBalance = Number(balance);
+     if (opts?.resetAccount || (closedTrades.length === 0 && activeTrades.length === 0)) {
+        virtualBalance = Number(balance);
+        todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+     }
   }
-  maxOpenTradesConfig = maxTrades;
+  if (Number.isFinite(maxTrades) && Number(maxTrades) >= 1) maxOpenTradesConfig = Number(maxTrades);
   if (opts) {
       if (opts.haltProfitEnabled !== undefined) haltProfitEnabled = opts.haltProfitEnabled;
       if (opts.haltProfitTarget !== undefined) haltProfitTarget = opts.haltProfitTarget;
@@ -146,6 +152,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.slAtrMultiplier !== undefined) slAtrMultiplier = opts.slAtrMultiplier;
       if (opts.geniusMode !== undefined) geniusMode = opts.geniusMode;
       if (opts.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = opts.pullbackSniperEnabled;
+      if (opts.strategyPortfolioEnabled !== undefined) strategyPortfolioEnabled = Boolean(opts.strategyPortfolioEnabled);
       if (opts.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = opts.freeTradeSlotEnabled;
       if (opts.scanBatchSize !== undefined) scanBatchSize = Number(opts.scanBatchSize) || 25;
       if (opts.feeRate !== undefined) feeRate = Number(opts.feeRate);
@@ -213,6 +220,7 @@ export function getStats() {
     slAtrMultiplier,
     geniusMode,
     pullbackSniperEnabled,
+    strategyPortfolioEnabled,
     freeTradeSlotEnabled,
     scanBatchSize,
     feeRate,
@@ -245,6 +253,7 @@ export function getConfig() {
     slAtrMultiplier, 
     geniusMode, 
     pullbackSniperEnabled,
+    strategyPortfolioEnabled,
     freeTradeSlotEnabled,
     scanBatchSize,
     feeRate,
@@ -269,6 +278,7 @@ export function setConfig(config: any) {
   if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
   if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
   if (config.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = config.pullbackSniperEnabled;
+  if (config.strategyPortfolioEnabled !== undefined) strategyPortfolioEnabled = Boolean(config.strategyPortfolioEnabled);
   if (config.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = config.freeTradeSlotEnabled;
   if (config.scanBatchSize !== undefined) scanBatchSize = Number(config.scanBatchSize) || 25;
   if (config.feeRate !== undefined) feeRate = Number(config.feeRate);
@@ -437,15 +447,18 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
-async function fetchLiq(symbol: string) {
-   // Proxying liquidation calculation (mocked for this specific requirement due to Binance lacking a free direct liq map)
-   return { _up: 3000000, _down: 3000000 };
+async function fetchLiq(_symbol: string) {
+   // Binance public REST does not provide this aggregate liquidation map; never fabricate institutional liquidity.
+   return { _up: null, _down: null, available: false, source: "unavailable" as const };
 }
 
 // --- SEC 1: MARKET CONTEXT (BTC) ---
 async function getContext() {
-   const btc4h = await fetchKl("BTCUSDT", "4h", 210);
-   const btc15m = await fetchKl("BTCUSDT", "15m", 30);
+   const rawBtc4h = await fetchKl("BTCUSDT", "4h", 210);
+   const rawBtc15m = await fetchKl("BTCUSDT", "15m", 30);
+   const btcClosedAt = Date.now();
+   const btc4h = strategyPortfolioEnabled ? rawBtc4h.filter((k: any) => isCandleClosed(k.closeTime, btcClosedAt)) : rawBtc4h;
+   const btc15m = strategyPortfolioEnabled ? rawBtc15m.filter((k: any) => Number(k.closeTime) < btcClosedAt) : rawBtc15m;
    
    if (btc4h.length < 200 || btc15m.length < 20) {
       throw new Error("Insufficient BTC context");
@@ -536,10 +549,15 @@ async function getContext() {
 }
 
 // --- SEC 2: WHALE READER ---
-async function readWhale(symbol: string, btc_chg: number) {
-   const c15 = await fetchKl(symbol, "15m", 210);
-   const c5 = await fetchKl(symbol, "5m", 30);
-   const c4h = await fetchKl(symbol, "4h", 20);
+async function readWhale(symbol: string, btc_chg: number, closedOnly: boolean = false) {
+   const raw15 = await fetchKl(symbol, "15m", 210);
+   const raw5 = await fetchKl(symbol, "5m", 30);
+   const raw4h = await fetchKl(symbol, "4h", 20);
+   const closedAt = Date.now();
+   // Portfolio mode is deliberately based only on completed exchange candles.
+   const c15 = closedOnly ? raw15.filter((k: any) => isCandleClosed(k.closeTime, closedAt)) : raw15;
+   const c5 = closedOnly ? raw5.filter((k: any) => Number(k.closeTime) < closedAt) : raw5;
+   const c4h = closedOnly ? raw4h.filter((k: any) => Number(k.closeTime) < closedAt) : raw4h;
 
    if (c15.length < 20 || c5.length < 15 || c4h.length < 10) {
       throw new Error("Insufficient klines for whale reader");
@@ -570,12 +588,17 @@ async function readWhale(symbol: string, btc_chg: number) {
    // Mixed ONLY when 15m and 5m directly oppose each other without clear directional pressure:
    const cvd_mixed = !directional_bull && !directional_bear;
 
-   const oiData = await fetchOI(symbol, "15m", 4);
+   const rawOiData = await fetchOI(symbol, "15m", 4);
+   const oiData = closedOnly ? rawOiData.filter((item: any) => Number(item.timestamp) + 15 * 60_000 <= closedAt) : rawOiData;
    let oi_chg = 0;
+   let oi_available = false;
    if (oiData && oiData.length >= 4) {
       const oi0 = parseFloat(oiData[oiData.length-1].sumOpenInterest);
       const oi3 = parseFloat(oiData[0].sumOpenInterest);
-      oi_chg = (oi0 - oi3) / oi3;
+      if (Number.isFinite(oi0) && Number.isFinite(oi3) && oi3 > 0) {
+         oi_chg = (oi0 - oi3) / oi3;
+         oi_available = true;
+      }
    }
 
    const p0 = c15[c15.length-1].close;
@@ -599,7 +622,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, p_chg, fund,
+      scenario, oi_chg: oi_available ? oi_chg : Number.NaN, oi_available, p_chg, fund,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
@@ -724,12 +747,194 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
 async function scoreEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
 
-   const w = await readWhale(symbol, ctx.btc_chg);
+   const w = await readWhale(symbol, ctx.btc_chg, strategyPortfolioEnabled);
    const p = await readPrice(symbol, w.c15, w.c5);
 
    // Passively update in-flight rejected signal future outcomes using candles and price already in memory
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
+
+   // Isolated four-strategy portfolio path. Disabled by default and never promoted by this branch.
+   if (strategyPortfolioEnabled) {
+      let safetyReason: string | null = null;
+      if (!ctx.tradeable || ctx.btc_whipsaw) safetyReason = "BTC market is not tradeable";
+      else if (!isLibyaTradingAllowed()) safetyReason = "Outside configured trading hours";
+      else if (w.f_danger) safetyReason = "Funding danger";
+      else if (p.rvol > 5 || p.rsi > 78 || p.rsi < 22 || p.adx > 60) safetyReason = "Extreme volatility/momentum safety gate";
+      if (safetyReason) return { signal: "WAIT", reason: safetyReason };
+
+      // Candidate generation uses completed 15m candles only; the forming candle is excluded.
+      const closedKlines = (p.klines || []).filter((k: any) => isCandleClosed(k.closeTime, Date.now()));
+      const candidateInput = closedKlines.map((k: any) => ({
+         time: k.openTime, open: k.open, high: k.high, low: k.low, close: k.close,
+         volume: k.volume, takerBuyBase: k.takerBuy
+      }));
+      // Snapshot Binance USD-M depth. This is visible resting liquidity, not proof of institutional intent.
+      let bookContext: any = { orderBookAvailable: false, orderBookAgeMs: Number.POSITIVE_INFINITY };
+      try {
+         const bookStartedAt = Date.now();
+         const depth = await axios.get(`${BINANCE_FAPI}/fapi/v1/depth`, { params: { symbol, limit: 20 }, timeout: 2500 });
+         const bids = (depth.data?.bids || []).reduce((sum: number, level: any[]) => sum + Number(level[0])*Number(level[1]), 0);
+         const asks = (depth.data?.asks || []).reduce((sum: number, level: any[]) => sum + Number(level[0])*Number(level[1]), 0);
+         const total = bids + asks;
+         const imbalance = total > 0 ? (bids-asks)/total : Number.NaN;
+         bookContext = { orderBookAvailable: Number.isFinite(imbalance), orderBookImbalance: imbalance, orderBookAgeMs: Date.now()-bookStartedAt };
+      } catch { /* Missing depth is a hard no-trade condition in the confluence engine. */ }
+      const confluenceContext = {
+         btcRegime: ctx.regime, btcChangePct: ctx.btc_chg, fundingRate: w.fund,
+         oiChangePct: w.oi_chg, oiAvailable: Boolean(w.oi_available), priceChangePct: w.p_chg,
+         cvdSlope5: w.slope5, cvdSlope15: w.slope15,
+         cvdAvailable: Number.isFinite(w.slope5) && Number.isFinite(w.slope15) && !w.cvd_mixed,
+         ...bookContext
+      };
+      const evaluations = evaluateStrategyPortfolio(candidateInput, confluenceContext);
+      // No score/ranking: only explicit AND-gates. Candidate order is deterministic and each
+      // accepted setup still passes the existing tri-regime, execution and risk guardians.
+      const acceptedCandidates = evaluations.flatMap((x: any) => x.candidates).filter((x: any) => x.accepted);
+      const logCandidateOutcome = (item: any, rejectionReason: string) => {
+         const key = `${symbol}:${item.strategy}:${item.side}`;
+         const now = Date.now();
+         const lastLogged = strategyCandidateLogCooldown.get(key) || 0;
+         if (now-lastLogged < 15*60_000) return;
+         strategyCandidateLogCooldown.set(key,now);
+         logRejectedSignal({
+            symbol, timeframe: "15m", direction: item.side, signal_score: 0,
+            rejection_reason: `[${item.strategy}] ${rejectionReason}`, p, w, ctx,
+            reasoning: {
+               regime: p.bull_align ? "TREND_UP" : p.bear_align ? "TREND_DOWN" : "RANGE",
+               scenario: { primary: { type: item.strategy, bias: item.side } },
+               flow: { state: w.scenario, persistenceState: w.cvd_mixed ? "CONFLICTED" : "OBSERVED" },
+               location: { nearestSupport: p.sup10, nearestResistance: p.res10 },
+               confirmation: { isConfirmed: item.accepted, reason: rejectionReason, evidence: item.reasons, missingItems: item.missingEvidence },
+               timingGate: { state: "CLOSED_CANDLE_EVALUATED", evidence: ["Completed 15m candle snapshot"] },
+               strategyPortfolio: { strategy: item.strategy, accepted: item.accepted, requiredEvidence: item.reasons, missingEvidence: item.missingEvidence }
+            }
+         });
+      };
+      for (const sideEvaluation of evaluations) {
+         for (const item of sideEvaluation.candidates) {
+            if (!item.accepted) {
+               logCandidateOutcome(item, item.missingEvidence.join("; ") || "Confluence chain not complete");
+            }
+         }
+      }
+      if (!acceptedCandidates.length) return { signal: "WAIT", reason: "No strategy candidate passed its independent evidence and stop-distance gates", strategyEvaluations: evaluations };
+
+      let livePriceResponse: any;
+      try {
+         livePriceResponse = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/price`, { params: { symbol }, timeout: 3000 });
+      } catch {
+         acceptedCandidates.forEach((item: any) => logCandidateOutcome(item, "Live execution price unavailable"));
+         return { signal: "WAIT", reason: "Live execution price unavailable" };
+      }
+      const executionPrice = Number(livePriceResponse.data?.price);
+      if (!Number.isFinite(executionPrice) || executionPrice <= 0) {
+         acceptedCandidates.forEach((item: any) => logCandidateOutcome(item, "Invalid live execution price"));
+         return { signal: "WAIT", reason: "Live execution price unavailable" };
+      }
+
+      // Preserve the repository's tri-regime and execution safety layers around every candidate.
+      const assetRegime = p.bull_align ? "TREND_UP" : p.bear_align ? "TREND_DOWN" : "RANGE";
+      const currentOpenRiskFraction = activeTrades.reduce((sum: number,t: any) => sum+(Math.abs(t.initialSlDist||0)*Math.max(0,Number(t.pos)||0))/Math.max(virtualBalance,1),0);
+      const openFloating = activeTrades.reduce((sum: number,t: any) => sum+(Number(t.pnl)||0),0);
+      let candidate: any = null;
+      let candidateSetupType = "";
+      let triRegimeGate: any = null;
+      let exitPlan: any = null;
+      let executionGate: any = null;
+      let risk: any = null;
+      let finalRiskUsd = 0;
+      let candidateBlockReason = "All accepted candidates were blocked by execution or portfolio risk gates";
+
+      for (const item of acceptedCandidates) {
+         if ((item.side === "LONG" && item.stopReference >= executionPrice) || (item.side === "SHORT" && item.stopReference <= executionPrice)) {
+            candidateBlockReason = "Price moved through candidate invalidation level";
+            logCandidateOutcome(item, candidateBlockReason);
+            continue;
+         }
+         const stopDistancePct = Math.abs(executionPrice-item.stopReference)/executionPrice;
+         if (!Number.isFinite(stopDistancePct) || stopDistancePct < 0.001 || stopDistancePct > 0.04) {
+            candidateBlockReason = "Live stop outside permitted 0.10%-4.00% risk band";
+            logCandidateOutcome(item, candidateBlockReason);
+            continue;
+         }
+
+         const itemSetupType = item.strategy === "TREND_RIDER" ? "PULLBACK_SNIPER"
+            : item.strategy === "LIQUIDITY_REVERSAL" ? "BOUNCE_SNIPER" : "BREAKOUT_MOMENTUM";
+         const candidatePriceData = { ...p, price: executionPrice, setupType: itemSetupType };
+         const candidateLocation = {
+            nearSupport: Math.abs(executionPrice-p.sup10)/executionPrice < 0.004,
+            nearResistance: Math.abs(p.res10-executionPrice)/executionPrice < 0.004,
+            distanceToSupportPct: (executionPrice-p.sup10)/executionPrice,
+            distanceToResistancePct: (p.res10-executionPrice)/executionPrice
+         };
+         const itemTriGate = evaluateTriRegimeExecution(
+            item.side, ctx, candidatePriceData, w, candidateLocation,
+            item.strategy === "LIQUIDITY_REVERSAL" ? "MEAN_REVERSION" : "CAPITAL_DEFENSE"
+         );
+         if (!itemTriGate.allowed) {
+            candidateBlockReason = itemTriGate.reason || "Tri-regime gate blocked candidate";
+            logCandidateOutcome(item, `Tri-regime gate: ${candidateBlockReason}`);
+            continue;
+         }
+         const itemExecutionGate = evaluateExecutionFilter(item.side, ctx.regime, assetRegime, {
+            rvol: p.rvol, adx: p.adx, hourUtc: new Date().getUTCHours()
+         });
+         if (!itemExecutionGate.allowed) {
+            candidateBlockReason = itemExecutionGate.reason || "Execution filter blocked candidate";
+            logCandidateOutcome(item, `Execution filter: ${candidateBlockReason}`);
+            continue;
+         }
+         const itemRisk = evaluateRiskGuardian({
+            equity: virtualBalance, entryPrice: executionPrice, stopDistancePct, currentOpenRiskFraction,
+            dailyRealizedPnl: todaysStats.pnl+openFloating, openPositions: activeTrades.length,
+            // Conservative concentration proxy: count same-direction positions; this is not a measured correlation matrix.
+            correlatedOpenPositions: activeTrades.filter((t: any) => t.direction === item.side).length
+         });
+         if (!itemRisk.allowed) {
+            candidateBlockReason = itemRisk.reason || "Portfolio risk guardian blocked candidate";
+            logCandidateOutcome(item, `Portfolio risk guardian: ${candidateBlockReason}`);
+            continue;
+         }
+
+         candidate = item;
+         candidateSetupType = itemSetupType;
+         triRegimeGate = itemTriGate;
+         exitPlan = resolveStrategyExitPlan(item.strategy, itemTriGate.exitStrategy);
+         executionGate = itemExecutionGate;
+         risk = itemRisk;
+         finalRiskUsd = applyRegimeRiskMultiplier(itemRisk.riskUsd, assetRegime);
+         break;
+      }
+
+      if (!candidate) return { signal: "WAIT", reason: candidateBlockReason, strategyEvaluations: evaluations };
+      for (const item of acceptedCandidates) {
+         if (item !== candidate) logCandidateOutcome(item, `Superseded by selected ${candidate.strategy} ${candidate.side}`);
+      }
+
+      const strategyReasoning = {
+         regime: assetRegime, flow: { state: w.scenario, persistenceState: w.cvd_mixed ? "CONFLICTED" : "OBSERVED" },
+         scenario: { primary: { type: candidate.strategy, bias: candidate.side } },
+         location: { nearestSupport: p.sup10, nearestResistance: p.res10 },
+         timingGate: { state: "CLOSED_CANDLE_CONFIRMED" },
+         confirmation: { isConfirmed: true, reason: candidate.reasons.join("; ") }
+      };
+      const closedHigh = closedKlines.map((k: any) => k.high);
+      const closedLow = closedKlines.map((k: any) => k.low);
+      const closedClose = closedKlines.map((k: any) => k.close);
+      const closedAtr14 = calcATR(closedHigh, closedLow, closedClose, 14).pop() || p.atr14;
+      const executionPriceData = { ...p, price: executionPrice, atr14: closedAtr14, klines: closedKlines, setupType: candidateSetupType };
+      const strategyLabels: Record<string,string> = { TREND_RIDER: "Trend Rider", BREAKOUT_RETEST: "Breakout Retest", LIQUIDITY_REVERSAL: "Liquidity Reversal", MOMENTUM_EXPANSION: "Momentum Expansion" };
+      addLog(`🧭 [PORTFOLIO CONFLUENCE] ${candidate.strategy} ${candidate.side} ${symbol} | risk ${finalRiskUsd.toFixed(2)} | confirmed: ${candidate.reasons.join("; ")}`, "info");
+      if (candidate.side === "LONG") apexPredatorStats.acceptedLongs++; else apexPredatorStats.acceptedShorts++;
+      return {
+         signal: candidate.side, score: 0, grade: { label: `PORTFOLIO ${candidate.strategy}`, risk: finalRiskUsd/Math.max(virtualBalance,1), mult: 1 },
+         riskAmount: finalRiskUsd, stopReference: candidate.stopReference, strategyId: candidate.strategy,
+         tp1R: exitPlan.tp1R, tp2R: exitPlan.tp2R, tp3R: exitPlan.tp3R,
+         partA: exitPlan.partA, partB: exitPlan.partB, partC: exitPlan.partC, minRRRequired: exitPlan.minRRRequired,
+         setupType: candidate.strategy, strategyLabel: strategyLabels[candidate.strategy], p: executionPriceData, w, ctx, reasoning: strategyReasoning
+      };
+   }
 
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
@@ -1180,13 +1385,20 @@ function executeTrade(symbol: string, decision: any) {
    // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
    const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
    const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   const riskAmt = Number.isFinite(decision.riskAmount) ? decision.riskAmount : virtualBalance * grade.risk * grade.mult * regimeRiskMult;
    if (regimeRiskMult < 1.0) {
       addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
    }
 
    const entryTiming = extractEntryTiming();
    const marketRegimeContext = extractMarketRegimeContext(p, ctx, reasoning);
+   const tp1R = Number.isFinite(decision.tp1R) ? decision.tp1R : TP1_R;
+   const tp2R = Number.isFinite(decision.tp2R) ? decision.tp2R : TP2_R;
+   const tp3R = Number.isFinite(decision.tp3R) ? decision.tp3R : TP3_R;
+   const partA = Number.isFinite(decision.partA) ? decision.partA : 0.40;
+   const partB = Number.isFinite(decision.partB) ? decision.partB : 0.35;
+   const partC = Number.isFinite(decision.partC) ? decision.partC : 0.25;
+   const minRRRequired = Number.isFinite(decision.minRRRequired) ? decision.minRRRequired : MIN_RR_REQUIRED;
 
    if (decision.signal === "LONG") {
       const entry = p.price;
@@ -1195,9 +1407,9 @@ function executeTrade(symbol: string, decision: any) {
       const isBounce = setupType === "BOUNCE_SNIPER";
       // Pillar 5: Tight Structural Stop Loss with compressed buffer
       const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const rawSl = isBounce && reasoning?.location?.nearestSupport && reasoning.location.nearestSupport < entry
+      const rawSl = Number.isFinite(decision.stopReference) ? decision.stopReference : (isBounce && reasoning?.location?.nearestSupport && reasoning.location.nearestSupport < entry
          ? Math.min(realLow, reasoning.location.nearestSupport) - structuralSlPad
-         : (isPullback ? Math.min(realLow, p.ema21) - structuralSlPad : realLow - structuralSlPad);
+         : (isPullback ? Math.min(realLow, p.ema21) - structuralSlPad : realLow - structuralSlPad));
 
       // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
       const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
@@ -1206,13 +1418,13 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
-      const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
-      const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
+      const tp1 = entry + (initialSlDist * tp1R);
+      const tp2 = entry + (initialSlDist * tp2R);
+      const tp3 = entry + (initialSlDist * tp3R);
 
       const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+      if (calculatedRR < minRRRequired) {
+         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${minRRRequired})`, "error");
          return;
       }
 
@@ -1228,15 +1440,16 @@ function executeTrade(symbol: string, decision: any) {
          addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
          pos = maxPosCap;
       }
-      const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
+      const setupLabel = decision.strategyLabel || (isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"));
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: partA, part_b: partB, part_c: partC,
+         tp1_r: tp1R, tp2_r: tp2R, tp3_r: tp3R,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
-         setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupType: decision.strategyId || (isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM")),
          setupLabel,
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
@@ -1248,7 +1461,7 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
             strongAcc: w.strong_acc ? "حركة مستويات السيولة العالية" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (مفتوحة)" : "تصريف عقود",
+            institutionalBias: w.oi_available ? (w.oi_chg > 0 ? "تراكم عقود (مفتوحة)" : "تصريف عقود") : "بيانات OI غير متاحة",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
@@ -1266,9 +1479,9 @@ function executeTrade(symbol: string, decision: any) {
       const isBounce = setupType === "BOUNCE_SNIPER";
       // Pillar 5: Tight Structural Stop Loss with compressed buffer
       const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const rawSl = isBounce && reasoning?.location?.nearestResistance && reasoning.location.nearestResistance > entry
+      const rawSl = Number.isFinite(decision.stopReference) ? decision.stopReference : (isBounce && reasoning?.location?.nearestResistance && reasoning.location.nearestResistance > entry
          ? Math.max(realHigh, reasoning.location.nearestResistance) + structuralSlPad
-         : (isPullback ? Math.max(realHigh, p.ema21) + structuralSlPad : realHigh + structuralSlPad);
+         : (isPullback ? Math.max(realHigh, p.ema21) + structuralSlPad : realHigh + structuralSlPad));
 
       // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
       const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
@@ -1277,12 +1490,12 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry - (initialSlDist * TP1_R);
-      const tp2 = entry - (initialSlDist * TP2_R);
-      const tp3 = entry - (initialSlDist * TP3_R);
+      const tp1 = entry - (initialSlDist * tp1R);
+      const tp2 = entry - (initialSlDist * tp2R);
+      const tp3 = entry - (initialSlDist * tp3R);
 
       const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
+      if (calculatedRR < minRRRequired) {
          addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
          return;
       }
@@ -1299,15 +1512,16 @@ function executeTrade(symbol: string, decision: any) {
          addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
          pos = maxPosCap;
       }
-      const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
+      const setupLabel = decision.strategyLabel || (isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم"));
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: partA, part_b: partB, part_c: partC,
+         tp1_r: tp1R, tp2_r: tp2R, tp3_r: tp3R,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
-         setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
+         setupType: decision.strategyId || (isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM")),
          setupLabel,
          atr: p.atr14, peak_r: 0,
          reasoning: decision.reasoning,
@@ -1319,7 +1533,7 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
             strongAcc: w.strong_dis ? "تفريغ السيولة المؤسساتي" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (شورت)" : "إغلاق صفقات",
+            institutionalBias: w.oi_available ? (w.oi_chg > 0 ? "تراكم عقود (شورت)" : "إغلاق صفقات") : "بيانات OI غير متاحة",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
@@ -1343,6 +1557,9 @@ async function exitBrain(trade: any, ctx: any) {
    t.currentPrice = price;
 
    const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
+   const tradeTp1R = Number.isFinite(t.tp1_r) ? t.tp1_r : TP1_R;
+   const tradeTp2R = Number.isFinite(t.tp2_r) ? t.tp2_r : TP2_R;
+   const tradeTp3R = Number.isFinite(t.tp3_r) ? t.tp3_r : TP3_R;
    const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
@@ -1478,13 +1695,13 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
-      if (profitR >= TP1_R) {
+      if (profitR >= tradeTp1R) {
          closePart(t, "A", t.part_a);
          // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
          t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+         addLog(`🎯 هدف أول (${Math.round(t.part_a*100)}%) ${t.symbol} | +${tradeTp1R}R | 🛡️ تم نقل الوقف لمستوى +0.30R`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry;
@@ -1496,12 +1713,12 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      if (profitR >= TP2_R) {
+      if (profitR >= tradeTp2R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
          // Lock in TP1 level as floor profit
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * tradeTp1R) : t.entry - (slDist * tradeTp1R);
+         addLog(`🎯 هدف ثانٍ (${Math.round(t.part_b*100)}%) ${t.symbol} | +${tradeTp2R}R | تم حجز الأرباح ورفع الوقف لمستوى +${tradeTp1R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
@@ -1513,10 +1730,10 @@ async function exitBrain(trade: any, ctx: any) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
-      if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
+      if (profitR >= tradeTp3R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
+         addLog(`🏁 هدف ثالث نهائي (${Math.round(t.part_c*100)}%) ${t.symbol} | +${tradeTp3R}R صيد الاتجاه بالكامل 🏆`, 'success');
          closeTradeFull(t, "TP3 Full Target Hit");
          return;
       }

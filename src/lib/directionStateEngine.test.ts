@@ -290,6 +290,11 @@ const decK = engineK.processCandle(goodEvidenceCandle);
 assert(decK.state === "FORMING_LONG", "Test K: State is FORMING_LONG");
 assert(decK.canEnter === true, "Test K: canEnter is TRUE for FORMING_LONG with complete evidence chain");
 assert(decK.entryType === "FORMING_EARLY", "Test K: entryType is FORMING_EARLY");
+assert(decK.latestTransition?.oi === "NEUTRAL", "Test K: unavailable OI remains NEUTRAL, not falsely SUPPORTIVE");
+const engineKZero = new DirectionStateEngine("TEST_K_ZERO_OI");
+createWarmupCandles(15).forEach(c => engineKZero.processCandle(c));
+const decKZero = engineKZero.processCandle(goodEvidenceCandle, {}, { oiChg: 0 });
+assert(decKZero.latestTransition?.oi === "NEUTRAL", "Test K: unchanged OI is NEUTRAL, not SUPPORTIVE");
 
 // -----------------------------------------------------------------------------
 // Test L: FORMING_LONG مع evidence غير كافية (Volume DRY) → WAIT

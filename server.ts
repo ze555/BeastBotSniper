@@ -42,6 +42,7 @@ async function startServer() {
         slAtrMultiplier: req.body.slAtrMultiplier,
         geniusMode: req.body.geniusMode,
         pullbackSniperEnabled: req.body.pullbackSniperEnabled,
+        strategyPortfolioEnabled: req.body.strategyPortfolioEnabled,
         freeTradeSlotEnabled: req.body.freeTradeSlotEnabled,
         scanBatchSize: req.body.scanBatchSize,
         feeRate: req.body.feeRate,
