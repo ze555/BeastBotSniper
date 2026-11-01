@@ -58,7 +58,7 @@ function flatCandles():StrategyCandle[]{
  assert.equal(r.status,"REPLAYED");
  assert.equal(r.partialFills,3,"three partial target fills are modelled");
  assert.equal(r.exitReason,"TP3");
- assert.ok(r.netPnl>0);
+ assert.ok(r.netPnl>15,"simulator uses the recorded 10-unit position size rather than a synthetic half-size");
  assert.ok(r.fees>0);
 }
 {
