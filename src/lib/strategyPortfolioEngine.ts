@@ -21,7 +21,7 @@ export const DEFAULT_RISK_GUARDIAN:RiskGuardianConfig={riskFraction:0.005,maxPor
 
 const finite=(n:number)=>Number.isFinite(n);
 export function isCandleClosed(closeTime:number|string|undefined,nowMs:number=Date.now()):boolean { const timestamp=Number(closeTime); return Number.isFinite(timestamp)&&timestamp<nowMs; }
-export function filterSnapshotCandles<T extends {time?:number|string;timestamp?:string}>(candles:T[],entryTimeMs:number,intervalMs:number):T[] { return candles.filter(c=>{const start=c.time!==undefined?Number(c.time):Date.parse(c.timestamp||"");return Number.isFinite(start)&&start+intervalMs<=entryTimeMs;}); }
+export function filterSnapshotCandles<T extends {time?:number|string;timestamp?:string}>(candles:T[],entryTimeMs:number,intervalMs:number):T[] { return candles.filter(c=>{const raw=c.time??c.timestamp;const numeric=typeof raw==="number"?raw:Number(raw);const start=Number.isFinite(numeric)?numeric:Date.parse(String(raw||""));return Number.isFinite(start)&&start+intervalMs<=entryTimeMs;}); }
 const clamp=(n:number,a:number,b:number)=>Math.max(a,Math.min(b,n));
 function ema(values:number[],period:number):number { if(!values.length)return 0; const k=2/(period+1); let v=values[0]; for(let i=1;i<values.length;i++)v=values[i]*k+v*(1-k); return v; }
 function atr(c:StrategyCandle[],period=14):number { if(c.length<2)return 0; const tr:number[]=[]; for(let i=1;i<c.length;i++)tr.push(Math.max(c[i].high-c[i].low,Math.abs(c[i].high-c[i-1].close),Math.abs(c[i].low-c[i-1].close))); return tr.slice(-period).reduce((a,b)=>a+b,0)/Math.min(period,tr.length); }
