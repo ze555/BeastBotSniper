@@ -771,7 +771,8 @@ async function scoreEntry(symbol: string, ctx: any) {
          btcRegime: ctx.regime, btcChangePct: ctx.btc_chg, fundingRate: w.fund,
          oiChangePct: w.oi_chg, oiAvailable: Boolean(w.oi_available)
       });
-      const candidate = evaluations.map((x: any) => x.selected).filter(Boolean).sort((a: any,b: any) => b.score-a.score)[0];
+      const acceptedCandidates = evaluations.flatMap((x: any) => x.candidates)
+         .filter((x: any) => x.accepted).sort((a: any,b: any) => b.score-a.score);
       const logCandidateOutcome = (item: any, rejectionReason: string) => {
          const key = `${symbol}:${item.strategy}:${item.side}`;
          const now = Date.now();
@@ -794,54 +795,104 @@ async function scoreEntry(symbol: string, ctx: any) {
       };
       for (const sideEvaluation of evaluations) {
          for (const item of sideEvaluation.candidates) {
-            const isSelected = Boolean(candidate && candidate.strategy === item.strategy && candidate.side === item.side);
-            if (isSelected || item.score < 4.5) continue;
-            logCandidateOutcome(item, item.accepted ? `Superseded by ${candidate?.strategy || "no executable candidate"}` : (item.reasons.filter((x: string) => x.startsWith("Rejected:")).join("; ") || "Evidence score below acceptance threshold"));
+            if (!item.accepted && item.score >= 4.5) {
+               logCandidateOutcome(item, item.reasons.filter((x: string) => x.startsWith("Rejected:")).join("; ") || "Evidence score below acceptance threshold");
+            }
          }
       }
-      if (!candidate) return { signal: "WAIT", reason: "No strategy candidate passed its independent evidence and stop-distance gates", strategyEvaluations: evaluations };
+      if (!acceptedCandidates.length) return { signal: "WAIT", reason: "No strategy candidate passed its independent evidence and stop-distance gates", strategyEvaluations: evaluations };
 
-      const livePriceResponse = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/price`, { params: { symbol }, timeout: 3000 });
-      const executionPrice = Number(livePriceResponse.data?.price);
-      if (!Number.isFinite(executionPrice) || executionPrice <= 0) { logCandidateOutcome(candidate, "Live execution price unavailable"); return { signal: "WAIT", reason: "Live execution price unavailable" }; }
-      if ((candidate.side === "LONG" && candidate.stopReference >= executionPrice) || (candidate.side === "SHORT" && candidate.stopReference <= executionPrice)) {
-         { logCandidateOutcome(candidate, "Price moved through the candidate invalidation level before execution"); return { signal: "WAIT", reason: "Price moved through the candidate invalidation level before execution" }; }
+      let livePriceResponse: any;
+      try {
+         livePriceResponse = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/price`, { params: { symbol }, timeout: 3000 });
+      } catch {
+         acceptedCandidates.forEach((item: any) => logCandidateOutcome(item, "Live execution price unavailable"));
+         return { signal: "WAIT", reason: "Live execution price unavailable" };
       }
-      const stopDistancePct = Math.abs(executionPrice-candidate.stopReference)/executionPrice;
-      if (!Number.isFinite(stopDistancePct) || stopDistancePct < 0.001 || stopDistancePct > 0.04) { logCandidateOutcome(candidate, "Live price moved stop outside permitted risk band"); return { signal: "WAIT", reason: "Live price moved the stop outside the permitted 0.10%-4.00% risk band" }; }
+      const executionPrice = Number(livePriceResponse.data?.price);
+      if (!Number.isFinite(executionPrice) || executionPrice <= 0) {
+         acceptedCandidates.forEach((item: any) => logCandidateOutcome(item, "Invalid live execution price"));
+         return { signal: "WAIT", reason: "Live execution price unavailable" };
+      }
 
-      // Preserve the repository's tri-regime and execution safety layers around the new strategy portfolio.
+      // Preserve the repository's tri-regime and execution safety layers around every candidate.
       const assetRegime = p.bull_align ? "TREND_UP" : p.bear_align ? "TREND_DOWN" : "RANGE";
-      const candidateSetupType = candidate.strategy === "TREND_RIDER" ? "PULLBACK_SNIPER"
-         : candidate.strategy === "LIQUIDITY_REVERSAL" ? "BOUNCE_SNIPER" : "BREAKOUT_MOMENTUM";
-      const candidatePriceData = { ...p, price: executionPrice, setupType: candidateSetupType };
-      const candidateLocation = {
-         nearSupport: Math.abs(executionPrice-p.sup10)/executionPrice < 0.004,
-         nearResistance: Math.abs(p.res10-executionPrice)/executionPrice < 0.004,
-         distanceToSupportPct: (executionPrice-p.sup10)/executionPrice,
-         distanceToResistancePct: (p.res10-executionPrice)/executionPrice
-      };
-      const triRegimeGate = evaluateTriRegimeExecution(
-         candidate.side, ctx, candidatePriceData, w, candidateLocation,
-         candidate.strategy === "LIQUIDITY_REVERSAL" ? "MEAN_REVERSION" : "CAPITAL_DEFENSE"
-      );
-      if (!triRegimeGate.allowed) { logCandidateOutcome(candidate, `Tri-regime gate: ${triRegimeGate.reason}`); return { signal: "WAIT", reason: triRegimeGate.reason, triRegimeGate }; }
-      const exitPlan = resolveStrategyExitPlan(candidate.strategy, triRegimeGate.exitStrategy);
-      const executionGate = evaluateExecutionFilter(candidate.side, ctx.regime, assetRegime, {
-         rvol: p.rvol, adx: p.adx, hourUtc: new Date().getUTCHours()
-      });
-      if (!executionGate.allowed) { logCandidateOutcome(candidate, `Execution filter: ${executionGate.reason || "blocked"}`); return { signal: "WAIT", reason: executionGate.reason || "Execution filter blocked candidate", executionGate }; }
-
       const currentOpenRiskFraction = activeTrades.reduce((sum: number,t: any) => sum+(Math.abs(t.initialSlDist||0)*Math.max(0,Number(t.pos)||0))/Math.max(virtualBalance,1),0);
       const openFloating = activeTrades.reduce((sum: number,t: any) => sum+(Number(t.pnl)||0),0);
-      const risk = evaluateRiskGuardian({
-         equity: virtualBalance, entryPrice: executionPrice, stopDistancePct, currentOpenRiskFraction,
-         dailyRealizedPnl: todaysStats.pnl+openFloating, openPositions: activeTrades.length,
-         // Conservative concentration proxy: count same-direction positions; this is not a measured correlation matrix.
-         correlatedOpenPositions: activeTrades.filter((t: any) => t.direction === candidate.side).length
-      });
-      if (!risk.allowed) { logCandidateOutcome(candidate, `Portfolio risk guardian: ${risk.reason}`); return { signal: "WAIT", reason: `Portfolio risk guardian: ${risk.reason}` }; }
-      const finalRiskUsd = applyRegimeRiskMultiplier(risk.riskUsd, assetRegime);
+      let candidate: any = null;
+      let candidateSetupType = "";
+      let triRegimeGate: any = null;
+      let exitPlan: any = null;
+      let executionGate: any = null;
+      let risk: any = null;
+      let finalRiskUsd = 0;
+      let candidateBlockReason = "All accepted candidates were blocked by execution or portfolio risk gates";
+
+      for (const item of acceptedCandidates) {
+         if ((item.side === "LONG" && item.stopReference >= executionPrice) || (item.side === "SHORT" && item.stopReference <= executionPrice)) {
+            candidateBlockReason = "Price moved through candidate invalidation level";
+            logCandidateOutcome(item, candidateBlockReason);
+            continue;
+         }
+         const stopDistancePct = Math.abs(executionPrice-item.stopReference)/executionPrice;
+         if (!Number.isFinite(stopDistancePct) || stopDistancePct < 0.001 || stopDistancePct > 0.04) {
+            candidateBlockReason = "Live stop outside permitted 0.10%-4.00% risk band";
+            logCandidateOutcome(item, candidateBlockReason);
+            continue;
+         }
+
+         const itemSetupType = item.strategy === "TREND_RIDER" ? "PULLBACK_SNIPER"
+            : item.strategy === "LIQUIDITY_REVERSAL" ? "BOUNCE_SNIPER" : "BREAKOUT_MOMENTUM";
+         const candidatePriceData = { ...p, price: executionPrice, setupType: itemSetupType };
+         const candidateLocation = {
+            nearSupport: Math.abs(executionPrice-p.sup10)/executionPrice < 0.004,
+            nearResistance: Math.abs(p.res10-executionPrice)/executionPrice < 0.004,
+            distanceToSupportPct: (executionPrice-p.sup10)/executionPrice,
+            distanceToResistancePct: (p.res10-executionPrice)/executionPrice
+         };
+         const itemTriGate = evaluateTriRegimeExecution(
+            item.side, ctx, candidatePriceData, w, candidateLocation,
+            item.strategy === "LIQUIDITY_REVERSAL" ? "MEAN_REVERSION" : "CAPITAL_DEFENSE"
+         );
+         if (!itemTriGate.allowed) {
+            candidateBlockReason = itemTriGate.reason || "Tri-regime gate blocked candidate";
+            logCandidateOutcome(item, `Tri-regime gate: ${candidateBlockReason}`);
+            continue;
+         }
+         const itemExecutionGate = evaluateExecutionFilter(item.side, ctx.regime, assetRegime, {
+            rvol: p.rvol, adx: p.adx, hourUtc: new Date().getUTCHours()
+         });
+         if (!itemExecutionGate.allowed) {
+            candidateBlockReason = itemExecutionGate.reason || "Execution filter blocked candidate";
+            logCandidateOutcome(item, `Execution filter: ${candidateBlockReason}`);
+            continue;
+         }
+         const itemRisk = evaluateRiskGuardian({
+            equity: virtualBalance, entryPrice: executionPrice, stopDistancePct, currentOpenRiskFraction,
+            dailyRealizedPnl: todaysStats.pnl+openFloating, openPositions: activeTrades.length,
+            // Conservative concentration proxy: count same-direction positions; this is not a measured correlation matrix.
+            correlatedOpenPositions: activeTrades.filter((t: any) => t.direction === item.side).length
+         });
+         if (!itemRisk.allowed) {
+            candidateBlockReason = itemRisk.reason || "Portfolio risk guardian blocked candidate";
+            logCandidateOutcome(item, `Portfolio risk guardian: ${candidateBlockReason}`);
+            continue;
+         }
+
+         candidate = item;
+         candidateSetupType = itemSetupType;
+         triRegimeGate = itemTriGate;
+         exitPlan = resolveStrategyExitPlan(item.strategy, itemTriGate.exitStrategy);
+         executionGate = itemExecutionGate;
+         risk = itemRisk;
+         finalRiskUsd = applyRegimeRiskMultiplier(itemRisk.riskUsd, assetRegime);
+         break;
+      }
+
+      if (!candidate) return { signal: "WAIT", reason: candidateBlockReason, strategyEvaluations: evaluations };
+      for (const item of acceptedCandidates) {
+         if (item !== candidate) logCandidateOutcome(item, `Superseded by selected ${candidate.strategy} ${candidate.side}`);
+      }
 
       const strategyReasoning = {
          regime: assetRegime, flow: { state: w.scenario, persistenceState: w.cvd_mixed ? "CONFLICTED" : "OBSERVED" },
