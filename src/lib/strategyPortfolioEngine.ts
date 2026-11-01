@@ -131,15 +131,29 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  const qty=finite(trade.position_size??NaN)&&Number(trade.position_size)>0?Number(trade.position_size):(cfg.equity*cfg.riskFraction)/riskDist;
  const entryFill=trade.entry_price*(isLong?1+cfg.slippageRate:1-cfg.slippageRate);
  let stop=isLong?trade.entry_price-riskDist:trade.entry_price+riskDist,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
- let a=false,b=false;
+ let a=false,b=false,microProtected=false;
  const closeFraction=(fraction:number,reference:number)=>{const f=Math.min(remaining,fraction);if(f<=0)return;const fill=reference*(isLong?1-cfg.slippageRate:1+cfg.slippageRate);const units=qty*f;gross+=(isLong?fill-entryFill:entryFill-fill)*units;fees+=((entryFill+fill)*units)*cfg.feeRate;remaining-=f;lastExit=fill;partialFills++;};
  for(let i=0;i<timeline.length&&remaining>1e-9;i++){
   const c=timeline[i];const stopHit=isLong?c.low<=stop:c.high>=stop;
   const targets=[!a?trade.take_profit_1:NaN,!b?trade.take_profit_2:NaN,(a&&b)?trade.take_profit_3:NaN].filter(finite);
   const targetHit=targets.some(t=>isLong?c.high>=t:c.low<=t);
-  if(stopHit&&targetHit)ambiguous++;
-  // Conservative intrabar ordering: if stop and any target can both have traded, stop is first.
-  if(stopHit){closeFraction(remaining,stop);reason="STOP_OR_AMBIGUOUS_STOP_FIRST";break;}
+  // Conservative intrabar ordering: an already-active stop wins any same-bar target collision.
+  if(stopHit){if(targetHit)ambiguous++;closeFraction(remaining,stop);reason=targetHit?"AMBIGUOUS_STOP_FIRST":"STOP_HIT";break;}
+
+  // Production soft-protection rule: at +0.45R move the stop to -0.25R until TP1.
+  if(!microProtected&&!a){
+   const protectTrigger=isLong?trade.entry_price+riskDist*0.45:trade.entry_price-riskDist*0.45;
+   const protectedStop=isLong?trade.entry_price-riskDist*0.25:trade.entry_price+riskDist*0.25;
+   const favorableReached=isLong?c.high>=protectTrigger:c.low<=protectTrigger;
+   const protectedStopTouched=isLong?c.low<=protectedStop:c.high>=protectedStop;
+   const tp1AlsoTouched=isLong?c.high>=trade.take_profit_1:c.low<=trade.take_profit_1;
+   if(favorableReached&&protectedStopTouched&&tp1AlsoTouched){
+    // The minute OHLC cannot order +0.45R, the -0.25R stop, and TP1. Resolve worst-case.
+    ambiguous++;closeFraction(remaining,protectedStop);reason="AMBIGUOUS_MICRO_PROTECTION_STOP_FIRST";break;
+   }
+   if(favorableReached&&!protectedStopTouched){stop=protectedStop;microProtected=true;}
+   else if(favorableReached&&protectedStopTouched)ambiguous++;
+  }
   if(!a&&(isLong?c.high>=trade.take_profit_1:c.low<=trade.take_profit_1)){
    closeFraction(cfg.tp1Fraction,trade.take_profit_1);a=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp1R:trade.entry_price-riskDist*cfg.moveStopAfterTp1R;
    const movedStopHit=isLong?c.low<=stop:c.high>=stop;
