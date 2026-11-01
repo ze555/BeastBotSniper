@@ -27,5 +27,7 @@ jobs:
         run: npm ci
       - name: Run unit tests and historical replay
         run: npm test
+      - name: TypeScript typecheck
+        run: npm run typecheck
       - name: Build
         run: npm run build
