@@ -51,7 +51,7 @@ const result={
  limitations:[
   "Entry candidates are evaluated only on the 15m pre-entry snapshots attached to executed trades; this cannot measure rejected opportunities or produce unbiased candidate strategy expectancy.",
   "The 1m candle streams cover only a subset of trades and stop at the recorded exit. Replay therefore compares a new partial-exit policy inside each historical trade's observed holding window.",
-  "The simulator uses configured 0.04% fee and 0.02% slippage on entry and each exit; historical account fee tier, spread, queue position and actual partial fill records are not present.",
+  "The simulator uses recorded position_size and reconstructs initial risk distance from TP1 at 0.75R when available; otherwise it falls back to configured 0.5% risk sizing. It models 0.04% fee and 0.02% slippage on entry and each exit; historical account fee tier, spread, queue position and actual partial fill records are not present.",
   "If a 1m candle touches both the active stop and a target, stop-first ordering is applied conservatively. Intrabar order is unknown.",
   "This replay does not model concurrent portfolio fills, funding payments, exchange liquidation, websocket latency, or the rejected-signal opportunity set."
  ],
