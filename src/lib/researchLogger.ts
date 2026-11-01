@@ -631,8 +631,10 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
       const target = item.targetEvent;
       if (!target) continue;
 
-      const makeSnapshot = () => ({
+      const makeSnapshot = (targetWindowMinutes: number) => ({
          timestamp: new Date().toISOString(),
+         target_window_minutes: targetWindowMinutes,
+         observed_after_minutes: Number(elapsedMinutes.toFixed(1)),
          price: currentPrice,
          price_change_percent_from_signal: Number(priceChangePct.toFixed(3)),
          high_since_signal: item.highestSinceSignal,
@@ -641,32 +643,38 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
          mae_percent: currentExcursion.maePercent
       });
 
-      if (elapsedMinutes >= 5 && !target.future_outcomes.snapshot_5m) {
-         target.future_outcomes.snapshot_5m = makeSnapshot();
+      // Keep outcome labels honest: a late scan must not masquerade as an exact 5m/15m observation.
+      if (elapsedMinutes >= 5 && elapsedMinutes < 10 && !target.future_outcomes.snapshot_5m) {
+         target.future_outcomes.snapshot_5m = makeSnapshot(5);
          needsRewrite = true;
       }
-      if (elapsedMinutes >= 15 && !target.future_outcomes.snapshot_15m) {
-         target.future_outcomes.snapshot_15m = makeSnapshot();
+      if (elapsedMinutes >= 15 && elapsedMinutes < 25 && !target.future_outcomes.snapshot_15m) {
+         target.future_outcomes.snapshot_15m = makeSnapshot(15);
          target.excursions.mfe_15m = currentExcursion.mfePercent;
          target.excursions.mae_15m = currentExcursion.maePercent;
          needsRewrite = true;
       }
-      if (elapsedMinutes >= 30 && !target.future_outcomes.snapshot_30m) {
-         target.future_outcomes.snapshot_30m = makeSnapshot();
+      if (elapsedMinutes >= 30 && elapsedMinutes < 45 && !target.future_outcomes.snapshot_30m) {
+         target.future_outcomes.snapshot_30m = makeSnapshot(30);
          target.excursions.mfe_30m = currentExcursion.mfePercent;
          target.excursions.mae_30m = currentExcursion.maePercent;
          needsRewrite = true;
       }
-      if (elapsedMinutes >= 60 && !target.future_outcomes.snapshot_60m) {
-         target.future_outcomes.snapshot_60m = makeSnapshot();
+      if (elapsedMinutes >= 60 && elapsedMinutes < 90 && !target.future_outcomes.snapshot_60m) {
+         target.future_outcomes.snapshot_60m = makeSnapshot(60);
          target.excursions.mfe_60m = currentExcursion.mfePercent;
          target.excursions.mae_60m = currentExcursion.maePercent;
          needsRewrite = true;
       }
       if (elapsedMinutes >= 120 && !target.future_outcomes.snapshot_120m) {
-         target.future_outcomes.snapshot_120m = makeSnapshot();
-         target.excursions.mfe_120m = currentExcursion.mfePercent;
-         target.excursions.mae_120m = currentExcursion.maePercent;
+         target.future_outcomes.snapshot_120m = makeSnapshot(120);
+         target.post_rejection_sample_status = elapsedMinutes <= 150 ? "ON_TIME" : "LATE";
+         if (elapsedMinutes <= 150) {
+            target.excursions.mfe_120m = currentExcursion.mfePercent;
+            target.excursions.mae_120m = currentExcursion.maePercent;
+         } else {
+            target.post_rejection_outcome = "UNKNOWN";
+         }
 
          if (currentKlines && Array.isArray(currentKlines)) {
             const afterKlines = currentKlines.filter((k: any) => {
@@ -676,17 +684,18 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
             target.candles_after_signal = formatCandles(afterKlines, 12);
          }
 
-         const finalMfe = target.excursions.mfe_120m || 0;
-         const finalMae = Math.abs(target.excursions.mae_120m || 0);
-
-         if (finalMfe >= 1.5 && finalMae <= 0.8) {
-            target.post_rejection_outcome = "FAVORABLE";
-         } else if (finalMae >= 1.5 && finalMfe <= 0.8) {
-            target.post_rejection_outcome = "ADVERSE";
-         } else if (finalMfe >= 1.2 && finalMae >= 1.2) {
-            target.post_rejection_outcome = "MIXED";
-         } else {
-            target.post_rejection_outcome = "UNKNOWN";
+         if (elapsedMinutes <= 150) {
+            const finalMfe = target.excursions.mfe_120m || 0;
+            const finalMae = Math.abs(target.excursions.mae_120m || 0);
+            if (finalMfe >= 1.5 && finalMae <= 0.8) {
+               target.post_rejection_outcome = "FAVORABLE";
+            } else if (finalMae >= 1.5 && finalMfe <= 0.8) {
+               target.post_rejection_outcome = "ADVERSE";
+            } else if (finalMfe >= 1.2 && finalMae >= 1.2) {
+               target.post_rejection_outcome = "MIXED";
+            } else {
+               target.post_rejection_outcome = "UNKNOWN";
+            }
          }
 
          item.completed = true;
