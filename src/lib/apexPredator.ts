@@ -15,7 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
-import { evaluateStrategyPortfolio, evaluateRiskGuardian, resolveStrategyExitPlan, isCandleClosed } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, resolveStrategyExitPlan, applyRegimeRiskMultiplier, isCandleClosed } from "./strategyPortfolioEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -841,6 +841,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          correlatedOpenPositions: activeTrades.filter((t: any) => t.direction === candidate.side).length
       });
       if (!risk.allowed) { logCandidateOutcome(candidate, `Portfolio risk guardian: ${risk.reason}`); return { signal: "WAIT", reason: `Portfolio risk guardian: ${risk.reason}` }; }
+      const finalRiskUsd = applyRegimeRiskMultiplier(risk.riskUsd, assetRegime);
 
       const strategyReasoning = {
          regime: assetRegime, flow: { state: w.scenario, persistenceState: w.cvd_mixed ? "CONFLICTED" : "OBSERVED" },
@@ -855,11 +856,11 @@ async function scoreEntry(symbol: string, ctx: any) {
       const closedAtr14 = calcATR(closedHigh, closedLow, closedClose, 14).pop() || p.atr14;
       const executionPriceData = { ...p, price: executionPrice, atr14: closedAtr14, klines: closedKlines, setupType: candidateSetupType };
       const strategyLabels: Record<string,string> = { TREND_RIDER: "Trend Rider", BREAKOUT_RETEST: "Breakout Retest", LIQUIDITY_REVERSAL: "Liquidity Reversal", MOMENTUM_EXPANSION: "Momentum Expansion" };
-      addLog(`🧭 [PORTFOLIO CANDIDATE] ${candidate.strategy} ${candidate.side} ${symbol} | score ${candidate.score}/10 | risk ${risk.riskUsd.toFixed(2)} | ${candidate.reasons.join("; ")}`, "info");
+      addLog(`🧭 [PORTFOLIO CANDIDATE] ${candidate.strategy} ${candidate.side} ${symbol} | score ${candidate.score}/10 | risk ${finalRiskUsd.toFixed(2)} | ${candidate.reasons.join("; ")}`, "info");
       if (candidate.side === "LONG") apexPredatorStats.acceptedLongs++; else apexPredatorStats.acceptedShorts++;
       return {
-         signal: candidate.side, score: candidate.score, grade: { label: `PORTFOLIO ${candidate.strategy}`, risk: risk.riskUsd/Math.max(virtualBalance,1), mult: 1 },
-         riskAmount: risk.riskUsd, stopReference: candidate.stopReference, strategyId: candidate.strategy,
+         signal: candidate.side, score: candidate.score, grade: { label: `PORTFOLIO ${candidate.strategy}`, risk: finalRiskUsd/Math.max(virtualBalance,1), mult: 1 },
+         riskAmount: finalRiskUsd, stopReference: candidate.stopReference, strategyId: candidate.strategy,
          tp1R: exitPlan.tp1R, tp2R: exitPlan.tp2R, tp3R: exitPlan.tp3R,
          partA: exitPlan.partA, partB: exitPlan.partB, partC: exitPlan.partC, minRRRequired: exitPlan.minRRRequired,
          setupType: candidate.strategy, strategyLabel: strategyLabels[candidate.strategy], p: executionPriceData, w, ctx, reasoning: strategyReasoning
