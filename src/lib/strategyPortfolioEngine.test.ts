@@ -3,7 +3,8 @@ import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTra
 
 function makeCandles():StrategyCandle[]{
  const out:StrategyCandle[]=[];let p=100;
- for(let i=0;i<40;i++){const open=p;const drift=0.08;const close=open+drift;out.push({time:i,open,high:close+0.08,low:open-0.04,close,volume:1000+(i%4)*30,takerBuyBase:650});p=close;}
+ const driftPattern=[0.06,-0.04,-0.04,0.06];
+ for(let i=0;i<40;i++){const open=p;const drift=driftPattern[i%driftPattern.length];const close=open+drift;out.push({time:i,open,high:Math.max(open,close)+0.08,low:Math.min(open,close)-0.04,close,volume:1000+(i%4)*30,takerBuyBase:650});p=close;}
  return out;
 }
 function flatCandles():StrategyCandle[]{
