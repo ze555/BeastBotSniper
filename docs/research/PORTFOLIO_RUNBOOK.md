@@ -36,7 +36,7 @@ The replay reads `study_all_trades_master.json` and `master_candles_1m.json` fro
 The API route `POST /api/predator/config` accepts `strategyPortfolioEnabled: true`. It is intended only for isolated virtual/paper evaluation. The flag is false by default and should be explicitly set back to false after a test. The portfolio path:
 - uses closed BTC 4h/15m and asset 15m/5m/4h candles for signal formation;
 - obtains a fresh ticker price before sizing;
-- applies the existing tri-regime evaluator and execution filter;
+- tries accepted candidates in score order and falls through to the next strategy if a higher-scored candidate fails a safety gate;\n- applies the existing tri-regime evaluator and execution filter;
 - checks the portfolio risk guardian;
 - uses the existing virtual-trade executor and existing `exitBrain`.
 
