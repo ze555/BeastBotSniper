@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTrade, summarizeReplay, resolveStrategyExitPlan, isCandleClosed, StrategyCandle, ReplayCandle } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTrade, summarizeReplay, resolveStrategyExitPlan, isCandleClosed, filterSnapshotCandles, StrategyCandle, ReplayCandle } from "./strategyPortfolioEngine.js";
 
 function makeCandles():StrategyCandle[]{
  const out:StrategyCandle[]=[];let p=100;
@@ -8,6 +8,13 @@ function makeCandles():StrategyCandle[]{
 }
 
 
+
+{
+ const entry=Date.parse("2026-11-01T00:16:00.000Z");
+ const snapshots=[{timestamp:"2026-11-01T00:00:00.000Z",close:100},{timestamp:"2026-11-01T00:15:00.000Z",close:101},{timestamp:"2026-11-01T00:30:00.000Z",close:102}];
+ const closed=filterSnapshotCandles(snapshots,entry,15*60_000);
+ assert.deepEqual(closed.map(x=>x.close),[100],"the 00:15 candle is still forming at 00:16 and must be excluded");
+}
 {
  assert.equal(isCandleClosed(1000,2000),true);
  assert.equal(isCandleClosed(2000,2000),false,"a candle is not treated as closed at its exact close timestamp");
