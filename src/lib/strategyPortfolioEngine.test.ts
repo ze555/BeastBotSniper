@@ -36,14 +36,15 @@ function flatCandles():StrategyCandle[]{
  assert.equal(momentumLong?.accepted,true,"momentum expansion candidate should pass directional range and volume expansion");
 }
 {
- const denied=evaluateRiskGuardian({equity:1000,stopDistancePct:0.01,currentOpenRiskFraction:0.02,dailyRealizedPnl:0,openPositions:0,correlatedOpenPositions:0});
+ const denied=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0.02,dailyRealizedPnl:0,openPositions:0,correlatedOpenPositions:0});
  assert.equal(denied.allowed,false,"portfolio risk cap blocks additional risk");
- const allowed=evaluateRiskGuardian({equity:1000,stopDistancePct:0.01,currentOpenRiskFraction:0.005,dailyRealizedPnl:0,openPositions:1,correlatedOpenPositions:0});
+ const allowed=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0.005,dailyRealizedPnl:0,openPositions:1,correlatedOpenPositions:0});
  assert.equal(allowed.allowed,true);
  assert.equal(allowed.riskUsd,5,"default single-trade risk is 0.5% of equity");
- const dailyStop=evaluateRiskGuardian({equity:1000,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:-20,openPositions:0,correlatedOpenPositions:0});
+ assert.equal(allowed.quantity,5,"quantity is sized using the actual entry-price stop distance");
+ const dailyStop=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:-20,openPositions:0,correlatedOpenPositions:0});
  assert.equal(dailyStop.allowed,false,"daily loss cap blocks fresh entries");
- const concentration=evaluateRiskGuardian({equity:1000,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:0,openPositions:2,correlatedOpenPositions:2});
+ const concentration=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:0,openPositions:2,correlatedOpenPositions:2});
  assert.equal(concentration.allowed,false,"same-direction concentration proxy blocks excess exposure");
 }
 {
