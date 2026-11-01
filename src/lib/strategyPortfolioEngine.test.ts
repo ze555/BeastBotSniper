@@ -66,11 +66,22 @@ function flatCandles():StrategyCandle[]{
  const trade={trade_id:"AMBIG",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:01:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,pnl_r:-1};
  const t=Date.parse(trade.timestamp_entry);
  const r=simulatePartialExitTrade(trade,[{time:t,open:100,high:101.2,low:98.8,close:100,volume:1000}]);
- assert.equal(r.exitReason,"STOP_OR_AMBIGUOUS_STOP_FIRST","same-candle stop/target collision resolves conservatively");
+ assert.equal(r.exitReason,"AMBIGUOUS_STOP_FIRST","same-candle stop/target collision resolves conservatively");
  assert.equal(r.ambiguousBars,1);
  assert.ok(r.netPnl<0);
 }
 
+
+{
+ const trade={trade_id:"SOFT_PROTECTION",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:02:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:-0.25};
+ const t=Date.parse(trade.timestamp_entry);
+ const r=simulatePartialExitTrade(trade,[
+  {time:t,open:100,high:100.5,low:100,close:100.4,volume:1000},
+  {time:t+60000,open:100.4,high:100.45,low:99.7,close:99.8,volume:1000}
+ ]);
+ assert.equal(r.exitReason,"STOP_HIT","the +0.45R protection stop is active on the following completed candle");
+ assert.ok(r.netR< -0.2 && r.netR> -0.4,"soft protection caps this replay loss near -0.25R before costs");
+}
 {
  const trade={trade_id:"TRAILING_STOP_RECORD",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:01:00.000Z",entry_price:100,stop_loss:99.8,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:0.1};
  const t=Date.parse(trade.timestamp_entry);
