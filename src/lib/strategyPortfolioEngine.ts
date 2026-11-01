@@ -95,11 +95,11 @@ export function evaluateStrategyPortfolio(candles:StrategyCandle[],ctx:StrategyC
   return {side,candidates,selected};
  });
 }
-export interface RiskRequest { equity:number; stopDistancePct:number; currentOpenRiskFraction:number; dailyRealizedPnl:number; openPositions:number; correlatedOpenPositions:number }
+export interface RiskRequest { equity:number; entryPrice:number; stopDistancePct:number; currentOpenRiskFraction:number; dailyRealizedPnl:number; openPositions:number; correlatedOpenPositions:number }
 export interface RiskDecision { allowed:boolean; riskUsd:number; quantity:number; reason:string }
 export function evaluateRiskGuardian(req:RiskRequest,cfg:RiskGuardianConfig=DEFAULT_RISK_GUARDIAN):RiskDecision{
  const fail=(reason:string):RiskDecision=>({allowed:false,riskUsd:0,quantity:0,reason});
- if(!finite(req.equity)||req.equity<=0||!finite(req.stopDistancePct)||req.stopDistancePct<=0)return fail("Invalid equity or stop distance");
+ if(!finite(req.equity)||req.equity<=0||!finite(req.entryPrice)||req.entryPrice<=0||!finite(req.stopDistancePct)||req.stopDistancePct<=0)return fail("Invalid equity, entry price or stop distance");
  if(req.dailyRealizedPnl<=-req.equity*cfg.dailyLossLimitFraction)return fail("Daily loss limit reached");
  if(req.openPositions>=cfg.maxPositions)return fail("Maximum concurrent positions reached");
  if(req.correlatedOpenPositions>=cfg.maxCorrelatedPositions)return fail("Correlated exposure limit reached");
@@ -107,7 +107,7 @@ export function evaluateRiskGuardian(req:RiskRequest,cfg:RiskGuardianConfig=DEFA
  const riskFraction=Math.min(cfg.riskFraction,available);
  if(riskFraction<=0)return fail("Portfolio open-risk budget exhausted");
  const riskUsd=req.equity*riskFraction;
- const quantity=riskUsd/(req.equity*req.stopDistancePct);
+ const quantity=riskUsd/(req.entryPrice*req.stopDistancePct);
  return {allowed:true,riskUsd,quantity,reason:"Risk budget available; size derived from stop distance"};
 }
 export interface ReplayTrade { trade_id:string;side:Side;timestamp_entry:string;timestamp_exit:string;entry_price:number;stop_loss:number;take_profit_1:number;take_profit_2:number;take_profit_3:number;position_size?:number;pnl_r?:number }
