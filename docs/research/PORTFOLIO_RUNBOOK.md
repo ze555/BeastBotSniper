@@ -6,15 +6,23 @@
 - No exchange order placement or production deployment is performed by the research workflow.
 - Do not merge or enable the flag for live trading based on the current research export.
 
-## Strategy families
-1. `TREND_RIDER`: EMA trend alignment, directional candle continuation, volume participation and a non-extended RSI zone.
-2. `BREAKOUT_RETEST`: completed-candle close through a prior 20-candle boundary, a retest/hold, strong close, volume and taker-flow proxy.
-3. `LIQUIDITY_REVERSAL`: sweep of a prior boundary, reclaim, rejection wick, volume expansion and taker-flow proxy.
-4. `MOMENTUM_EXPANSION`: ATR range expansion, directional body, volume expansion, trend alignment and an extension guard.
+## Strategy families and evidence chain
+1. `TREND_RIDER`: closed-candle EMA21/EMA50 structure, EMA9 resumption, directional close, participation and non-extended RSI.
+2. `BREAKOUT_RETEST`: completed-candle close beyond the prior 20-candle boundary, retest/hold, directional body and volume expansion.
+3. `LIQUIDITY_REVERSAL`: prior boundary sweep, reclaim, rejection wick and volume expansion.
+4. `MOMENTUM_EXPANSION`: ATR expansion, directional body, volume expansion, fast EMA alignment and extension guard.
 
-The flow feature is based on exchange kline taker-buy information when present, otherwise close-location-in-range weighted by volume. It is not order-book depth, liquidation flow, or proof of institutional positioning.
+There is no additive score, weighted vote or score threshold in this portfolio engine. Each candidate must pass every required gate (logical AND); one missing, stale or contradictory required source vetoes the candidate. There is no compensation for a failed confirmation from several weaker indicators. The engine reports confirmed and missing evidence explicitly.
 
-The portfolio path also logs high-scoring rejected and superseded candidates (score >= 4.5) into the rejected-signal research stream, deduplicated per symbol/strategy/side for 15 minutes. The passive outcome tracker records a snapshot only when it is actually observed inside the corresponding time window; each snapshot includes `target_window_minutes` and `observed_after_minutes`. A missed 120-minute window is marked `LATE`/`UNKNOWN` rather than silently treated as an exact 120-minute outcome. This is the collection mechanism needed to build a future non-traded opportunity dataset.
+### What the data actually represents
+- 15m/5m CVD slopes are derived from Binance futures kline taker-buy/taker-sell volume. They are exchange aggressor-flow proxies, not full-market CVD or proof of a named institution.
+- Open interest and funding are Binance USD-M public futures endpoints. Price/OI combinations are contextual positioning evidence, not direct identification of long/short beneficial owners.
+- Order-book imbalance is calculated from the top 20 visible bid/ask levels, weighted by quoted notional. It is a short-lived displayed-liquidity snapshot and can be spoofed/cancelled; it is not institutional order flow or a liquidation map.
+- Liquidation levels, hidden institutional orders, iceberg orders and off-exchange positioning are not inferred. If an authentic feed is not connected, those data are unavailable and cannot confirm a trade.
+- The order-book snapshot must be received within the local 5-second request window. The REST depth response does not provide a trustworthy exchange generation timestamp in this integration, so this is request latency, not a certified source timestamp.
+- Missing CVD, OI, funding or order-book data blocks entries. Missing data is never silently converted to neutral evidence.
+
+The Binance kline taker-buy field is preferred. The candle close-location proxy is retained only for non-portfolio legacy logic; the strict portfolio path additionally requires the explicit CVD fields and a fresh depth snapshot.
 
 ## Risk guardian defaults
 - 0.5% equity risk per new position.
