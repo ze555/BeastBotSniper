@@ -15,7 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
-import { evaluateStrategyPortfolio, evaluateRiskGuardian } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, resolveStrategyExitPlan } from "./strategyPortfolioEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -798,6 +798,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          candidate.strategy === "LIQUIDITY_REVERSAL" ? "MEAN_REVERSION" : "CAPITAL_DEFENSE"
       );
       if (!triRegimeGate.allowed) return { signal: "WAIT", reason: triRegimeGate.reason, triRegimeGate };
+      const exitPlan = resolveStrategyExitPlan(candidate.strategy, triRegimeGate.exitStrategy);
       const executionGate = evaluateExecutionFilter(candidate.side, ctx.regime, assetRegime, {
          rvol: p.rvol, adx: p.adx, hourUtc: new Date().getUTCHours()
       });
@@ -831,6 +832,8 @@ async function scoreEntry(symbol: string, ctx: any) {
       return {
          signal: candidate.side, score: candidate.score, grade: { label: `PORTFOLIO ${candidate.strategy}`, risk: risk.riskUsd/Math.max(virtualBalance,1), mult: 1 },
          riskAmount: risk.riskUsd, stopReference: candidate.stopReference, strategyId: candidate.strategy,
+         tp1R: exitPlan.tp1R, tp2R: exitPlan.tp2R, tp3R: exitPlan.tp3R,
+         partA: exitPlan.partA, partB: exitPlan.partB, partC: exitPlan.partC, minRRRequired: exitPlan.minRRRequired,
          setupType: candidate.strategy, strategyLabel: strategyLabels[candidate.strategy], p: executionPriceData, w, ctx, reasoning: strategyReasoning
       };
    }
@@ -1291,6 +1294,13 @@ function executeTrade(symbol: string, decision: any) {
 
    const entryTiming = extractEntryTiming();
    const marketRegimeContext = extractMarketRegimeContext(p, ctx, reasoning);
+   const tp1R = Number.isFinite(decision.tp1R) ? decision.tp1R : TP1_R;
+   const tp2R = Number.isFinite(decision.tp2R) ? decision.tp2R : TP2_R;
+   const tp3R = Number.isFinite(decision.tp3R) ? decision.tp3R : TP3_R;
+   const partA = Number.isFinite(decision.partA) ? decision.partA : 0.40;
+   const partB = Number.isFinite(decision.partB) ? decision.partB : 0.35;
+   const partC = Number.isFinite(decision.partC) ? decision.partC : 0.25;
+   const minRRRequired = Number.isFinite(decision.minRRRequired) ? decision.minRRRequired : MIN_RR_REQUIRED;
 
    if (decision.signal === "LONG") {
       const entry = p.price;
@@ -1310,12 +1320,12 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
-      const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
-      const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
+      const tp1 = entry + (initialSlDist * tp1R);
+      const tp2 = entry + (initialSlDist * tp2R);
+      const tp3 = entry + (initialSlDist * tp3R)
 
       const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
+      if (calculatedRR < minRRRequired) {
          addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
          return;
       }
@@ -1337,7 +1347,8 @@ function executeTrade(symbol: string, decision: any) {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: partA, part_b: partB, part_c: partC,
+         tp1_r: tp1R, tp2_r: tp2R, tp3_r: tp3R,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
          setupType: decision.strategyId || (isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM")),
@@ -1381,12 +1392,12 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry - (initialSlDist * TP1_R);
-      const tp2 = entry - (initialSlDist * TP2_R);
-      const tp3 = entry - (initialSlDist * TP3_R);
+      const tp1 = entry - (initialSlDist * tp1R);
+      const tp2 = entry - (initialSlDist * tp2R);
+      const tp3 = entry - (initialSlDist * tp3R);
 
       const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
+      if (calculatedRR < minRRRequired) {
          addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
          return;
       }
@@ -1408,7 +1419,8 @@ function executeTrade(symbol: string, decision: any) {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: partA, part_b: partB, part_c: partC,
+         tp1_r: tp1R, tp2_r: tp2R, tp3_r: tp3R,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
          setupType: decision.strategyId || (isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM")),
@@ -1447,6 +1459,9 @@ async function exitBrain(trade: any, ctx: any) {
    t.currentPrice = price;
 
    const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
+   const tradeTp1R = Number.isFinite(t.tp1_r) ? t.tp1_r : TP1_R;
+   const tradeTp2R = Number.isFinite(t.tp2_r) ? t.tp2_r : TP2_R;
+   const tradeTp3R = Number.isFinite(t.tp3_r) ? t.tp3_r : TP3_R;
    const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
@@ -1582,13 +1597,13 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
    if (!t.a_closed) {
-      if (profitR >= TP1_R) {
+      if (profitR >= tradeTp1R) {
          closePart(t, "A", t.part_a);
          // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
          t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${tradeTp1R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry;
@@ -1600,12 +1615,12 @@ async function exitBrain(trade: any, ctx: any) {
 
    // 2. PROFIT EXPANSION (TP2: +1.80R)
    if (t.a_closed && !t.b_closed) {
-      if (profitR >= TP2_R) {
+      if (profitR >= tradeTp2R) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
          // Lock in TP1 level as floor profit
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
+         t.sl = t.direction === "LONG" ? t.entry + (slDist * tradeTp1R) : t.entry - (slDist * tradeTp1R);
+         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${tradeTp2R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
@@ -1617,10 +1632,10 @@ async function exitBrain(trade: any, ctx: any) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
-      if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
+      if (profitR >= tradeTp3R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
+         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${tradeTp3R}R صيد الاتجاه بالكامل 🏆`, 'success');
          closeTradeFull(t, "TP3 Full Target Hit");
          return;
       }
