@@ -117,7 +117,7 @@ export function evaluateRiskGuardian(req:RiskRequest,cfg:RiskGuardianConfig=DEFA
  const quantity=riskUsd/(req.entryPrice*req.stopDistancePct);
  return {allowed:true,riskUsd,quantity,reason:"Risk budget available; size derived from stop distance"};
 }
-export interface ReplayTrade { trade_id:string;side:Side;timestamp_entry:string;timestamp_exit:string;entry_price:number;stop_loss:number;take_profit_1:number;take_profit_2:number;take_profit_3:number;position_size?:number;pnl_r?:number }
+export interface ReplayTrade { trade_id:string;side:Side;timestamp_entry:string;timestamp_exit:string;entry_price:number;stop_loss:number;take_profit_1:number;take_profit_2:number;take_profit_3:number;position_size?:number;pnl_r?:number;tp1_r?:number;tp2_r?:number;tp3_r?:number;part_a?:number;part_b?:number;part_c?:number }
 export interface ReplayCandle {time:number;open:number;high:number;low:number;close:number;volume:number;takerBuyBase?:number}
 export interface ReplayConfig {equity:number;riskFraction:number;feeRate:number;slippageRate:number;tp1Fraction:number;tp2Fraction:number;tp3Fraction:number;moveStopAfterTp1R:number;moveStopAfterTp2R:number;maxHoldMinutes:number}
 export const DEFAULT_REPLAY_CONFIG:ReplayConfig={equity:1000,riskFraction:0.005,feeRate:0.0004,slippageRate:0.0002,tp1Fraction:0.4,tp2Fraction:0.35,tp3Fraction:0.25,moveStopAfterTp1R:0.3,moveStopAfterTp2R:0.75,maxHoldMinutes:1440};
@@ -126,7 +126,7 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  const invalid=(status:ReplayResult["status"],reason:string):ReplayResult=>({trade_id:trade.trade_id,status,exitReason:reason,exitPrice:trade.entry_price,grossPnl:0,fees:0,netPnl:0,netR:0,partialFills:0,bars:0,ambiguousBars:0,recordedR:finite(trade.pnl_r??NaN)?trade.pnl_r!:null});
  if(!Array.isArray(candles)||!candles.length)return invalid("NO_CANDLES","No 1m candles");
  const entryMs=Date.parse(trade.timestamp_entry),exitMs=Date.parse(trade.timestamp_exit);
- const tpRiskDistance=Math.abs(trade.take_profit_1-trade.entry_price)/0.75;
+ const tp1R=finite(trade.tp1_r??NaN)&&Number(trade.tp1_r)>0?Number(trade.tp1_r):0.75;\n const tp2Fraction=finite(trade.part_b??NaN)?Number(trade.part_b):cfg.tp2Fraction;\n const tp1Fraction=finite(trade.part_a??NaN)?Number(trade.part_a):cfg.tp1Fraction;\n const tp3Fraction=finite(trade.part_c??NaN)?Number(trade.part_c):cfg.tp3Fraction;\n const tpRiskDistance=Math.abs(trade.take_profit_1-trade.entry_price)/tp1R;
  const riskDist=finite(tpRiskDistance)&&tpRiskDistance>0?tpRiskDistance:Math.abs(trade.entry_price-trade.stop_loss);
  if(!finite(entryMs)||!finite(exitMs)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0)return invalid("INVALID","Invalid entry/exit/initial risk data");
  // Only use fully closed 1m bars after entry and before recorded exit; never inspect the partial exit minute.
@@ -162,17 +162,17 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
    else if(favorableReached&&protectedStopTouched)ambiguous++;
   }
   if(!a&&(isLong?c.high>=trade.take_profit_1:c.low<=trade.take_profit_1)){
-   closeFraction(cfg.tp1Fraction,trade.take_profit_1);a=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp1R:trade.entry_price-riskDist*cfg.moveStopAfterTp1R;
+   closeFraction(tp1Fraction,trade.take_profit_1);a=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp1R:trade.entry_price-riskDist*cfg.moveStopAfterTp1R;
    const movedStopHit=isLong?c.low<=stop:c.high>=stop;
    if(movedStopHit&&remaining>1e-9){ambiguous++;closeFraction(remaining,stop);reason="SAME_BAR_TP1_THEN_MOVED_STOP_CONSERVATIVE";break;}
   }
   if(a&&!b&&(isLong?c.high>=trade.take_profit_2:c.low<=trade.take_profit_2)){
-   closeFraction(cfg.tp2Fraction,trade.take_profit_2);b=true;stop=isLong?trade.entry_price+riskDist*cfg.moveStopAfterTp2R:trade.entry_price-riskDist*cfg.moveStopAfterTp2R;
+   closeFraction(tp2Fraction,trade.take_profit_2);b=true;const floorR=tp1R;stop=isLong?trade.entry_price+riskDist*floorR:trade.entry_price-riskDist*floorR;
    const movedStopHit=isLong?c.low<=stop:c.high>=stop;
    if(movedStopHit&&remaining>1e-9){ambiguous++;closeFraction(remaining,stop);reason="SAME_BAR_TP2_THEN_MOVED_STOP_CONSERVATIVE";break;}
   }
   if(a&&b&&(isLong?c.high>=trade.take_profit_3:c.low<=trade.take_profit_3)){
-   closeFraction(cfg.tp3Fraction,trade.take_profit_3);reason="TP3";break;
+   closeFraction(tp3Fraction,trade.take_profit_3);reason="TP3";break;
   }
   if(i===timeline.length-1){closeFraction(remaining,c.close);reason="RECORDED_WINDOW_CLOSE";}
  }
