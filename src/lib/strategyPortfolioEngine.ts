@@ -110,6 +110,15 @@ export interface RiskDecision { allowed:boolean; riskUsd:number; quantity:number
 export function evaluateRiskGuardian(req:RiskRequest,cfg:RiskGuardianConfig=DEFAULT_RISK_GUARDIAN):RiskDecision{
  const fail=(reason:string):RiskDecision=>({allowed:false,riskUsd:0,quantity:0,reason});
  if(!finite(req.equity)||req.equity<=0||!finite(req.entryPrice)||req.entryPrice<=0||!finite(req.stopDistancePct)||req.stopDistancePct<=0)return fail("Invalid equity, entry price or stop distance");
+ if(!finite(req.currentOpenRiskFraction)||req.currentOpenRiskFraction<0||req.currentOpenRiskFraction>1||
+    !finite(req.dailyRealizedPnl)||!Number.isInteger(req.openPositions)||req.openPositions<0||
+    !Number.isInteger(req.correlatedOpenPositions)||req.correlatedOpenPositions<0||
+    !finite(cfg.riskFraction)||cfg.riskFraction<=0||cfg.riskFraction>1||
+    !finite(cfg.maxPortfolioRiskFraction)||cfg.maxPortfolioRiskFraction<=0||cfg.maxPortfolioRiskFraction>1||
+    !finite(cfg.dailyLossLimitFraction)||cfg.dailyLossLimitFraction<=0||cfg.dailyLossLimitFraction>1||
+    !Number.isInteger(cfg.maxPositions)||cfg.maxPositions<1||
+    !Number.isInteger(cfg.maxCorrelatedPositions)||cfg.maxCorrelatedPositions<1)
+   return fail("Invalid risk state or guardian configuration");
  if(req.dailyRealizedPnl<=-req.equity*cfg.dailyLossLimitFraction)return fail("Daily loss limit reached");
  if(req.openPositions>=cfg.maxPositions)return fail("Maximum concurrent positions reached");
  if(req.correlatedOpenPositions>=cfg.maxCorrelatedPositions)return fail("Correlated exposure limit reached");
@@ -136,16 +145,34 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  const tpRiskDistance=Math.abs(trade.take_profit_1-trade.entry_price)/tp1R;
  const storedRiskDistance=Number(trade.initial_sl_dist);
  const riskDist=finite(storedRiskDistance)&&storedRiskDistance>0?storedRiskDistance:(finite(tpRiskDistance)&&tpRiskDistance>0?tpRiskDistance:Math.abs(trade.entry_price-trade.stop_loss));
- if(!finite(entryMs)||!finite(exitMs)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0)return invalid("INVALID","Invalid entry/exit/initial risk data");
+ const isLong=trade.side==="LONG";
+ const initialStop=finite(trade.initial_stop_loss??NaN)?Number(trade.initial_stop_loss):(isLong?trade.entry_price-riskDist:trade.entry_price+riskDist);
+ const tp1Fraction=finite(trade.part_a??NaN)?Number(trade.part_a):cfg.tp1Fraction;
+ const tp2Fraction=finite(trade.part_b??NaN)?Number(trade.part_b):cfg.tp2Fraction;
+ const tp3Fraction=finite(trade.part_c??NaN)?Number(trade.part_c):cfg.tp3Fraction;
+ const fractionsValid=[tp1Fraction,tp2Fraction,tp3Fraction].every(x=>finite(x)&&x>=0&&x<=1)&&Math.abs(tp1Fraction+tp2Fraction+tp3Fraction-1)<1e-6;
+ const targetsValid=isLong
+   ? trade.take_profit_1>trade.entry_price&&trade.take_profit_2>=trade.take_profit_1&&trade.take_profit_3>=trade.take_profit_2
+   : trade.take_profit_1<trade.entry_price&&trade.take_profit_2<=trade.take_profit_1&&trade.take_profit_3<=trade.take_profit_2;
+ if(!finite(entryMs)||!finite(exitMs)||exitMs<=entryMs||!finite(riskDist)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0||
+    !finite(initialStop)||!(isLong?initialStop<trade.entry_price:initialStop>trade.entry_price)||!targetsValid||
+    !finite(cfg.equity)||cfg.equity<=0||!finite(cfg.riskFraction)||cfg.riskFraction<=0||
+    !finite(cfg.feeRate)||cfg.feeRate<0||cfg.feeRate>0.05||!finite(cfg.slippageRate)||cfg.slippageRate<0||cfg.slippageRate>0.05||!fractionsValid)
+   return invalid("INVALID","Invalid trade levels, fill costs, size fractions or replay configuration");
  // Only use fully closed 1m bars after entry and before recorded exit; never inspect the partial exit minute.
  const timeline=candles.filter(c=>c.time>=entryMs&&c.time+60_000<=exitMs).sort((a,b)=>a.time-b.time);
  if(!timeline.length)return invalid("NO_CANDLES","No candles inside recorded trade interval");
- const isLong=trade.side==="LONG";
+ const seenTimes=new Set<number>();
+ for(const c of timeline){
+  if(!finite(c.time)||!finite(c.open)||!finite(c.high)||!finite(c.low)||!finite(c.close)||!finite(c.volume)||c.volume<0||
+     c.high<c.low||c.high<Math.max(c.open,c.close)||c.low>Math.min(c.open,c.close)||seenTimes.has(c.time))
+   return invalid("INVALID","Malformed or duplicate OHLCV candle in replay window");
+  seenTimes.add(c.time);
+ }
  // Prefer the original recorded quantity. TP1 is anchored at 0.75R in the production entry schema,
  // so it reconstructs the initial stop distance even when stop_loss was later trailed.
  const qty=finite(trade.position_size??NaN)&&Number(trade.position_size)>0?Number(trade.position_size):(cfg.equity*cfg.riskFraction)/riskDist;
  const entryFill=trade.entry_price*(isLong?1+cfg.slippageRate:1-cfg.slippageRate);
- const initialStop=finite(trade.initial_stop_loss??NaN)?Number(trade.initial_stop_loss):(isLong?trade.entry_price-riskDist:trade.entry_price+riskDist);
  let stop=initialStop,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
  let a=false,b=false,microProtected=false;
  const closeFraction=(fraction:number,reference:number)=>{const f=Math.min(remaining,fraction);if(f<=0)return;const fill=reference*(isLong?1-cfg.slippageRate:1+cfg.slippageRate);const units=qty*f;gross+=(isLong?fill-entryFill:entryFill-fill)*units;fees+=fill*units*cfg.feeRate;remaining-=f;lastExit=fill;partialFills++;};
