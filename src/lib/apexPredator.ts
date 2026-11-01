@@ -15,7 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
-import { evaluateStrategyPortfolio, evaluateRiskGuardian, resolveStrategyExitPlan } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, resolveStrategyExitPlan, isCandleClosed } from "./strategyPortfolioEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -455,7 +455,7 @@ async function getContext() {
    const rawBtc4h = await fetchKl("BTCUSDT", "4h", 210);
    const rawBtc15m = await fetchKl("BTCUSDT", "15m", 30);
    const btcClosedAt = Date.now();
-   const btc4h = strategyPortfolioEnabled ? rawBtc4h.filter((k: any) => Number(k.closeTime) < btcClosedAt) : rawBtc4h;
+   const btc4h = strategyPortfolioEnabled ? rawBtc4h.filter((k: any) => isCandleClosed(k.closeTime, btcClosedAt)) : rawBtc4h;
    const btc15m = strategyPortfolioEnabled ? rawBtc15m.filter((k: any) => Number(k.closeTime) < btcClosedAt) : rawBtc15m;
    
    if (btc4h.length < 200 || btc15m.length < 20) {
@@ -553,7 +553,7 @@ async function readWhale(symbol: string, btc_chg: number, closedOnly: boolean = 
    const raw4h = await fetchKl(symbol, "4h", 20);
    const closedAt = Date.now();
    // Portfolio mode is deliberately based only on completed exchange candles.
-   const c15 = closedOnly ? raw15.filter((k: any) => Number(k.closeTime) < closedAt) : raw15;
+   const c15 = closedOnly ? raw15.filter((k: any) => isCandleClosed(k.closeTime, closedAt)) : raw15;
    const c5 = closedOnly ? raw5.filter((k: any) => Number(k.closeTime) < closedAt) : raw5;
    const c4h = closedOnly ? raw4h.filter((k: any) => Number(k.closeTime) < closedAt) : raw4h;
 
@@ -762,7 +762,7 @@ async function scoreEntry(symbol: string, ctx: any) {
       if (safetyReason) return { signal: "WAIT", reason: safetyReason };
 
       // Candidate generation uses completed 15m candles only; the forming candle is excluded.
-      const closedKlines = (p.klines || []).filter((k: any) => Number(k.closeTime) < Date.now());
+      const closedKlines = (p.klines || []).filter((k: any) => isCandleClosed(k.closeTime, Date.now()));
       const candidateInput = closedKlines.map((k: any) => ({
          time: k.openTime, open: k.open, high: k.high, low: k.low, close: k.close,
          volume: k.volume, takerBuyBase: k.takerBuy
