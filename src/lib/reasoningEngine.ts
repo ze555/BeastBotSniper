@@ -223,7 +223,7 @@ export function detectMarketRegime(ctx: any, p: any): MarketRegimeType {
 // ----------------------------------------------------------------------------
 export function interpretFlow(p: any, w: any): FlowAnalysis {
    const pChg = w.p_chg || 0;
-   const oiChg = w.oi_chg || 0;
+   const oiChg = Number.isFinite(w.oi_chg) ? w.oi_chg : Number.NaN;
    const slope15 = w.slope15 || 0;
    const slope5 = w.slope5 || 0;
    const slope4h = w.slope4h || 0;
@@ -1251,7 +1251,7 @@ export function evaluateInstitutionalTradeGuard(
    const slope15 = w.slope15 || 0;
    const slope5 = w.slope5 || 0;
    const slope4h = w.slope4h || 0;
-   const oi_chg = w.oi_chg || 0;
+   const oi_chg = Number.isFinite(w.oi_chg) ? w.oi_chg : Number.NaN;
    const taker = p.taker || 0.5;
    const scenario = w.scenario || "UNCLEAR";
 
