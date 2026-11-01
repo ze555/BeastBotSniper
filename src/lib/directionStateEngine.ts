@@ -217,7 +217,7 @@ export class DirectionStateEngine {
         cvd: recentCvdSum5 > 0 ? "BULLISH" : recentCvdSum5 < 0 ? "BEARISH" : "NEUTRAL",
         takerFlow: recentTaker5 >= 0.51 ? "BUYING_DOMINANT" : recentTaker5 <= 0.49 ? "SELLING_DOMINANT" : "NEUTRAL",
         volume: rvol >= 1.2 ? "EXPANDING" : rvol >= 0.75 ? "NORMAL" : "DRY",
-        oi: (oiContext.oiChg || 0) >= 0 ? "SUPPORTIVE" : "UNFAVORABLE",
+        oi: !Number.isFinite(oiContext.oiChg) ? "NEUTRAL" : (oiContext.oiChg as number) >= 0 ? "SUPPORTIVE" : "UNFAVORABLE",
         btcContext: newState.includes("LONG") 
           ? (isBtcCongruentLong ? "CONGRUENT" : "NON_CONTRADICTORY")
           : (isBtcCongruentShort ? "CONGRUENT" : "NON_CONTRADICTORY"),
