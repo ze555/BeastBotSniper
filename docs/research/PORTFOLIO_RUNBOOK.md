@@ -33,7 +33,7 @@ These values are protective starting defaults for paper evaluation, not empirica
 The replay reads `study_all_trades_master.json` and `master_candles_1m.json` from the repository root. It excludes 15m snapshot candles that were still forming at entry, uses completed 1m candles only, prefers recorded initial stop/risk/quantity fields, and falls back to TP1-based initial-risk reconstruction for the legacy export. Candidate outcome slices are conditional on already-executed trades; they are not an unbiased estimate of strategy expectancy. Missing or unchanged OI is labeled neutral/unavailable, not supportive evidence.
 
 ## Optional paper-only runtime evaluation
-The API route `POST /api/predator/config` accepts `strategyPortfolioEnabled: true`. It is intended only for isolated virtual/paper evaluation. The flag is false by default and should be explicitly set back to false after a test. The portfolio path:
+The API route `POST /api/predator/config` accepts a minimal body such as `{"strategyPortfolioEnabled":true}`; balance and max-trade settings are preserved when omitted. It is intended only for isolated virtual/paper evaluation. The flag is false by default and should be explicitly set back to false after a test. The portfolio path:
 - uses closed BTC 4h/15m and asset 15m/5m/4h candles for signal formation;
 - obtains a fresh ticker price before sizing;
 - tries accepted candidates in score order and falls through to the next strategy if a higher-scored candidate fails a safety gate;\n- applies the existing tri-regime evaluator and execution filter;
