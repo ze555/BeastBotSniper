@@ -34,33 +34,42 @@ function makeCandles():StrategyCandle[]{
  assert.equal(momentumPlan.tp3R,3);
 }
 {
- const c=makeCandles();const result=evaluateStrategyPortfolio(c,{btcRegime:"BULL_WEAK"});
+ const c=makeCandles();const result=evaluateStrategyPortfolio(c,{btcRegime:"BULL_WEAK",...confirmedLongContext});
  assert.equal(result.length,2,"portfolio evaluates both directions");
  assert.equal(result[0].side,"LONG");
  assert.equal(result[0].candidates.length,4,"all four strategy families are evaluated independently");
  assert.equal(result[1].side,"SHORT");
- assert.ok(result.every(x=>x.candidates.every(y=>Number.isFinite(y.score))),"scores are finite");
+ assert.ok(result.every(x=>x.candidates.every(y=>Array.isArray(y.missingEvidence))),"each candidate reports explicit missing evidence; no score is produced");
 }
 
 function flatCandles():StrategyCandle[]{
  return Array.from({length:40},(_,i)=>({time:i,open:100,high:100.2,low:99.8,close:100.05,volume:1000,takerBuyBase:650}));
 }
+const confirmedLongContext={oiAvailable:true,oiChangePct:0.002,priceChangePct:0.003,cvdAvailable:true,cvdSlope5:10,cvdSlope15:20,fundingRate:0.0001,orderBookAvailable:true,orderBookImbalance:0.2,orderBookAgeMs:100};
 {
  const trend=makeCandles();
- const trendLong=evaluateStrategyPortfolio(trend)[0].candidates.find(x=>x.strategy==="TREND_RIDER");
+ const trendLong=evaluateStrategyPortfolio(trend,confirmedLongContext)[0].candidates.find(x=>x.strategy==="TREND_RIDER");
  assert.equal(trendLong?.accepted,true,"trend continuation candidate should pass aligned rising structure and flow");
  const breakout=flatCandles();
  breakout.push({time:40,open:100.15,high:100.85,low:100.14,close:100.75,volume:2200,takerBuyBase:1500});
- const breakoutLong=evaluateStrategyPortfolio(breakout)[0].candidates.find(x=>x.strategy==="BREAKOUT_RETEST");
+ const breakoutLong=evaluateStrategyPortfolio(breakout,confirmedLongContext)[0].candidates.find(x=>x.strategy==="BREAKOUT_RETEST");
  assert.equal(breakoutLong?.accepted,true,"breakout/retest candidate should pass a closed breakout and retest");
  const reversal=flatCandles();
  reversal.push({time:40,open:99.6,high:100.1,low:99.0,close:100.0,volume:2200,takerBuyBase:1500});
- const reversalLong=evaluateStrategyPortfolio(reversal)[0].candidates.find(x=>x.strategy==="LIQUIDITY_REVERSAL");
+ const reversalLong=evaluateStrategyPortfolio(reversal,confirmedLongContext)[0].candidates.find(x=>x.strategy==="LIQUIDITY_REVERSAL");
  assert.equal(reversalLong?.accepted,true,"liquidity reversal candidate should pass a sweep and reclaim");
  const momentum=flatCandles();
  momentum.push({time:40,open:100,high:101.7,low:99.9,close:101.5,volume:2200,takerBuyBase:1500});
- const momentumLong=evaluateStrategyPortfolio(momentum)[0].candidates.find(x=>x.strategy==="MOMENTUM_EXPANSION");
+ const momentumLong=evaluateStrategyPortfolio(momentum,confirmedLongContext)[0].candidates.find(x=>x.strategy==="MOMENTUM_EXPANSION");
  assert.equal(momentumLong?.accepted,true,"momentum expansion candidate should pass directional range and volume expansion");
+ const noBook=evaluateStrategyPortfolio(trend,{...confirmedLongContext,orderBookAvailable:false})[0].candidates.find(x=>x.strategy==="TREND_RIDER");
+ assert.equal(noBook?.accepted,false,"missing depth must block the entry rather than count as a neutral score");
+ assert.ok(noBook?.missingEvidence.includes("Fresh order-book imbalance unavailable, stale or opposing"));
+ const conflictingCvd=evaluateStrategyPortfolio(trend,{...confirmedLongContext,cvdSlope5:-10})[0].candidates.find(x=>x.strategy==="TREND_RIDER");
+ assert.equal(conflictingCvd?.accepted,false,"conflicting 5m/15m CVD must veto the entry");
+ const missingOi=evaluateStrategyPortfolio(trend,{...confirmedLongContext,oiAvailable:false})[0].candidates.find(x=>x.strategy==="TREND_RIDER");
+ assert.equal(missingOi?.accepted,false,"missing OI must veto the entry");
+
 }
 {
  const denied=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0.02,dailyRealizedPnl:0,openPositions:0,correlatedOpenPositions:0});
