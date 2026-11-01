@@ -1,9 +1,9 @@
 import fs from "node:fs";
-import { evaluateStrategyPortfolio, simulatePartialExitTrade, summarizeReplay, DEFAULT_REPLAY_CONFIG, StrategyCandle, ReplayCandle, ReplayTrade, ReplayResult, StrategyId } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, simulatePartialExitTrade, summarizeReplay, DEFAULT_REPLAY_CONFIG, filterSnapshotCandles, StrategyCandle, ReplayCandle, ReplayTrade, ReplayResult, StrategyId } from "./strategyPortfolioEngine.js";
 
 interface ResearchTrade extends ReplayTrade {
  symbol:string;market_regime:string;market_context?:{btc_regime?:string;volatility_state?:string;funding_rate?:number};
- candles_before_entry?:StrategyCandle[];risk_percent?:number;pnl?:number;fees?:number;
+ candles_before_entry?:(StrategyCandle & {timestamp?:string})[];risk_percent?:number;pnl?:number;fees?:number;
 }
 const trades=JSON.parse(fs.readFileSync("study_all_trades_master.json","utf8")) as ResearchTrade[];
 const streams=JSON.parse(fs.readFileSync("master_candles_1m.json","utf8")) as Record<string,ReplayCandle[]>;
@@ -13,8 +13,10 @@ const candidateTradeIds:Record<string,Set<string>>={};
 for(const id of ids){candidateStats[id]={evaluated:0,accepted:0,matchedDirection:0,scoreSum:0};candidateTradeIds[id]=new Set<string>();}
 let featureCoverage=0;
 for(const t of trades){
- const c=t.candles_before_entry;
- if(!Array.isArray(c)||c.length<25)continue;
+ const entryMs=Date.parse(t.timestamp_entry);
+ const rawSnapshots=Array.isArray(t.candles_before_entry)?t.candles_before_entry:[];
+ const c=filterSnapshotCandles(rawSnapshots,entryMs,15*60_000);
+ if(c.length<25)continue;
  featureCoverage++;
  const context={btcRegime:t.market_context?.btc_regime, fundingRate:t.market_context?.funding_rate,oiAvailable:false};
  const evaluated=evaluateStrategyPortfolio(c,context);
