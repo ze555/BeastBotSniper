@@ -73,6 +73,10 @@ function flatCandles():StrategyCandle[]{
  assert.equal(dailyStop.allowed,false,"daily loss cap blocks fresh entries");
  const concentration=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:0,openPositions:2,correlatedOpenPositions:2});
  assert.equal(concentration.allowed,false,"same-direction concentration proxy blocks excess exposure");
+ const malformedRisk=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:Number.NaN,dailyRealizedPnl:0,openPositions:0,correlatedOpenPositions:0});
+ assert.equal(malformedRisk.allowed,false,"NaN open-risk state must fail closed");
+ const malformedDaily=evaluateRiskGuardian({equity:1000,entryPrice:100,stopDistancePct:0.01,currentOpenRiskFraction:0,dailyRealizedPnl:Number.NaN,openPositions:0,correlatedOpenPositions:0});
+ assert.equal(malformedDaily.allowed,false,"unknown daily PnL must fail closed");
 }
 {
  const trade={trade_id:"WIN",side:"LONG" as const,timestamp_entry:"2026-11-01T00:00:00.000Z",timestamp_exit:"2026-11-01T00:03:00.000Z",entry_price:100,stop_loss:99,take_profit_1:100.75,take_profit_2:101.8,take_profit_3:103.5,position_size:10,pnl_r:2};
@@ -97,6 +101,10 @@ function flatCandles():StrategyCandle[]{
  assert.equal(r.exitReason,"AMBIGUOUS_STOP_FIRST","same-candle stop/target collision resolves conservatively");
  assert.equal(r.ambiguousBars,1);
  assert.ok(r.netPnl<0);
+ const badCandle=simulatePartialExitTrade({...trade,trade_id:"BAD"},[{time:t,open:100,high:98,low:99,close:100,volume:1000}]);
+ assert.equal(badCandle.status,"INVALID","malformed OHLC bars must be rejected");
+ const badFractions=simulatePartialExitTrade({...trade,trade_id:"BAD-FRACTIONS",part_a:0.8,part_b:0.8,part_c:0},[{time:t,open:100,high:100.2,low:99.8,close:100,volume:1000}]);
+ assert.equal(badFractions.status,"INVALID","partial exit fractions must sum to one");
 }
 
 
