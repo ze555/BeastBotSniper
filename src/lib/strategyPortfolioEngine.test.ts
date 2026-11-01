@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTrade, summarizeReplay, StrategyCandle, ReplayCandle } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTrade, summarizeReplay, resolveStrategyExitPlan, StrategyCandle, ReplayCandle } from "./strategyPortfolioEngine.js";
 
 function makeCandles():StrategyCandle[]{
  const out:StrategyCandle[]=[];let p=100;
  for(let i=0;i<40;i++){const open=p;const drift=0.08;const close=open+drift;out.push({time:i,open,high:close+0.08,low:open-0.04,close,volume:1000+(i%4)*30,takerBuyBase:650});p=close;}
  return out;
+}
+
+{
+ const rangePlan=resolveStrategyExitPlan("LIQUIDITY_REVERSAL","RANGE_SCALP");
+ assert.deepEqual(rangePlan,{tp1R:0.8,tp2R:1,tp3R:1,partA:0.5,partB:0.5,partC:0,minRRRequired:0.9});
+ const trendPlan=resolveStrategyExitPlan("TREND_RIDER","TSUNAMI_RUNNER");
+ assert.equal(trendPlan.tp3R,3.5);
+ const momentumPlan=resolveStrategyExitPlan("MOMENTUM_EXPANSION","TSUNAMI_RUNNER");
+ assert.equal(momentumPlan.tp3R,3);
 }
 {
  const c=makeCandles();const result=evaluateStrategyPortfolio(c,{btcRegime:"BULL_WEAK"});
