@@ -56,7 +56,7 @@ const confirmedLongContext={oiAvailable:true,oiChangePct:0.002,priceChangePct:0.
  const breakoutLong=evaluateStrategyPortfolio(breakout,confirmedLongContext)[0].candidates.find(x=>x.strategy==="BREAKOUT_RETEST");
  assert.equal(breakoutLong?.accepted,true,"breakout/retest candidate should pass a closed breakout and retest");
  const reversal=flatCandles();
- reversal.push({time:40,open:99.6,high:100.1,low:99.0,close:100.0,volume:2200,takerBuyBase:1500});
+ reversal.push({time:40,open:99.7,high:100.1,low:98.8,close:100.0,volume:2200,takerBuyBase:1500});
  const reversalLong=evaluateStrategyPortfolio(reversal,confirmedLongContext)[0].candidates.find(x=>x.strategy==="LIQUIDITY_REVERSAL");
  assert.equal(reversalLong?.accepted,true,"liquidity reversal candidate should pass a sweep and reclaim");
  const momentum=flatCandles();
