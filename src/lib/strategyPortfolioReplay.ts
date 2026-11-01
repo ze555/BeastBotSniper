@@ -8,9 +8,9 @@ interface ResearchTrade extends ReplayTrade {
 const trades=JSON.parse(fs.readFileSync("study_all_trades_master.json","utf8")) as ResearchTrade[];
 const streams=JSON.parse(fs.readFileSync("master_candles_1m.json","utf8")) as Record<string,ReplayCandle[]>;
 const ids:StrategyId[]=["TREND_RIDER","BREAKOUT_RETEST","LIQUIDITY_REVERSAL","MOMENTUM_EXPANSION"];
-const candidateStats:Record<string,{evaluated:number;accepted:number;matchedDirection:number;scoreSum:number}>={};
+const candidateStats:Record<string,{evaluated:number;accepted:number;matchedDirection:number;missingEvidence:Record<string,number>}>={};
 const candidateTradeIds:Record<string,Set<string>>={};
-for(const id of ids){candidateStats[id]={evaluated:0,accepted:0,matchedDirection:0,scoreSum:0};candidateTradeIds[id]=new Set<string>();}
+for(const id of ids){candidateStats[id]={evaluated:0,accepted:0,matchedDirection:0,missingEvidence:{}};candidateTradeIds[id]=new Set<string>();}
 let featureCoverage=0;
 for(const t of trades){
  const entryMs=Date.parse(t.timestamp_entry);
@@ -21,7 +21,7 @@ for(const t of trades){
  const context={btcRegime:t.market_context?.btc_regime, fundingRate:t.market_context?.funding_rate,oiAvailable:false};
  const evaluated=evaluateStrategyPortfolio(c,context);
  for(const side of evaluated)for(const candidate of side.candidates){
-  const s=candidateStats[candidate.strategy];s.evaluated++;s.scoreSum+=candidate.score;
+  const s=candidateStats[candidate.strategy];s.evaluated++;for(const reason of candidate.missingEvidence)s.missingEvidence[reason]=(s.missingEvidence[reason]||0)+1;
   if(candidate.accepted){s.accepted++;if(candidate.side===t.side){s.matchedDirection++;candidateTradeIds[candidate.strategy].add(t.trade_id);}}
  }
 }
@@ -46,7 +46,7 @@ const recordedR=recorded.reduce((s,t)=>s+(Number(t.pnl_r)||0),0);
 const recordedFees=recorded.reduce((s,t)=>s+(Number(t.fees)||0),0);
 const result={
  dataset:{trades:trades.length,tradeCandleCoverage:Object.keys(streams).length,featureSnapshotCoverage:featureCoverage,recordedNetPnl:Number(recordedPnl.toFixed(2)),recordedNetR:Number(recordedR.toFixed(3)),recordedFeesAllTrades:Number(trades.reduce((s,t)=>s+(Number(t.fees)||0),0).toFixed(2)),recordedCoveredFees:Number(recordedFees.toFixed(2))},
- entryCandidateDiagnostics:Object.fromEntries(ids.map(id=>{const s=candidateStats[id];return [id,{evaluated:s.evaluated,accepted:s.accepted,acceptedPct:s.evaluated?Number((s.accepted/s.evaluated*100).toFixed(1)):0,acceptedOnActualSide:s.matchedDirection,averageScore:s.evaluated?Number((s.scoreSum/s.evaluated).toFixed(2)):0}]})),
+ entryConfluenceDiagnostics:Object.fromEntries(ids.map(id=>{const s=candidateStats[id];return [id,{evaluated:s.evaluated,accepted:s.accepted,acceptedPct:s.evaluated?Number((s.accepted/s.evaluated*100).toFixed(1)):0,acceptedOnActualSide:s.matchedDirection,mostCommonMissingEvidence:Object.entries(s.missingEvidence).sort((a,b)=>b[1]-a[1]).slice(0,10)}]})),
  conditionalOutcomesOnExecutedTradeSnapshots:conditionalOutcomes,
  fillAwarePartialExitReplay:{...summary,netPnl:Number(summary.netPnl.toFixed(2)),netR:Number(summary.netR.toFixed(3)),profitFactor:summary.profitFactor===null?null:Number(summary.profitFactor.toFixed(3)),expectancy:Number(summary.expectancy.toFixed(3)),maxDrawdownUsd:Number(summary.maxDrawdownUsd.toFixed(2)),fees:Number(summary.fees.toFixed(2)),coveragePct:Number((replayResults.length/trades.length*100).toFixed(1)),withinAvailableStreamsPct:Number((summary.coverage*100).toFixed(1))},
  comparison:{recordedCoveredPnl:Number(recordedPnl.toFixed(2)),recordedCoveredR:Number(recordedR.toFixed(3)),replayedVsRecordedPnl:Number((summary.netPnl-recordedPnl).toFixed(2)),riskUnitComparison:"Recorded pnl_r denominator and fee convention are not fully specified; report replay netR and recorded R separately."},
