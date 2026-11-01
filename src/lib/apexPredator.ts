@@ -806,7 +806,7 @@ async function scoreEntry(symbol: string, ctx: any) {
       const currentOpenRiskFraction = activeTrades.reduce((sum: number,t: any) => sum+(Math.abs(t.initialSlDist||0)*Math.max(0,Number(t.pos)||0))/Math.max(virtualBalance,1),0);
       const openFloating = activeTrades.reduce((sum: number,t: any) => sum+(Number(t.pnl)||0),0);
       const risk = evaluateRiskGuardian({
-         equity: virtualBalance, stopDistancePct, currentOpenRiskFraction,
+         equity: virtualBalance, entryPrice: executionPrice, stopDistancePct, currentOpenRiskFraction,
          dailyRealizedPnl: todaysStats.pnl+openFloating, openPositions: activeTrades.length,
          // Conservative concentration proxy: count same-direction positions; this is not a measured correlation matrix.
          correlatedOpenPositions: activeTrades.filter((t: any) => t.direction === candidate.side).length
