@@ -9,6 +9,7 @@ export interface StrategyContext { btcRegime?:string; btcChangePct?:number; fund
 export interface StrategyCandidate { strategy:StrategyId; side:Side; score:number; accepted:boolean; reasons:string[]; entryReference:number; stopReference:number; targetR:number }
 export interface StrategyEvaluation { side:Side; candidates:StrategyCandidate[]; selected:StrategyCandidate|null }
 export interface StrategyExitPlan { tp1R:number; tp2R:number; tp3R:number; partA:number; partB:number; partC:number; minRRRequired:number }
+export function applyRegimeRiskMultiplier(riskUsd:number,assetRegime:string):number { return assetRegime==="RANGE"||assetRegime==="TRANSITION"?riskUsd*0.5:riskUsd; }
 export function resolveStrategyExitPlan(strategy:StrategyId,triRegimeExitStrategy:string):StrategyExitPlan {
  if(triRegimeExitStrategy==="RANGE_SCALP")return {tp1R:0.8,tp2R:1.0,tp3R:1.0,partA:0.5,partB:0.5,partC:0,minRRRequired:0.9};
  if(strategy==="LIQUIDITY_REVERSAL")return {tp1R:0.75,tp2R:1.5,tp3R:2.5,partA:0.4,partB:0.35,partC:0.25,minRRRequired:2.0};
