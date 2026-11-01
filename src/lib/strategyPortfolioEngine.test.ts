@@ -6,6 +6,10 @@ function makeCandles():StrategyCandle[]{
  for(let i=0;i<40;i++){const open=p;const drift=0.08;const close=open+drift;out.push({time:i,open,high:close+0.08,low:open-0.04,close,volume:1000+(i%4)*30,takerBuyBase:650});p=close;}
  return out;
 }
+function flatCandles():StrategyCandle[]{
+ return Array.from({length:40},(_,i)=>({time:i,open:100,high:100.2,low:99.8,close:100.05,volume:1000,takerBuyBase:650}));
+}
+const confirmedLongContext={oiAvailable:true,oiChangePct:0.002,priceChangePct:0.003,cvdAvailable:true,cvdSlope5:10,cvdSlope15:20,fundingRate:0.0001,orderBookAvailable:true,orderBookImbalance:0.2,orderBookAgeMs:100};
 
 
 
@@ -42,10 +46,6 @@ function makeCandles():StrategyCandle[]{
  assert.ok(result.every(x=>x.candidates.every(y=>Array.isArray(y.missingEvidence))),"each candidate reports explicit missing evidence; no score is produced");
 }
 
-function flatCandles():StrategyCandle[]{
- return Array.from({length:40},(_,i)=>({time:i,open:100,high:100.2,low:99.8,close:100.05,volume:1000,takerBuyBase:650}));
-}
-const confirmedLongContext={oiAvailable:true,oiChangePct:0.002,priceChangePct:0.003,cvdAvailable:true,cvdSlope5:10,cvdSlope15:20,fundingRate:0.0001,orderBookAvailable:true,orderBookImbalance:0.2,orderBookAgeMs:100};
 {
  const trend=makeCandles();
  const trendLong=evaluateStrategyPortfolio(trend,confirmedLongContext)[0].candidates.find(x=>x.strategy==="TREND_RIDER");
