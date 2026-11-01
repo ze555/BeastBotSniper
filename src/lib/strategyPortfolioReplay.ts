@@ -30,14 +30,16 @@ for(const t of trades){
  replayResults.push(simulatePartialExitTrade(t,candles,cfg));
 }
 const summary=summarizeReplay(replayResults);
-const recorded=trades.filter(t=>Number.isFinite(t.pnl_r));
+const replayedIds=new Set(replayResults.map(r=>r.trade_id));
+const recorded=trades.filter(t=>replayedIds.has(t.trade_id)&&Number.isFinite(t.pnl_r));
 const recordedPnl=recorded.reduce((s,t)=>s+(Number(t.pnl)||0),0);
 const recordedR=recorded.reduce((s,t)=>s+(Number(t.pnl_r)||0),0);
+const recordedFees=recorded.reduce((s,t)=>s+(Number(t.fees)||0),0);
 const result={
- dataset:{trades:trades.length,tradeCandleCoverage:Object.keys(streams).length,featureSnapshotCoverage:featureCoverage,recordedNetPnl:Number(recordedPnl.toFixed(2)),recordedNetR:Number(recordedR.toFixed(3)),recordedFees:Number(trades.reduce((s,t)=>s+(Number(t.fees)||0),0).toFixed(2))},
+ dataset:{trades:trades.length,tradeCandleCoverage:Object.keys(streams).length,featureSnapshotCoverage:featureCoverage,recordedNetPnl:Number(recordedPnl.toFixed(2)),recordedNetR:Number(recordedR.toFixed(3)),recordedFeesAllTrades:Number(trades.reduce((s,t)=>s+(Number(t.fees)||0),0).toFixed(2)),recordedCoveredFees:Number(recordedFees.toFixed(2))},
  entryCandidateDiagnostics:Object.fromEntries(ids.map(id=>{const s=candidateStats[id];return [id,{evaluated:s.evaluated,accepted:s.accepted,acceptedPct:s.evaluated?Number((s.accepted/s.evaluated*100).toFixed(1)):0,acceptedOnActualSide:s.matchedDirection,averageScore:s.evaluated?Number((s.scoreSum/s.evaluated).toFixed(2)):0}]})),
- fillAwarePartialExitReplay:{...summary,netPnl:Number(summary.netPnl.toFixed(2)),netR:Number(summary.netR.toFixed(3)),profitFactor:summary.profitFactor===null?null:Number(summary.profitFactor.toFixed(3)),expectancy:Number(summary.expectancy.toFixed(3)),maxDrawdownUsd:Number(summary.maxDrawdownUsd.toFixed(2)),fees:Number(summary.fees.toFixed(2)),coveragePct:Number((summary.coverage*100).toFixed(1))},
- comparison:{replayedVsRecordedPnl:Number((summary.netPnl-recordedPnl).toFixed(2)),replayedVsRecordedR:Number((summary.netR-recordedR).toFixed(3))},
+ fillAwarePartialExitReplay:{...summary,netPnl:Number(summary.netPnl.toFixed(2)),netR:Number(summary.netR.toFixed(3)),profitFactor:summary.profitFactor===null?null:Number(summary.profitFactor.toFixed(3)),expectancy:Number(summary.expectancy.toFixed(3)),maxDrawdownUsd:Number(summary.maxDrawdownUsd.toFixed(2)),fees:Number(summary.fees.toFixed(2)),coveragePct:Number((replayResults.length/trades.length*100).toFixed(1)),withinAvailableStreamsPct:Number((summary.coverage*100).toFixed(1))},
+ comparison:{recordedCoveredPnl:Number(recordedPnl.toFixed(2)),recordedCoveredR:Number(recordedR.toFixed(3)),replayedVsRecordedPnl:Number((summary.netPnl-recordedPnl).toFixed(2)),replayedVsRecordedR:Number((summary.netR-recordedR).toFixed(3))},
  limitations:[
   "Entry candidates are evaluated only on the 15m pre-entry snapshots attached to executed trades; this cannot measure rejected opportunities or produce unbiased candidate strategy expectancy.",
   "The 1m candle streams cover only a subset of trades and stop at the recorded exit. Replay therefore compares a new partial-exit policy inside each historical trade's observed holding window.",
