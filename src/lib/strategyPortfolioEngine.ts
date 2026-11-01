@@ -8,6 +8,13 @@ export interface StrategyCandle { time?: number | string; open:number; high:numb
 export interface StrategyContext { btcRegime?:string; btcChangePct?:number; fundingRate?:number; oiChangePct?:number; oiAvailable?:boolean }
 export interface StrategyCandidate { strategy:StrategyId; side:Side; score:number; accepted:boolean; reasons:string[]; entryReference:number; stopReference:number; targetR:number }
 export interface StrategyEvaluation { side:Side; candidates:StrategyCandidate[]; selected:StrategyCandidate|null }
+export interface StrategyExitPlan { tp1R:number; tp2R:number; tp3R:number; partA:number; partB:number; partC:number; minRRRequired:number }
+export function resolveStrategyExitPlan(strategy:StrategyId,triRegimeExitStrategy:string):StrategyExitPlan {
+ if(triRegimeExitStrategy==="RANGE_SCALP")return {tp1R:0.8,tp2R:1.0,tp3R:1.0,partA:0.5,partB:0.5,partC:0,minRRRequired:0.9};
+ if(strategy==="LIQUIDITY_REVERSAL")return {tp1R:0.75,tp2R:1.5,tp3R:2.5,partA:0.4,partB:0.35,partC:0.25,minRRRequired:2.0};
+ if(strategy==="MOMENTUM_EXPANSION")return {tp1R:0.75,tp2R:1.5,tp3R:3.0,partA:0.4,partB:0.35,partC:0.25,minRRRequired:2.5};
+ return {tp1R:0.75,tp2R:1.8,tp3R:3.5,partA:0.4,partB:0.35,partC:0.25,minRRRequired:2.5};
+}
 export interface RiskGuardianConfig { riskFraction:number; maxPortfolioRiskFraction:number; dailyLossLimitFraction:number; maxPositions:number; maxCorrelatedPositions:number }
 export const DEFAULT_RISK_GUARDIAN:RiskGuardianConfig={riskFraction:0.005,maxPortfolioRiskFraction:0.02,dailyLossLimitFraction:0.02,maxPositions:5,maxCorrelatedPositions:2};
 
