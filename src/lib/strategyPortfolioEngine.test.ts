@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTrade, summarizeReplay, resolveStrategyExitPlan, isCandleClosed, filterSnapshotCandles, StrategyCandle, ReplayCandle } from "./strategyPortfolioEngine.js";
+import { evaluateStrategyPortfolio, evaluateRiskGuardian, simulatePartialExitTrade, summarizeReplay, resolveStrategyExitPlan, applyRegimeRiskMultiplier, isCandleClosed, filterSnapshotCandles, StrategyCandle, ReplayCandle } from "./strategyPortfolioEngine.js";
 
 function makeCandles():StrategyCandle[]{
  const out:StrategyCandle[]=[];let p=100;
@@ -19,6 +19,11 @@ function makeCandles():StrategyCandle[]{
  assert.equal(isCandleClosed(1000,2000),true);
  assert.equal(isCandleClosed(2000,2000),false,"a candle is not treated as closed at its exact close timestamp");
  assert.equal(isCandleClosed(undefined,2000),false,"missing close time is never assumed to be closed");
+}
+{
+ assert.equal(applyRegimeRiskMultiplier(5,"RANGE"),2.5);
+ assert.equal(applyRegimeRiskMultiplier(5,"TRANSITION"),2.5);
+ assert.equal(applyRegimeRiskMultiplier(5,"TREND_UP"),5);
 }
 {
  const rangePlan=resolveStrategyExitPlan("LIQUIDITY_REVERSAL","RANGE_SCALP");
