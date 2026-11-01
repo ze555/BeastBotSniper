@@ -120,7 +120,7 @@ export function evaluateRiskGuardian(req:RiskRequest,cfg:RiskGuardianConfig=DEFA
  const quantity=riskUsd/(req.entryPrice*req.stopDistancePct);
  return {allowed:true,riskUsd,quantity,reason:"Risk budget available; size derived from stop distance"};
 }
-export interface ReplayTrade { trade_id:string;side:Side;timestamp_entry:string;timestamp_exit:string;entry_price:number;stop_loss:number;take_profit_1:number;take_profit_2:number;take_profit_3:number;position_size?:number;pnl_r?:number;tp1_r?:number;tp2_r?:number;tp3_r?:number;part_a?:number;part_b?:number;part_c?:number }
+export interface ReplayTrade { trade_id:string;side:Side;timestamp_entry:string;timestamp_exit:string;entry_price:number;stop_loss:number;take_profit_1:number;take_profit_2:number;take_profit_3:number;position_size?:number;initial_stop_loss?:number;initial_sl_dist?:number;initial_risk_usd?:number;pnl_r?:number;tp1_r?:number;tp2_r?:number;tp3_r?:number;part_a?:number;part_b?:number;part_c?:number }
 export interface ReplayCandle {time:number;open:number;high:number;low:number;close:number;volume:number;takerBuyBase?:number}
 export interface ReplayConfig {equity:number;riskFraction:number;feeRate:number;slippageRate:number;tp1Fraction:number;tp2Fraction:number;tp3Fraction:number;moveStopAfterTp1R:number;moveStopAfterTp2R:number;maxHoldMinutes:number}
 export const DEFAULT_REPLAY_CONFIG:ReplayConfig={equity:1000,riskFraction:0.005,feeRate:0.0004,slippageRate:0.0002,tp1Fraction:0.4,tp2Fraction:0.35,tp3Fraction:0.25,moveStopAfterTp1R:0.3,moveStopAfterTp2R:0.75,maxHoldMinutes:1440};
@@ -134,7 +134,8 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  const tp1Fraction=finite(trade.part_a??NaN)?Number(trade.part_a):cfg.tp1Fraction; 
  const tp3Fraction=finite(trade.part_c??NaN)?Number(trade.part_c):cfg.tp3Fraction; 
  const tpRiskDistance=Math.abs(trade.take_profit_1-trade.entry_price)/tp1R;
- const riskDist=finite(tpRiskDistance)&&tpRiskDistance>0?tpRiskDistance:Math.abs(trade.entry_price-trade.stop_loss);
+ const storedRiskDistance=Number(trade.initial_sl_dist);
+ const riskDist=finite(storedRiskDistance)&&storedRiskDistance>0?storedRiskDistance:(finite(tpRiskDistance)&&tpRiskDistance>0?tpRiskDistance:Math.abs(trade.entry_price-trade.stop_loss));
  if(!finite(entryMs)||!finite(exitMs)||riskDist<=0||!finite(trade.entry_price)||trade.entry_price<=0)return invalid("INVALID","Invalid entry/exit/initial risk data");
  // Only use fully closed 1m bars after entry and before recorded exit; never inspect the partial exit minute.
  const timeline=candles.filter(c=>c.time>=entryMs&&c.time+60_000<=exitMs).sort((a,b)=>a.time-b.time);
@@ -144,7 +145,8 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
  // so it reconstructs the initial stop distance even when stop_loss was later trailed.
  const qty=finite(trade.position_size??NaN)&&Number(trade.position_size)>0?Number(trade.position_size):(cfg.equity*cfg.riskFraction)/riskDist;
  const entryFill=trade.entry_price*(isLong?1+cfg.slippageRate:1-cfg.slippageRate);
- let stop=isLong?trade.entry_price-riskDist:trade.entry_price+riskDist,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
+ const initialStop=finite(trade.initial_stop_loss??NaN)?Number(trade.initial_stop_loss):(isLong?trade.entry_price-riskDist:trade.entry_price+riskDist);
+ let stop=initialStop,remaining=1,gross=0,fees=entryFill*qty*cfg.feeRate,partialFills=0,ambiguous=0,reason="END_OF_DATA",lastExit=entryFill;
  let a=false,b=false,microProtected=false;
  const closeFraction=(fraction:number,reference:number)=>{const f=Math.min(remaining,fraction);if(f<=0)return;const fill=reference*(isLong?1-cfg.slippageRate:1+cfg.slippageRate);const units=qty*f;gross+=(isLong?fill-entryFill:entryFill-fill)*units;fees+=fill*units*cfg.feeRate;remaining-=f;lastExit=fill;partialFills++;};
  for(let i=0;i<timeline.length&&remaining>1e-9;i++){
@@ -183,7 +185,7 @@ export function simulatePartialExitTrade(trade:ReplayTrade,candles:ReplayCandle[
   }
   if(i===timeline.length-1){closeFraction(remaining,c.close);reason="RECORDED_WINDOW_CLOSE";}
  }
- const net=gross-fees,riskUsd=qty*riskDist;
+ const net=gross-fees,storedRiskUsd=Number(trade.initial_risk_usd),riskUsd=finite(storedRiskUsd)&&storedRiskUsd>0?storedRiskUsd:qty*riskDist;
  return {trade_id:trade.trade_id,status:"REPLAYED",exitReason:reason,exitPrice:lastExit,grossPnl:gross,fees,netPnl:net,netR:net/riskUsd,partialFills,bars:timeline.length,ambiguousBars:ambiguous,recordedR:finite(trade.pnl_r??NaN)?trade.pnl_r!:null};
 }
 export function summarizeReplay(results:ReplayResult[]){
