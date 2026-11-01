@@ -1322,11 +1322,11 @@ function executeTrade(symbol: string, decision: any) {
 
       const tp1 = entry + (initialSlDist * tp1R);
       const tp2 = entry + (initialSlDist * tp2R);
-      const tp3 = entry + (initialSlDist * tp3R)
+      const tp3 = entry + (initialSlDist * tp3R);
 
       const calculatedRR = (tp3 - entry) / realSlDist;
       if (calculatedRR < minRRRequired) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
+         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${minRRRequired})`, "error");
          return;
       }
 
@@ -1603,7 +1603,7 @@ async function exitBrain(trade: any, ctx: any) {
          t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
          t.a_closed = true; 
          t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${tradeTp1R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
+         addLog(`🎯 هدف أول (${Math.round(t.part_a*100)}%) ${t.symbol} | +${tradeTp1R}R | 🛡️ تم نقل الوقف لمستوى +0.30R`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
          t.sl = t.entry;
@@ -1620,7 +1620,7 @@ async function exitBrain(trade: any, ctx: any) {
          t.b_closed = true;
          // Lock in TP1 level as floor profit
          t.sl = t.direction === "LONG" ? t.entry + (slDist * tradeTp1R) : t.entry - (slDist * tradeTp1R);
-         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${tradeTp2R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
+         addLog(`🎯 هدف ثانٍ (${Math.round(t.part_b*100)}%) ${t.symbol} | +${tradeTp2R}R | تم حجز الأرباح ورفع الوقف لمستوى +${tradeTp1R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
@@ -1635,7 +1635,7 @@ async function exitBrain(trade: any, ctx: any) {
       if (profitR >= tradeTp3R || exhaust >= 8 || peak >= 8) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${tradeTp3R}R صيد الاتجاه بالكامل 🏆`, 'success');
+         addLog(`🏁 هدف ثالث نهائي (${Math.round(t.part_c*100)}%) ${t.symbol} | +${tradeTp3R}R صيد الاتجاه بالكامل 🏆`, 'success');
          closeTradeFull(t, "TP3 Full Target Hit");
          return;
       }
