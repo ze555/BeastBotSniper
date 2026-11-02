@@ -321,9 +321,9 @@ async function updateDynamicWatchlist() {
          const activeMovers = [...validTickers]
             .filter((s: any) => Math.abs(parseFloat(s.priceChangePercent) || 0) >= 2.0)
             .sort((a: any, b: any) => {
-               const scoreA = Math.abs(parseFloat(a.priceChangePercent) || 0) * Math.log10(parseFloat(a.quoteVolume) || 1);
-               const scoreB = Math.abs(parseFloat(b.priceChangePercent) || 0) * Math.log10(parseFloat(b.quoteVolume) || 1);
-               return scoreB - scoreA;
+               const moveA = Math.abs(parseFloat(a.priceChangePercent) || 0);
+               const moveB = Math.abs(parseFloat(b.priceChangePercent) || 0);
+               return moveB - moveA;
             })
             .map((s: any) => s.symbol);
 
@@ -782,7 +782,7 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
 }
 
 // --- SEC 4: INSTITUTIONAL EVIDENCE ENTRY ENGINE (NO SCORE) ---
-async function scoreEntry(symbol: string, ctx: any) {
+async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
    if (!ctx.tradeable || ctx.btc_whipsaw) return { signal: "WAIT", reason: "BTC_WHIPSaw_CONTEXT" };
    if (!isLibyaTradingAllowed()) return { signal: "WAIT", reason: "OUTSIDE_LIBYA_HOURS" };
@@ -995,7 +995,8 @@ function executeTrade(symbol: string, decision: any) {
          entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
-         be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
+         be_done: false, micro_banked: false, grade: grade.label, pnl: 0,
+         institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
          atr: p.atr14, peak_r: 0,
@@ -1094,8 +1095,6 @@ async function exitBrain(trade: any, ctx: any) {
       : spotDelta < 0 && futuresDelta < 0;
    const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
    const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
-   let exhaust = 0;
-   let peak = 0;
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
@@ -1130,12 +1129,6 @@ async function exitBrain(trade: any, ctx: any) {
          t.a_closed = true; 
          t.be_done = true;
          addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
-      } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
-         closePart(t, "A", t.part_a);
-         t.sl = t.entry;
-         t.a_closed = true;
-         t.be_done = true;
-         addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
       }
    }
 
@@ -1147,9 +1140,6 @@ async function exitBrain(trade: any, ctx: any) {
          // Lock in TP1 level as floor profit
          t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
          addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
-      } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
-         closePart(t, "B", t.part_b);
-         t.b_closed = true;
       }
    }
 
@@ -1158,7 +1148,7 @@ async function exitBrain(trade: any, ctx: any) {
       if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
       else { t.sl = Math.min(t.sl, price + trailDist); }
 
-      if (profitR >= TP3_R || exhaust >= 8 || peak >= 8) {
+      if (profitR >= TP3_R) {
          closePart(t, "C", t.part_c);
          t.c_closed = true;
          addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
@@ -1336,7 +1326,7 @@ export async function runApexLoop() {
          const promises = chunk.map(async (sym: string) => {
             if (activeTrades.some(t => t.symbol === sym)) return null;
             try {
-               const dec = await scoreEntry(sym, ctx);
+               const dec = await evaluateInstitutionalEntry(sym, ctx);
                return { sym, dec };
             } catch {
                return null;
