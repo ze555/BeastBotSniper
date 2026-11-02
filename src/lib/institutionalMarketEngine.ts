@@ -229,8 +229,17 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   if ((longSqueeze && !longSpot) || (shortSqueeze && !shortSpot)) {
     state = "SQUEEZE_ONLY";
     reason = "Price expansion is accompanied by declining OI and lacks confirming spot participation.";
+  } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
+      input.previousDirection === "LONG" && longFlow && recent.close >= priorHigh * 0.995 && !longExhaustion) {
+    state = "CONTINUATION"; direction = "LONG";
+    reason = "Previously confirmed bullish structure remains accepted with spot/futures flow still aligned.";
+  } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
+      input.previousDirection === "SHORT" && shortFlow && recent.close <= priorLow * 1.005 && !shortExhaustion) {
+    state = "CONTINUATION"; direction = "SHORT";
+    reason = "Previously confirmed bearish structure remains accepted with spot/futures flow still aligned.";
   } else if (longConfirmed) {
-    state = "BREAKOUT_CONFIRMED"; direction = "LONG"; canEnter = true; entryType = "CONFIRMED_BREAKOUT";
+    state = input.previousDirection === "SHORT" ? "REVERSAL_CONFIRMED" : "BREAKOUT_CONFIRMED";
+    direction = "LONG"; canEnter = true; entryType = "CONFIRMED_BREAKOUT";
     reason = "Spot and futures aggression, expanding OI, participation and post-breakout acceptance align.";
   } else if (shortConfirmed) {
     state = input.previousDirection === "LONG" ? "REVERSAL_CONFIRMED" : "BREAKOUT_CONFIRMED";
@@ -242,14 +251,6 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   } else if (shortIgnition && shortBreakdown) {
     state = "IGNITION"; direction = "SHORT"; canEnter = true; entryType = "EARLY_IGNITION";
     reason = "Fresh breakdown with spot/futures selling and OI expansion; acceptance is not yet established.";
-  } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
-      input.previousDirection === "LONG" && longFlow && recent.close >= priorHigh * 0.995 && !longExhaustion) {
-    state = "CONTINUATION"; direction = "LONG";
-    reason = "Previously confirmed bullish structure remains accepted with spot/futures flow still aligned.";
-  } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
-      input.previousDirection === "SHORT" && shortFlow && recent.close <= priorLow * 1.005 && !shortExhaustion) {
-    state = "CONTINUATION"; direction = "SHORT";
-    reason = "Previously confirmed bearish structure remains accepted with spot/futures flow still aligned.";
   } else if (longSpot && longFutures && (highParticipation || longBook)) {
     state = "PRE_IGNITION"; direction = "LONG";
     reason = "Buy-side flow is developing before a confirmed structural break.";
