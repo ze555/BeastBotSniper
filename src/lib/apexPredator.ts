@@ -308,7 +308,7 @@ async function updateDynamicWatchlist() {
          const base = s.symbol.replace('USDT', '');
          if (excludedBases.includes(base)) return false;
          const quoteVol = parseFloat(s.quoteVolume) || 0;
-         return quoteVol >= 15_000_000; // Require at least 15M USDT 24h volume
+         return quoteVol > 0; // Keep the complete active USDT perpetual universe; execution liquidity is validated separately.
       });
 
       // 1. Dynamic Fast Momentum Queue (HOT_WATCHLIST)
@@ -338,7 +338,6 @@ async function updateDynamicWatchlist() {
       if (needsFullUpdate) {
          const sortedByVol = [...validTickers]
             .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-            .slice(0, 120)
             .map((s: any) => s.symbol);
 
          if (sortedByVol.length > 0) {
