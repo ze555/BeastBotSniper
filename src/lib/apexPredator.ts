@@ -781,451 +781,80 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
    };
 }
 
-// --- SEC 4: SCORE ENTRY ---
+// --- SEC 4: INSTITUTIONAL EVIDENCE ENTRY ENGINE (NO SCORE) ---
 async function scoreEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
+   if (!ctx.tradeable || ctx.btc_whipsaw) return { signal: "WAIT", reason: "BTC_WHIPSaw_CONTEXT" };
+   if (!isLibyaTradingAllowed()) return { signal: "WAIT", reason: "OUTSIDE_LIBYA_HOURS" };
 
    const w = await readWhale(symbol, ctx.btc_chg);
    const p = await readPrice(symbol, w.c15, w.c5);
-
-   // Passively update in-flight rejected signal future outcomes using candles and price already in memory
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
 
-   let earlyReason = null;
-   if (!ctx.tradeable) earlyReason = "BLOCKED";
-   else if (!isLibyaTradingAllowed()) earlyReason = "OUTSIDE_LIBYA_HOURS";
-   else if (w.cvd_mixed) earlyReason = "CVD Mixed";
-   else if (w.f_danger) earlyReason = "Funding Danger";
-   else if (p.rvol > 5.0) earlyReason = "RVOL Crazy";
-   else if (p.rsi > 78 || p.rsi < 22) earlyReason = "RSI Exhst";
-   else if (p.adx > 60) earlyReason = "ADX Exhst";
-   else if (w.scenario === "SHORT_COVER" || w.scenario === "LONG_LIQ") earlyReason = `TEMP: ${w.scenario}`;
-   if (geniusMode && Math.abs(ctx.btc_chg) > (Number(btcVolThresholdStr) / 100) && !ctx.btc_dump && !ctx.btc_pump && p.rvol < 1.0) earlyReason = "Low Vol during BTC Chaos";
-   if (geniusMode && p.body < p.u_wick && p.body < p.l_wick && p.rsi > 45 && p.rsi < 55) earlyReason = "Indecision Doji";
-
-   let sl = 0.0, ss = 0.0;
-   let setupType = "BREAKOUT_MOMENTUM";
-
-   // Layer 1
-   let layer1_sl = 0, layer1_ss = 0;
-   if (ctx.regime === "BULL_STRONG") { layer1_sl += 3.0; }
-   else if (ctx.regime === "BULL_WEAK") { layer1_sl += 2.0; layer1_ss += 0.5; }
-   else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 0.5; layer1_ss += 2.0; }
-   else if (ctx.regime === "BEAR_STRONG") { layer1_ss += 3.0; }
-   else if (ctx.regime === "NEUTRAL_CONSOLIDATION" || ctx.regime === "RANGING") { layer1_sl += 1.5; layer1_ss += 1.5; }
-   sl += layer1_sl; ss += layer1_ss;
-   if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; 
-   else {
-       apexPredatorStats.rules.market_context.failed++;
-       console.log(`[Market Context Failed] ctx.regime=${ctx.regime}, price=${ctx.price}, ema200=${ctx.ema200}`);
-   }
-
-   // Layer 2
-   let layer2_sl = 0, layer2_ss = 0;
-   if (w.scenario === "INST_LONG") layer2_sl += 3.0;
-   else if (w.scenario === "INST_SHORT") layer2_ss += 3.0;
-   else if (w.scenario === "BULL_TRAP") { layer2_ss += 2.5; layer2_sl -= 1.0; }
-   else if (w.scenario === "BEAR_TRAP") { layer2_sl += 2.5; layer2_ss -= 1.0; }
-
-   if (w.hidden_buy) layer2_sl += 1.5;
-   if (w.hidden_sell) layer2_ss += 1.5;
-   if (w.strong_acc) layer2_sl += 0.5;
-   if (w.strong_dis) layer2_ss += 0.5;
-   if (w.asset_strong) layer2_sl += 0.5;
-   if (w.f_gold_long) layer2_sl += 0.5;
-   if (w.f_gold_short) layer2_ss += 0.5;
-   sl += layer2_sl; ss += layer2_ss;
-   if (layer2_sl > 0 || layer2_ss > 0) apexPredatorStats.rules.whale_reader.passed++; else apexPredatorStats.rules.whale_reader.failed++;
-
-   // Layer 3
-   let layer3_sl = 0, layer3_ss = 0;
-   if (p.bull_align && p.HH_HL) layer3_sl += 2.0;
-   else if (p.bull_align) layer3_sl += 1.2;
-   if (p.bear_align && p.LH_LL) layer3_ss += 2.0;
-   else if (p.bear_align) layer3_ss += 1.2;
-
-   if (p.compressed) { layer3_sl += 0.3; layer3_ss += 0.3; }
-   if (p.stop_hunt_bull) layer3_sl += 1.0;
-   if (p.stop_hunt_bear) layer3_ss += 1.0;
-   sl += layer3_sl; ss += layer3_ss;
-   if (layer3_sl > 0 || layer3_ss > 0) apexPredatorStats.rules.price_structure.passed++; else apexPredatorStats.rules.price_structure.failed++;
-
-   // Layer 4
-   let layer4_sl = 0, layer4_ss = 0;
-   if (p.strong_bull_c && p.rvol > 1.5) layer4_sl += 1.2;
-   else if (p.strong_bull_c) layer4_sl += 0.7;
-   if (p.strong_bear_c && p.rvol > 1.5) layer4_ss += 1.2;
-   else if (p.strong_bear_c) layer4_ss += 0.7;
-
-   if (p.cpos > 0.8) layer4_sl += 0.3;
-   if (p.cpos < 0.2) layer4_ss += 0.3;
-
-   if (p.di_plus > p.di_minus && p.adx > 22 && p.hist_bull && p.rsi_bull && p.st_bull) layer4_sl += 1.0;
-   else if (p.di_plus > p.di_minus && p.adx > 22) layer4_sl += 0.5;
-
-   if (p.di_minus > p.di_plus && p.adx > 22 && p.hist_bear && p.rsi_bear && p.st_bear) layer4_ss += 1.0;
-   else if (p.di_minus > p.di_plus && p.adx > 22) layer4_ss += 0.5;
-
-   if (p.taker > 0.58) layer4_sl += 0.2;
-   if (p.taker < 0.42) layer4_ss += 0.2;
-   sl += layer4_sl; ss += layer4_ss;
-   if (layer4_sl > 0 || layer4_ss > 0) apexPredatorStats.rules.momentum_ignition.passed++; else apexPredatorStats.rules.momentum_ignition.failed++;
-
-   // Multi-Timeframe 5m Confluence bonus
-   if (p.conf5_bull) sl += 0.8;
-   if (p.conf5_bear) ss += 0.8;
-
-   // Trend Pullback Sniper Model bonus
-   if (pullbackSniperEnabled) {
-      if (p.pullback_long && (w.slope15 >= 0 || w.slope5 >= 0)) {
-         sl += 2.2;
-         setupType = "PULLBACK_SNIPER";
-      }
-      if (p.pullback_short && (w.slope15 <= 0 || w.slope5 <= 0)) {
-         ss += 2.2;
-         setupType = "PULLBACK_SNIPER";
-      }
-   }
-
-   sl = Math.min(Math.max(sl, 0), 10);
-   ss = Math.min(Math.max(ss, 0), 10);
-
-   if (sl > 0) apexPredatorStats.totalLongScanned++;
-   if (ss > 0) apexPredatorStats.totalShortScanned++;
-
-   if (earlyReason) {
-      if (earlyReason === "BLOCKED") return { signal: "BLOCKED" };
-      return { signal: "WAIT", reason: earlyReason };
-   }
-
-   // High win-rate filters for 3:1 Genius Mode
-   if (geniusMode) {
-      // Directional Market Enforcement during BTC Expansion
-      if (ctx.btc_dump) {
-         sl = 0; // Strict: No longs during BTC Dump
-         ss += 2.5; // Big tailwind for breakdown shorts
-      } else if (ctx.btc_pump) {
-         ss = 0; // Strict: No shorts during BTC Pump
-         sl += 2.5; // Big tailwind for breakout longs
-      }
-
-      // 1. Strict Market Regime filter:
-      if (ctx.regime.includes("BEAR")) {
-         sl = 0; // Strict: Don't buy in bear regime
-      }
-      if (ctx.regime.includes("BULL")) {
-         ss = 0; // Strict: Don't short in bull regime
-      }
-
-      // 2. High-probability RSI Momentum Corridor:
-      if (p.rsi > 68) sl -= 2.5; // Avoid buying overbought tops
-      const isBearMarket = ctx.regime.includes("BEAR") || ctx.btc_dump;
-      if (!isBearMarket && p.rsi < 32) ss -= 2.5; // Avoid shorting oversold bottoms in non-bear markets
-      if (isBearMarket && p.rsi < 28) ss -= 2.5; // In bear markets, allow breakdown momentum down to 28
-      if (p.rsi >= 50 && p.rsi <= 66) sl += 1.0;
-      if (p.rsi <= 50 && p.rsi >= (isBearMarket ? 28 : 34)) ss += 1.0;
-
-      // 3. Supertrend & Trend Confluence:
-      if (p.st_bull && p.price > p.ema50) sl += 1.2;
-      if (p.st_bear && p.price < p.ema50) ss += 1.2;
-
-      // 4. Whale Orderflow Bias:
-      if (w.scenario === "INST_LONG" && w.triple_bull) sl += 1.5;
-      if (w.scenario === "INST_SHORT" && w.triple_bear) ss += 1.5;
-   }
-
-   function getGrade(score: number) {
-      if (score >= 8.5) return { label: "💎 APEX 3:1 GOLD", risk: 0.010, mult: 1.0 };
-      if (score >= 7.6) return { label: "🥈 APEX 3:1 SILVER", risk: 0.007, mult: 1.0 };
-      if (score >= 6.8) return { label: "🥉 BRONZE", risk: 0.005, mult: 1.0 };
-      return { label: "⏳ WAIT", risk: 0, mult: 0 };
-   }
-
-   // --- BEAST ARCHITECTURE REASONING EVALUATION ---
-   // Evaluates: Market Regime -> Flow Interpretation -> Scenarios -> Location -> Confirmation
-   const reasoning: ReasoningResult = evaluateSymbolReasoning(
+   // Only completed candles are eligible. The current, still-forming candle is excluded.
+   const closedCandles = (p.klines || []).filter((c: any) => Number(c.closeTime) < Date.now());
+   const institutional = evaluateInstitutionalMarket({
       symbol,
-      ctx,
-      p,
-      w,
-      { sl, ss }
+      timestamp: Date.now(),
+      price: p.price,
+      candles: closedCandles,
+      spotFlow: w.spotFlow,
+      futuresFlow: w.futuresFlow,
+      orderBook: w.orderBook,
+      oiChange: w.oi_chg,
+      oiAvailable: w.oi_available === true,
+      fundingRate: Number.isFinite(w.fund) ? w.fund : null,
+      btcChange: Number.isFinite(ctx.btc_chg) ? ctx.btc_chg : null
+   });
+
+   p.institutionalEvidence = institutional;
+   p.institutionalInvalidation = institutional.metrics.invalidationLevel;
+   if (institutional.state === "DATA_INSUFFICIENT") {
+      addLog(`⛔ ${symbol}: Institutional entry blocked — ${institutional.reason} Missing: ${institutional.missingEvidence.join(", ")}`, "warn");
+      return { signal: "WAIT", reason: institutional.reason, p, w, ctx, institutional };
+   }
+   if (!institutional.canEnter || institutional.direction === "NONE") {
+      if (institutional.state !== "DORMANT") {
+         addLog(`🔎 ${symbol}: ${institutional.state} — ${institutional.reason}`, "info");
+      }
+      return { signal: "WAIT", reason: institutional.reason, p, w, ctx, institutional };
+   }
+
+   const direction = institutional.direction;
+   const invalidation = institutional.metrics.invalidationLevel;
+   if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(p.atr14 > 0)) {
+      addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
+      return { signal: "WAIT", reason: "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, institutional };
+   }
+
+   const reasoning: any = {
+      regime: p.HH_HL ? "TREND_UP" : p.LH_LL ? "TREND_DOWN" : "TRANSITION",
+      location: {
+         nearestResistance: p.res10,
+         nearestSupport: p.sup10,
+         rangeHigh: p.res10,
+         rangeLow: p.sup10
+      },
+      flow: { state: "EXECUTED_SPOT_FUTURES_ALIGNMENT", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
+      scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: "CONFIRMED", bias: direction } },
+      confirmation: { isConfirmed: true, confirmedSignal: direction, reason: institutional.reason },
+      institutional
+   };
+   const grade = { label: "INSTITUTIONAL_CONFIRMED", risk: 0.007, mult: 1.0 };
+   if (direction === "LONG") apexPredatorStats.acceptedLongs++;
+   else apexPredatorStats.acceptedShorts++;
+
+   addLog(
+      `🧠 [INSTITUTIONAL ${institutional.state}] ${direction} ${symbol} | ${institutional.reason} | ${institutional.evidenceFor.join(" | ")}`,
+      "success"
    );
-
-   const minScore = geniusMode ? 7.6 : 6.8;
-
-   // Confirmation Gatekeeper: PREDICTION != ENTRY and SIGNAL != CONFIRMATION
-   // Both directional signal AND strict ConfirmationEngine must agree
-   if (reasoning.confirmation.isConfirmed) {
-      if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
-         // INSTITUTIONAL TRI-REGIME EVALUATION:
-         if (reasoning.triRegime && !reasoning.triRegime.allowed) {
-            addLog(`🛡️ [TRI-REGIME] تم منع صفقة LONG على ${symbol}: ${reasoning.triRegime.reason}`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: reasoning.triRegime.reason,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // REGIME LOCK: مانع صفقات الـ LONG تماماً في حالة البير (BEAR Market)
-         if (ctx.regime.includes("BEAR")) {
-            addLog(`🛡️ [REGIME LOCK] تم منع صفقة LONG على ${symbol} لأن نظام البيتكوين هابط (${ctx.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Strict Bear Regime: All LONG trades prohibited during BTC ${ctx.regime} market.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 2: مانع صفقات الـ LONG أثناء صعود البيتكوين الضعيف
-         // الشرط: إذا كان نظام البيتكوين BTC = BULL_WEAK وحالة العملة هابطة TREND_DOWN أو مرحلة انتقالية TRANSITION.
-         if (ctx.regime === "BULL_WEAK" && (reasoning.regime === "TREND_DOWN" || reasoning.regime === "TRANSITION")) {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة LONG على ${symbol} لأن البيتكوين في صعود ضعيف (BTC BULL_WEAK) وحالة الأصل (${reasoning.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Safety Gate: BTC BULL_WEAK with Asset ${reasoning.regime}. Buying weak assets prohibited.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 3: مانع الشراء في النطاق العرضي (فخ السيولة - RANGE Long Trap)
-         // الشرط: حظر صفقات الـ LONG نهائياً إذا كانت العملة في نطاق عرضي (Asset = RANGE) أثناء أي صعود للبيتكوين (BULL_STRONG أو BULL_WEAK).
-         if (reasoning.regime === "RANGE" && (ctx.regime === "BULL_STRONG" || ctx.regime === "BULL_WEAK")) {
-            addLog(`🛡️ [LIQUIDITY TRAP] تم منع صفقة LONG على ${symbol} لأن الأصل في نطاق عرضي (RANGE) أثناء صعود البيتكوين (${ctx.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "LONG",
-               signal_score: sl,
-               rejection_reason: `Liquidity Trap Gate: RANGE Long prohibited during BTC ${ctx.regime} (altcoin liquidity drain).`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
-         if (reasoning.regime === "RANGE") {
-            const hasExplosiveRvol = p.rvol >= 2.0;
-            const hasDirectionalMomentum = p.adx >= 22 && p.di_plus > p.di_minus;
-            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
-               addLog(`🛡️ [DEAD CHOP] تم منع صفقة LONG على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية صاعدة (ADX >= 22 مع DI+ > DI-).`, "warn");
-               logRejectedSignal({
-                  symbol,
-                  timeframe: "15m",
-                  direction: "LONG",
-                  signal_score: sl,
-                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
-                  p,
-                  w,
-                  ctx,
-                  reasoning
-               });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-            }
-         }
-
-         apexPredatorStats.acceptedLongs++;
-         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-         else apexPredatorStats.breakoutSetups++;
-
-         // Log deep reasoning breakdown
-         addLog(
-            `🧠 [REASONING CONFIRMED] LONG ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
-            `Primary: ${reasoning.scenario.primary.type} | Score: ${sl.toFixed(1)}/10`,
-            "info"
-         );
-
-         return {
-            signal: "LONG",
-            score: sl,
-            grade: getGrade(sl),
-            setupType: reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : setupType,
-            p,
-            w,
-            ctx,
-            reasoning
-         };
-      }
-
-      if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
-         // INSTITUTIONAL TRI-REGIME EVALUATION:
-         if (reasoning.triRegime && !reasoning.triRegime.allowed) {
-            addLog(`🛡️ [TRI-REGIME] تم منع صفقة SHORT على ${symbol}: ${reasoning.triRegime.reason}`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "SHORT",
-               signal_score: ss,
-               rejection_reason: reasoning.triRegime.reason,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // REGIME LOCK: مانع صفقات الـ SHORT تماماً في حالة البول (BULL Market)
-         if (ctx.regime.includes("BULL")) {
-            addLog(`🛡️ [REGIME LOCK] تم منع صفقة SHORT على ${symbol} لأن نظام البيتكوين صاعد (${ctx.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "SHORT",
-               signal_score: ss,
-               rejection_reason: `Strict Bull Regime: All SHORT trades prohibited during BTC ${ctx.regime} market.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 1: مانع صفقات الـ SHORT أثناء صعود البيتكوين القوي
-         // الشرط: إذا كان نظام البيتكوين BTC = BULL_STRONG وحالة الأصل في اتجاه صاعد TREND_UP أو مرحلة انتقالية TRANSITION.
-         if (ctx.regime === "BULL_STRONG" && (reasoning.regime === "TREND_UP" || reasoning.regime === "TRANSITION")) {
-            addLog(`🛡️ [SAFETY GATE] تم منع صفقة SHORT على ${symbol} لأن اتجاه بيتكوين صاعد قوي (BTC BULL_STRONG) والأصل في حالة (${reasoning.regime}).`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "SHORT",
-               signal_score: ss,
-               rejection_reason: `Safety Gate: BTC Regime is BULL_STRONG and Asset is ${reasoning.regime}. Counter-trend shorting prohibited.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         // SAFETY GATE 4: مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE)
-         if (reasoning.regime === "RANGE") {
-            const hasExplosiveRvol = p.rvol >= 2.0;
-            const hasDirectionalMomentum = p.adx >= 22 && p.di_minus > p.di_plus;
-            if (!hasExplosiveRvol || !hasDirectionalMomentum) {
-               addLog(`🛡️ [DEAD CHOP] تم منع صفقة SHORT على ${symbol} في الـ RANGE لعدم توفر حجم انفجاري (RVOL >= 2.0) وقوة اتجاهية هابطة (ADX >= 22 مع DI- > DI+).`, "warn");
-               logRejectedSignal({
-                  symbol,
-                  timeframe: "15m",
-                  direction: "SHORT",
-                  signal_score: ss,
-                  rejection_reason: `Dead Chop Filter: Prohibited in RANGE without explosive RVOL >= 2.0 (got ${p.rvol?.toFixed(2)}) and directional momentum (ADX: ${p.adx?.toFixed(1)}).`,
-                  p,
-                  w,
-                  ctx,
-                  reasoning
-               });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-            }
-         }
-
-         // OVERSOLD SHORT BLOCKER: مانع بيع القيعان عند التشبع البيعي
-         // في الظروف العادية (تذبذب عرضي): يتم حظر الشورت إذا كان RSI < 42 لحماية الحساب من الارتداد.
-         // في حالة انهيار البيتكوين (BTC DUMP) أو الاتجاه الهابط القوي (BEAR):
-         // يُسمح بركوب شلال الهبوط الانفجاري (Breakdown Ignition) حتى RSI >= 28 طالما لا يوجد ذيل امتصاص شرائي سفلي.
-         const rsiVal = p.rsi ?? 50;
-         const isBearMarket = ctx.regime.includes("BEAR") || ctx.btc_dump;
-         const minRsiAllowed = isBearMarket ? 28 : 42;
-         const maxAtrDist = isBearMarket ? 2.5 : 1.8;
-         const isOverstretched = p.atr14 > 0 && p.price < (p.ema21 - (maxAtrDist * p.atr14));
-         const hasBuyerAbsorptionWick = p.l_wick > p.body * 1.5 && p.l_wick > (p.atr14 * 0.4);
-
-         if (rsiVal < minRsiAllowed || isOverstretched || hasBuyerAbsorptionWick) {
-            addLog(`🛡️ [OVERSOLD SHORT BLOCK] تم منع صفقة SHORT على ${symbol} بسبب ${rsiVal < minRsiAllowed ? `التشبع البيعي الحاد (RSI: ${rsiVal.toFixed(1)} < ${minRsiAllowed})` : (hasBuyerAbsorptionWick ? "ظهور ذيل امتصاص شرائي سفلي" : `تمدد سعري مفرط تحت EMA21 (> ${maxAtrDist}x ATR)`)}.`, "warn");
-            logRejectedSignal({
-               symbol,
-               timeframe: "15m",
-               direction: "SHORT",
-               signal_score: ss,
-               rejection_reason: `Oversold Short Blocker: SHORT prohibited (RSI: ${rsiVal.toFixed(1)} < ${minRsiAllowed} or overstretched > ${maxAtrDist}x ATR14). Prevents selling bottoms.`,
-               p,
-               w,
-               ctx,
-               reasoning
-            });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
-         }
-
-         apexPredatorStats.acceptedShorts++;
-         if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
-         else apexPredatorStats.breakoutSetups++;
-
-         addLog(
-            `🧠 [REASONING CONFIRMED] SHORT ${symbol} | Regime: ${reasoning.regime} | Flow: ${reasoning.flow.state} | ` +
-            `Primary: ${reasoning.scenario.primary.type} | Score: ${ss.toFixed(1)}/10`,
-            "info"
-         );
-
-         return {
-            signal: "SHORT",
-            score: ss,
-            grade: getGrade(ss),
-            setupType: reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : setupType,
-            p,
-            w,
-            ctx,
-            reasoning
-         };
-      }
-   }
-
-   // Strict Rule: No trade can enter unless verified and confirmed by Confirmation Engine.
-   // Unconfirmed attempts at key levels must wait for valid breakout or reversal confirmation.
-
-   // If indicator score was high but confirmation rejected or waiting:
-   if ((sl >= minScore || ss >= minScore) && !reasoning.confirmation.isConfirmed) {
-      const rejectDirection = sl >= ss ? "LONG" : "SHORT";
-      const rejectScore = Math.max(sl, ss);
-      const rejectReason = reasoning.confirmation.reason || "Confirmation pending or failed";
-
-      if (reasoning.location.nearResistance && sl >= minScore) {
-         addLog(`⏳ ${symbol}: سيناريو صعودي نشط (${reasoning.scenario.primary.type}) لكن السعر ملاصق للمقاومة (${reasoning.location.nearestResistance.toFixed(4)}). بانتظار التأكيد.`, "info");
-      } else if (reasoning.flow.state === "SHORT_COVERING") {
-         addLog(`⏳ ${symbol}: صعود السعر ناتج عن Short Covering (إغلاق عقود بيع وليس فتح عقود شراء جديدة). انتظار تراكم حقيقي.`, "info");
-      }
-
-      // Record in Research Logger for future post-analysis
-      logRejectedSignal({
-         symbol,
-         timeframe: "15m",
-         direction: rejectDirection,
-         signal_score: rejectScore,
-         rejection_reason: rejectReason,
-         p,
-         w,
-         ctx,
-         reasoning
-      });
-   }
-
-   return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+   return {
+      signal: direction,
+      grade,
+      setupType: institutional.entryType === "EARLY_IGNITION" ? "INSTITUTIONAL_IGNITION" : "INSTITUTIONAL_BREAKOUT",
+      p, w, ctx, reasoning, institutional
+   };
 }
 
 // --- SEC 5: EXECUTION ---
