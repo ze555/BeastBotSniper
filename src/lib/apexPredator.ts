@@ -654,7 +654,7 @@ async function readWhale(symbol: string, btc_chg: number) {
    const oiTimestamp = Number(oiLatest?.timestamp);
    const oi_available = Boolean(oiData && oiData.length >= 4 &&
       Number.isFinite(oi_chg) && Number.isFinite(oi0Safe(oiData)) &&
-      (!Number.isFinite(oiTimestamp) || Date.now() - oiTimestamp <= 20 * 60 * 1000));
+      (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 20 * 60 * 1000));
    const [spotFlowResult, futuresFlowResult, orderBookResult] = await Promise.allSettled([
       fetchAggressorFlow("spot", symbol),
       fetchAggressorFlow("futures", symbol),
