@@ -296,8 +296,16 @@ async function updateDynamicWatchlist() {
          return;
       }
 
-      const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 8000 });
-      if (!Array.isArray(res.data) || res.data.length === 0) return;
+      const [res, exchangeInfo] = await Promise.all([
+         axios.get(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 8000 }),
+         axios.get(`${BINANCE_FAPI}/fapi/v1/exchangeInfo`, { timeout: 8000 })
+      ]);
+      if (!Array.isArray(res.data) || res.data.length === 0 || !Array.isArray(exchangeInfo.data?.symbols)) return;
+      const activeUsdtPerpetuals = new Set(
+         exchangeInfo.data.symbols
+            .filter((item: any) => item.contractType === "PERPETUAL" && item.quoteAsset === "USDT" && item.status === "TRADING")
+            .map((item: any) => item.symbol)
+      );
       
       const excludedBases = [
          'USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT',
@@ -306,7 +314,7 @@ async function updateDynamicWatchlist() {
       ];
       
       const validTickers = res.data.filter((s: any) => {
-         if (!s.symbol || !s.symbol.endsWith('USDT')) return false;
+         if (!s.symbol || !activeUsdtPerpetuals.has(s.symbol)) return false;
          const base = s.symbol.replace('USDT', '');
          if (excludedBases.includes(base)) return false;
          const quoteVol = parseFloat(s.quoteVolume) || 0;
