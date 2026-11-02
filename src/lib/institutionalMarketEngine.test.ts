@@ -26,6 +26,39 @@ assert.equal(confirmed.direction, "LONG");
 assert.equal(confirmed.canEnter, true);
 assert.equal(confirmed.metrics.btcChange, -0.01, "BTC adverse context must not block independent long evidence");
 
+const shortCandles = snapshot().candles.map(c => ({ ...c }));
+shortCandles[22] = { ...shortCandles[22], open: 99, high: 99, low: 96, close: 96.5, volume: 250, quoteVolume: 25_000 };
+const confirmedShort = evaluateInstitutionalMarket(snapshot({
+  price: 96.5,
+  candles: shortCandles,
+  spotFlow: { buyQuote: 20_000, sellQuote: 80_000, tradeCount: 100, observedAt: now, source: "BINANCE_AGG_TRADES" },
+  futuresFlow: { buyQuote: 25_000, sellQuote: 75_000, tradeCount: 100, observedAt: now, source: "BINANCE_AGG_TRADES" },
+  orderBook: { bidNotional: 200_000, askNotional: 500_000, spreadBps: 2, observedAt: now, source: "BINANCE_DEPTH" },
+  btcChange: 0.01
+}));
+assert.equal(confirmedShort.state, "BREAKOUT_CONFIRMED");
+assert.equal(confirmedShort.direction, "SHORT");
+assert.equal(confirmedShort.canEnter, true, "Strong short evidence may enter even while BTC rises");
+
+const confirmedReversal = evaluateInstitutionalMarket(snapshot({
+  previousState: "BREAKOUT_CONFIRMED",
+  previousDirection: "SHORT"
+}));
+assert.equal(confirmedReversal.state, "REVERSAL_CONFIRMED");
+assert.equal(confirmedReversal.direction, "LONG");
+
+const continuation = evaluateInstitutionalMarket(snapshot({
+  previousState: "BREAKOUT_CONFIRMED",
+  previousDirection: "LONG"
+}));
+assert.equal(continuation.state, "CONTINUATION");
+assert.equal(continuation.canEnter, false, "Continuation manages an existing position; it is not a fresh entry");
+
+const thinBook = evaluateInstitutionalMarket(snapshot({
+  orderBook: { bidNotional: 2_000, askNotional: 1_000, spreadBps: 40, observedAt: now, source: "BINANCE_DEPTH" }
+}));
+assert.equal(thinBook.canEnter, false, "Thin depth / wide spread cannot qualify as executable liquidity");
+
 const squeeze = evaluateInstitutionalMarket(snapshot({
   oiChange: -0.01,
   spotFlow: { buyQuote: 20_000, sellQuote: 80_000, tradeCount: 100, observedAt: now, source: "BINANCE_AGG_TRADES" }
