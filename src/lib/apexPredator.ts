@@ -1,6 +1,6 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
-import { evaluateSymbolReasoning, ReasoningResult, evaluateInstitutionalTradeGuard, InstitutionalGuardResult } from "./reasoningEngine.js";
+
 import {
    logRejectedSignal,
    logTradeDecision,
@@ -864,7 +864,7 @@ function executeTrade(symbol: string, decision: any) {
       return;
    }
 
-   const { p, w, score, grade, setupType, ctx, reasoning } = decision;
+   const { p, w, grade, setupType, ctx, reasoning, institutional } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
    // Dynamic Risk Sizing based on Market Regime:
    // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
@@ -885,9 +885,8 @@ function executeTrade(symbol: string, decision: any) {
       const isBounce = setupType === "BOUNCE_SNIPER";
       // Pillar 5: Tight Structural Stop Loss with compressed buffer
       const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const rawSl = isBounce && reasoning?.location?.nearestSupport && reasoning.location.nearestSupport < entry
-         ? Math.min(realLow, reasoning.location.nearestSupport) - structuralSlPad
-         : (isPullback ? Math.min(realLow, p.ema21) - structuralSlPad : realLow - structuralSlPad);
+      const evidenceInvalidation = Number.isFinite(p.institutionalInvalidation) ? p.institutionalInvalidation : realLow;
+      const rawSl = Math.min(realLow, evidenceInvalidation) - structuralSlPad;
 
       // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
       const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
@@ -925,7 +924,8 @@ function executeTrade(symbol: string, decision: any) {
          entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
          a_closed: false, b_closed: false, c_closed: false,
-         be_done: false, micro_banked: false, score, grade: grade.label, pnl: 0,
+         be_done: false, micro_banked: false, grade: grade.label, pnl: 0,
+         institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
          atr: p.atr14, peak_r: 0,
@@ -948,7 +948,7 @@ function executeTrade(symbol: string, decision: any) {
       };
       activeTrades.push(newTrade);
       registerTradeForDirectionTracking(newTrade);
-      addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    } else {
       const entry = p.price;
       const c = p.klines;
@@ -956,9 +956,8 @@ function executeTrade(symbol: string, decision: any) {
       const isBounce = setupType === "BOUNCE_SNIPER";
       // Pillar 5: Tight Structural Stop Loss with compressed buffer
       const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const rawSl = isBounce && reasoning?.location?.nearestResistance && reasoning.location.nearestResistance > entry
-         ? Math.max(realHigh, reasoning.location.nearestResistance) + structuralSlPad
-         : (isPullback ? Math.max(realHigh, p.ema21) + structuralSlPad : realHigh + structuralSlPad);
+      const evidenceInvalidation = Number.isFinite(p.institutionalInvalidation) ? p.institutionalInvalidation : realHigh;
+      const rawSl = Math.max(realHigh, evidenceInvalidation) + structuralSlPad;
 
       // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
       const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
@@ -1019,7 +1018,7 @@ function executeTrade(symbol: string, decision: any) {
       };
       activeTrades.push(newTrade);
       registerTradeForDirectionTracking(newTrade);
-      addLog(`✅ SHORT ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
+      addLog(`✅ SHORT ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    }
 }
 
@@ -1052,95 +1051,51 @@ async function exitBrain(trade: any, ctx: any) {
    // Record trade journey periodic snapshot (MFE/MAE tracking)
    logTradeJourneySnapshot(t, price, t.pnl);
 
-   // --- SEC 6.1: INSTITUTIONAL TRADE GUARD MATRIX EVALUATION ---
-   // Matrix cross-validation: CVD slopes (5m/15m/4h) x OI flow x Taker imbalance x Traps x Multi-Timeframe MMF
-   const guard = evaluateInstitutionalTradeGuard(t, p, w, ctx);
+   // --- SEC 6.1: INSTITUTIONAL EXECUTED-FLOW EXIT ENGINE (NO SCORE) ---
+   const institutionalInvalidation = Number.isFinite(t.institutionalInvalidationLevel)
+      ? t.institutionalInvalidationLevel
+      : t.sl;
+   const structureInvalidated = t.direction === "LONG"
+      ? price < institutionalInvalidation
+      : price > institutionalInvalidation;
+   const exitEvidence = evaluateInstitutionalExit({
+      direction: t.direction,
+      price,
+      entry: t.entry,
+      stop: t.sl,
+      structureInvalidated,
+      spotFlow: w.spotFlow || null,
+      futuresFlow: w.futuresFlow || null,
+      fundingRate: Number.isFinite(w.fund) ? w.fund : null,
+      timestamp: Date.now()
+   });
 
-   // 1. ABSORPTION & TRAP EXIT: Instant peak harvest before distribution or short squeeze dump
-   if (guard.action === "ABSORPTION_TRAP_EXIT") {
-      addLog(`🎯 [رادار الفخاخ المؤسساتي] خروج وحجز أرباح لـ ${t.symbol} (${t.direction}) عند +${profitR.toFixed(2)}R: ${guard.reason}`, 'success');
-      closeTradeFull(t, `Institutional Trap Harvest: ${guard.reason}`);
+   if (exitEvidence.action === "EXIT") {
+      addLog(`🚨 [INSTITUTIONAL REVERSAL CONFIRMED] ${t.symbol} ${t.direction} at ${profitR.toFixed(2)}R | ${exitEvidence.reasons.join(" | ")}`, "warn");
+      closeTradeFull(t, "Institutional Structure + Spot/Futures Flow Reversal");
       return;
    }
-
-   // 2. LIQUIDATION / SQUEEZE EXHAUSTION EXIT: Lock in gains at the exhaustion extreme
-   if (guard.action === "SQUEEZE_EXHAUSTION_EXIT") {
-      addLog(`🎯 [إنهاك حركة التصفية] حجز كامل الأرباح لـ ${t.symbol} (${t.direction}) عند +${profitR.toFixed(2)}R: ${guard.reason}`, 'success');
-      closeTradeFull(t, `Liquidation Exhaustion Exit: ${guard.reason}`);
-      return;
-   }
-
-   // 3. SURGICAL INVALIDATION EXIT: Multi-timeframe orderflow + structural reversal at minor loss
-   if (guard.action === "SURGICAL_INVALIDATION_EXIT") {
-      addLog(`🛡️ [القطع الجراحي المؤسساتي] إغلاق وقائي لـ ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R: ${guard.reason}. تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
-      closeTradeFull(t, `Surgical Invalidation: ${guard.reason}`);
-      return;
-   }
-
-   const isTsunamiRunner = guard.action === "TSUNAMI_RUNNER_HOLD";
-   const isBenignPullback = guard.action === "BENIGN_PULLBACK_HOLD";
-
-   if (isTsunamiRunner) {
-      if (guard.trailFloorR !== undefined) {
-         const floorSl = t.direction === "LONG" ? t.entry + (slDist * guard.trailFloorR) : t.entry - (slDist * guard.trailFloorR);
-         if (t.direction === "LONG" && floorSl > t.sl) {
-            t.sl = floorSl;
-            t.be_done = true;
-         } else if (t.direction === "SHORT" && floorSl < t.sl) {
-            t.sl = floorSl;
-            t.be_done = true;
-         }
-      }
-      addLog(`🌊 [تسونامي مؤسساتي] ${t.symbol} (${t.direction}) راكب الموجة الانفجارية (+${profitR.toFixed(2)}R) | تدفق السيولة والـ CVD مستمر بقوة دون إغلاق متعجل!`, 'info');
-   } else if (isBenignPullback) {
-      addLog(`🛡️ [ارتداد صحي زائف] تمسك بصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R: تذبذب 5 دقائق مؤقت بينما تدفق الـ 15 دقيقة والـ CVD المؤسساتي ما زال مؤكداً للاتجاه!`, 'info');
-   }
-
-   let emergency = false;
-   let emReason = "";
-
-   if (ctx.regime === "RANGING" || !ctx.tradeable) {
-      if (smartBtcHoldEnabled && t.direction === "LONG" && ctx.btc_chg > 0.0) {
-         addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من توقف صعود بيتكوين لأن الاتجاه منسجم مع وضعية الصعود (${ctx.btc_chg.toFixed(4)})`, "info");
-      } else if (smartBtcHoldEnabled && t.direction === "SHORT" && ctx.btc_chg < -0.0) {
-         addLog(`🔄 ${t.symbol}: تجاهل الخروج بالرغم من هبوط بيتكوين لأن الاتجاه منسجم مع وضعية الشورت (${ctx.btc_chg.toFixed(4)})`, "info");
-      } else if (isTsunamiRunner || isBenignPullback) {
-         // Institutional momentum active on pair: maintain position through BTC pause
-      } else if (profitR > 0.20) {
-         // Trade is running in profit with independent pair strength: do not panic exit on BTC range
-      } else if (ctx.btc_whipsaw) {
-         emergency = true; emReason = "BTC Violent Whipsaw";
+   if (exitEvidence.action === "PROTECT") {
+      addLog(`🛡️ [INSTITUTIONAL EXHAUSTION WARNING] ${t.symbol} ${t.direction} | ${exitEvidence.reasons.join(" | ")}`, "info");
+      if (profitR >= 0.30) {
+         const protectedStop = t.direction === "LONG"
+            ? t.entry + slDist * 0.10
+            : t.entry - slDist * 0.10;
+         if (t.direction === "LONG") t.sl = Math.max(t.sl, protectedStop);
+         else t.sl = Math.min(t.sl, protectedStop);
+         t.be_done = true;
       }
    }
 
-   // Strict high-conviction orderflow reversal across multiple timeframes:
-   if (t.direction === "LONG" && w.scenario === "INST_SHORT" && w.triple_bear && p.taker < 0.44) {
-      emergency = true; emReason = "Inst Short Triple Bear Reversal";
-   }
-   if (t.direction === "SHORT" && w.scenario === "INST_LONG" && w.triple_bull && p.taker > 0.56) {
-      emergency = true; emReason = "Inst Long Triple Bull Reversal";
-   }
-
-   if (emergency) {
-      addLog(`🚨 EMERGENCY EXIT ${t.symbol} | ${emReason} | PnL: ${profitR.toFixed(2)}R`, 'error');
-      closeTradeFull(t, `Emergency Exit: ${emReason}`);
-      return;
-   }
-
+   const spotDelta = w.spotFlow ? w.spotFlow.buyQuote - w.spotFlow.sellQuote : 0;
+   const futuresDelta = w.futuresFlow ? w.futuresFlow.buyQuote - w.futuresFlow.sellQuote : 0;
+   const supportiveFlow = t.direction === "LONG"
+      ? spotDelta > 0 && futuresDelta > 0
+      : spotDelta < 0 && futuresDelta < 0;
+   const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
+   const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
    let exhaust = 0;
    let peak = 0;
-   
-   if (t.direction === "LONG") {
-      const c = p.klines;
-      if (price > Math.max(...c.slice(-10,-3).map((k: any) => k.high)) && p.hist[p.hist.length-1] < p.hist[p.hist.length-4]) exhaust += 3;
-      if (w.fund > 0.06/100) exhaust += 1;
-      
-      const bodySize = (klines: any[]) => { const last = klines[klines.length-1]; return Math.abs(last.open - last.close); };
-      const ss_cand = p.u_wick > bodySize(c)*2.5 && p.price > p.res10 * 0.998;
-      if (ss_cand) peak += 3;
-   } else {
-      if (w.fund < -0.07/100) peak += 2;
-   }
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
 
@@ -1208,64 +1163,6 @@ async function exitBrain(trade: any, ctx: any) {
          t.c_closed = true;
          addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
          closeTradeFull(t, "TP3 Full Target Hit");
-         return;
-      }
-   }
-
-   // 4. SMART CVD & OI EXHAUSTION EXIT (حجز الأرباح عند القمم برصد تراجع CVD و OI)
-   if (profitR >= 0.70) {
-      if (t.direction === "LONG") {
-         const cvdExhaustion = w.slope15 < -100 && w.slope5 < -80;
-         const oiDropping = w.oi_chg < -0.005;
-         if (cvdExhaustion && oiDropping) {
-            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لرصد دايفرجنس بيعي وتصريف مؤسساتي في CVD/OI.`, 'success');
-            closeTradeFull(t, "CVD/OI Exhaustion Peak");
-            return;
-         }
-      } else if (t.direction === "SHORT") {
-         const cvdExhaustion = w.slope15 > 100 && w.slope5 > 80;
-         const oiDropping = w.oi_chg < -0.005;
-         if (cvdExhaustion && oiDropping) {
-            addLog(`🎯 [SMART CVD EXIT] خروج ذكي وحجز أرباح لـ ${t.symbol} عند +${profitR.toFixed(2)}R لانتهاء تغطية الشورتات وانعكاس CVD صعوداً.`, 'success');
-            closeTradeFull(t, "CVD/OI Short Squeeze Peak");
-            return;
-         }
-      }
-   }
-
-   // 5. INSTITUTIONAL CONFLUENCE INVALIDATION MATRIX
-   // Replaces brittle premature cuts with true multi-indicator confluence.
-   // An early exit before hard SL requires ALL 3 institutional confirmations:
-   // (1) Minimum trade duration (elapsedSeconds >= 180s to filter entry spread/noise)
-   // (2) Position is in adverse territory (-0.30R to -0.85R)
-   // (3) Confluence of:
-   //     a) Structural break confirmed by candles closed AFTER entry
-   //     b) Dual-timeframe CVD reversal (both 15m and 5m slopes adverse)
-   //     c) Taker aggression definitively against position (< 0.44 for LONG, > 0.56 for SHORT)
-   const elapsedSec = (Date.now() - new Date(t.entryTime).getTime()) / 1000;
-   const entryTimeMs = new Date(t.entryTime).getTime();
-   const postEntryCandles = (p.klines || []).filter((c: any) => c.openTime >= entryTimeMs);
-   const postEntryBroken = postEntryCandles.length >= 2 && postEntryCandles.slice(-2).every((c: any) =>
-      t.direction === "LONG" ? c.close < p.ema21 : c.close > p.ema21
-   );
-
-   if (!isBenignPullback && !t.a_closed && elapsedSec >= 180 && profitR <= -0.30 && profitR > -0.90) {
-      const cvdReversed = t.direction === "LONG"
-         ? (w.slope15 < -60 && w.slope5 < -40)
-         : (w.slope15 > 60 && w.slope5 > 40);
-      
-      const takerReversed = t.direction === "LONG"
-         ? p.taker < 0.44
-         : p.taker > 0.56;
-
-      const structuralInvalidation = postEntryBroken || (
-         t.direction === "LONG" ? (price < (t.entry - slDist * 0.60) && p.price < p.ema21)
-                                : (price > (t.entry + slDist * 0.60) && p.price > p.ema21)
-      );
-
-      if (cvdReversed && takerReversed && structuralInvalidation) {
-         addLog(`🛡️ [القطع الجراحي المؤسساتي المندمج] إغلاق وقائي لصفقة ${t.symbol} (${t.direction}) عند ${profitR.toFixed(2)}R لتأكيد انعكاس متزامن في الهيكل وCVD والـ Taker. تم توفير ${(1 + profitR).toFixed(2)}R من الستوب لوس!`, 'warn');
-         closeTradeFull(t, "Institutional Confluence Invalidation Cut");
          return;
       }
    }
