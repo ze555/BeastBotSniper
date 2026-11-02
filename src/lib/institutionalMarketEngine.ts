@@ -198,8 +198,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
 
   const longFlow = longSpot && longFutures && longOi;
   const shortFlow = shortSpot && shortFutures && shortOi;
-  const longIgnition = longFlow && highParticipation && (longBook || relativeStrengthLong);
-  const shortIgnition = shortFlow && highParticipation && (shortBook || relativeStrengthShort);
+  const longIgnition = longFlow && highParticipation && liquidityQualified && (longBook || relativeStrengthLong);
+  const shortIgnition = shortFlow && highParticipation && liquidityQualified && (shortBook || relativeStrengthShort);
   const longConfirmed = longIgnition && longAcceptance;
   const shortConfirmed = shortIgnition && shortAcceptance;
 
