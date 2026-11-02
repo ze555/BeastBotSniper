@@ -51,6 +51,8 @@ export interface InstitutionalSnapshot {
   btcChange: number | null;
   /** True only when the OI observation is recent and valid. */
   oiAvailable: boolean;
+  previousState?: MarketState;
+  previousDirection?: Side | "NONE";
 }
 
 export interface EvidenceDecision {
@@ -180,8 +182,10 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const longOi = oi > 0.001;
   const shortOi = oi > 0.001;
   const oiFlatOrFalling = oi <= 0.001;
-  const longBook = bookImbalance !== null && bookImbalance >= 0.08;
-  const shortBook = bookImbalance !== null && bookImbalance <= -0.08;
+  const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 15 &&
+    input.orderBook!.bidNotional + input.orderBook!.askNotional >= 10_000;
+  const longBook = liquidityQualified && bookImbalance !== null && bookImbalance >= 0.08;
+  const shortBook = liquidityQualified && bookImbalance !== null && bookImbalance <= -0.08;
   const highParticipation = relativeVolume !== null && relativeVolume >= 1.35;
   const longBreakout = recent.close > priorHigh && recent.close > recent.open;
   const shortBreakdown = recent.close < priorLow && recent.close < recent.open;
@@ -229,7 +233,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     state = "BREAKOUT_CONFIRMED"; direction = "LONG"; canEnter = true; entryType = "CONFIRMED_BREAKOUT";
     reason = "Spot and futures aggression, expanding OI, participation and post-breakout acceptance align.";
   } else if (shortConfirmed) {
-    state = "BREAKOUT_CONFIRMED"; direction = "SHORT"; canEnter = true; entryType = "CONFIRMED_BREAKOUT";
+    state = input.previousDirection === "LONG" ? "REVERSAL_CONFIRMED" : "BREAKOUT_CONFIRMED";
+    direction = "SHORT"; canEnter = true; entryType = "CONFIRMED_BREAKOUT";
     reason = "Spot and futures selling, expanding OI, participation and post-breakdown acceptance align.";
   } else if (longIgnition && longBreakout) {
     state = "IGNITION"; direction = "LONG"; canEnter = true; entryType = "EARLY_IGNITION";
@@ -237,6 +242,14 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   } else if (shortIgnition && shortBreakdown) {
     state = "IGNITION"; direction = "SHORT"; canEnter = true; entryType = "EARLY_IGNITION";
     reason = "Fresh breakdown with spot/futures selling and OI expansion; acceptance is not yet established.";
+  } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
+      input.previousDirection === "LONG" && longFlow && recent.close >= priorHigh * 0.995 && !longExhaustion) {
+    state = "CONTINUATION"; direction = "LONG";
+    reason = "Previously confirmed bullish structure remains accepted with spot/futures flow still aligned.";
+  } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
+      input.previousDirection === "SHORT" && shortFlow && recent.close <= priorLow * 1.005 && !shortExhaustion) {
+    state = "CONTINUATION"; direction = "SHORT";
+    reason = "Previously confirmed bearish structure remains accepted with spot/futures flow still aligned.";
   } else if (longSpot && longFutures && (highParticipation || longBook)) {
     state = "PRE_IGNITION"; direction = "LONG";
     reason = "Buy-side flow is developing before a confirmed structural break.";
@@ -256,7 +269,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
 
   return {
     symbol: input.symbol, state, direction, canEnter, entryType, management: "NONE",
-    evidenceFor, evidenceAgainst, missingEvidence: bookOk ? [] : ["fresh order-book snapshot (context only)"],
+    evidenceFor, evidenceAgainst, missingEvidence: !bookOk ? ["fresh order-book snapshot (context only)"] :
+      !liquidityQualified ? ["minimum executable depth of 10,000 USDT and spread <= 15 bps"] : [],
     dataQuality: { spotTrades: spotOk, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: "UNAVAILABLE" },
     metrics: {
       spotDeltaQuote: spotDelta, futuresDeltaQuote: futuresDelta, spotBuyShare: spotShare,
