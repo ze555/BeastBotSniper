@@ -1113,7 +1113,7 @@ async function exitBrain(trade: any, ctx: any) {
    const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
    const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
 
-   let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7) * (p.adx > 30 ? 1.0 : 0.7);
+   let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7);
 
    // 0. PILLAR 1: SOFT RISK REDUCTION AT +0.45R (BREATHING ROOM)
    // بدلاً من خنق الصفقة وسحب الوقف لنقطة الدخول فوراً عند +0.35R (مما يخرج الصفقة بربح سنتات عند أي تذبذب طبيعي)،
@@ -1129,7 +1129,7 @@ async function exitBrain(trade: any, ctx: any) {
    if (!isTsunamiRunner && !isBenignPullback && !t.a_closed && elapsedSeconds >= 2700) {
       // 45 minutes without breaking out towards TP1
       const isStagnant = profitR < 0.30 && profitR > -0.30;
-      const momentumDying = p.rvol < 1.1 || p.adx < 22 || Math.abs(w.slope15) < 80;
+      const momentumDying = p.rvol < 1.1 || !supportiveFlow;
       if (isStagnant && momentumDying) {
          addLog(`⏳ [الركيزة 2: إغلاق الركود الزمني] إغلاق صفقة ${t.symbol} بعد ${(elapsedSeconds/60).toFixed(0)} دقيقة عند ${profitR.toFixed(2)}R لتفادي الانعكاس وتحرير السيولة.`, 'warn');
          closeTradeFull(t, "Time-Decay Stagnation Cut");
