@@ -120,6 +120,8 @@ let apexPredatorStats: any = {
   }
 };
 
+const institutionalStateBySymbol = new Map<string, { state: string; direction: string }>();
+
 export function resetAccountState() {
   virtualBalance = 1000;
   initialVirtualBalance = 1000;
@@ -795,6 +797,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
 
    // Only completed candles are eligible. The current, still-forming candle is excluded.
    const closedCandles = (p.klines || []).filter((c: any) => Number(c.closeTime) < Date.now());
+   const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
    const institutional = evaluateInstitutionalMarket({
       symbol,
       timestamp: Date.now(),
@@ -805,10 +808,15 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       orderBook: w.orderBook,
       oiChange: w.oi_chg,
       oiAvailable: w.oi_available === true,
+      previousState: previousInstitutionalState?.state as any,
+      previousDirection: previousInstitutionalState?.direction as any,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
       btcChange: Number.isFinite(ctx.btc_chg) ? ctx.btc_chg : null
    });
 
+   if (institutional.state !== "DATA_INSUFFICIENT") {
+      institutionalStateBySymbol.set(symbol, { state: institutional.state, direction: institutional.direction });
+   }
    p.institutionalEvidence = institutional;
    p.institutionalInvalidation = institutional.metrics.invalidationLevel;
    if (institutional.state === "DATA_INSUFFICIENT") {
