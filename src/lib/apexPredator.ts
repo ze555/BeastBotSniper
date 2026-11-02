@@ -14,6 +14,7 @@ import {
 } from "./researchLogger.js";
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
+import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
@@ -360,6 +361,10 @@ interface CacheEntry {
 const klineCache = new Map<string, CacheEntry>();
 const fundingCache = new Map<string, CacheEntry>();
 const oiCache = new Map<string, CacheEntry>();
+const aggTradeCache = new Map<string, CacheEntry>();
+const depthCache = new Map<string, CacheEntry>();
+
+function oi0Safe(data: any[]) { return Number(data?.[0]?.sumOpenInterest); }
 
 function getCached<T>(cache: Map<string, CacheEntry>, key: string): T | null {
    const entry = cache.get(key);
@@ -402,6 +407,7 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
       low: parseFloat(k[3]),
       close: parseFloat(k[4]),
       volume: parseFloat(k[5]),
+      quoteVolume: parseFloat(k[7]),
       closeTime: k[6],
       takerBuy: parseFloat(k[9]),
       takerSell: parseFloat(k[5]) - parseFloat(k[9]) // volume - taker buy = taker sell
@@ -437,9 +443,51 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
-async function fetchLiq(symbol: string) {
-   // Proxying liquidation calculation (mocked for this specific requirement due to Binance lacking a free direct liq map)
-   return { _up: 3000000, _down: 3000000 };
+async function fetchAggressorFlow(market: "spot" | "futures", symbol: string) {
+   const key = `${market}:${symbol}`;
+   const cached = getCached<any>(aggTradeCache, key);
+   if (cached) return cached;
+   const base = market === "spot" ? "https://api.binance.com" : BINANCE_FAPI;
+   const path = market === "spot" ? "/api/v3/aggTrades" : "/fapi/v1/aggTrades";
+   const res = await axios.get(`${base}${path}`, { params: { symbol, limit: 1000 }, timeout: 5000 });
+   if (!Array.isArray(res.data) || res.data.length === 0) throw new Error(`No ${market} aggregate trades`);
+   let buyQuote = 0;
+   let sellQuote = 0;
+   for (const trade of res.data) {
+      const notional = Number(trade.p) * Number(trade.q);
+      if (!Number.isFinite(notional) || notional < 0) continue;
+      // m=true means buyer is maker, therefore the seller was the aggressor.
+      if (trade.m === true) sellQuote += notional;
+      else buyQuote += notional;
+   }
+   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: Date.now(), source: "BINANCE_AGG_TRADES" };
+   setCached(aggTradeCache, key, flow, 5000);
+   return flow;
+}
+
+async function fetchOrderBookEvidence(symbol: string) {
+   const cached = getCached<any>(depthCache, symbol);
+   if (cached) return cached;
+   const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/depth`, { params: { symbol, limit: 20 }, timeout: 5000 });
+   const bids = Array.isArray(res.data?.bids) ? res.data.bids : [];
+   const asks = Array.isArray(res.data?.asks) ? res.data.asks : [];
+   if (!bids.length || !asks.length) throw new Error("Order book unavailable");
+   const bidNotional = bids.reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
+   const askNotional = asks.reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
+   const bestBid = Number(bids[0][0]);
+   const bestAsk = Number(asks[0][0]);
+   if (![bidNotional, askNotional, bestBid, bestAsk].every(Number.isFinite) || bestBid <= 0 || bestAsk < bestBid) {
+      throw new Error("Malformed order book");
+   }
+   const mid = (bestBid + bestAsk) / 2;
+   const book = {
+      bidNotional, askNotional,
+      spreadBps: ((bestAsk - bestBid) / mid) * 10000,
+      observedAt: Date.now(),
+      source: "BINANCE_DEPTH"
+   };
+   setCached(depthCache, symbol, book, 2000);
+   return book;
 }
 
 // --- SEC 1: MARKET CONTEXT (BTC) ---
@@ -591,6 +639,19 @@ async function readWhale(symbol: string, btc_chg: number) {
    else if (p_chg < 0 && oi_chg > 0 && slope15 > 0) scenario = "BEAR_TRAP";
 
    const fund = await fetchFunding(symbol);
+   const oiLatest = oiData?.[oiData.length - 1];
+   const oiTimestamp = Number(oiLatest?.timestamp);
+   const oi_available = Boolean(oiData && oiData.length >= 4 &&
+      Number.isFinite(oi_chg) && Number.isFinite(oi0Safe(oiData)) &&
+      (!Number.isFinite(oiTimestamp) || Date.now() - oiTimestamp <= 20 * 60 * 1000));
+   const [spotFlowResult, futuresFlowResult, orderBookResult] = await Promise.allSettled([
+      fetchAggressorFlow("spot", symbol),
+      fetchAggressorFlow("futures", symbol),
+      fetchOrderBookEvidence(symbol)
+   ]);
+   const spotFlow = spotFlowResult.status === "fulfilled" ? spotFlowResult.value : null;
+   const futuresFlow = futuresFlowResult.status === "fulfilled" ? futuresFlowResult.value : null;
+   const orderBook = orderBookResult.status === "fulfilled" ? orderBookResult.value : null;
    
    const corr = Math.abs(btc_chg) > 0.001 ? p_chg / btc_chg : 0;
    const asset_strong = btc_chg < -0.003 && corr > -0.3;
@@ -599,7 +660,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, p_chg, fund,
+      scenario, oi_chg, oi_available, p_chg, fund, spotFlow, futuresFlow, orderBook,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
