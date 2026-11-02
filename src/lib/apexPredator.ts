@@ -471,7 +471,7 @@ async function fetchAggressorFlow(market: "spot" | "futures", symbol: string) {
    }
    const latestTradeTime = Number(res.data[res.data.length - 1]?.T);
    if (!Number.isFinite(latestTradeTime)) throw new Error("Aggregate trades have no valid exchange timestamp");
-   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: latestTradeTime, source: "BINANCE_AGG_TRADES" };
+   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: latestTradeTime, source: "BINANCE_AGG_TRADES" as const };
    setCached(aggTradeCache, key, flow, 5000);
    return flow;
 }
@@ -495,7 +495,7 @@ async function fetchOrderBookEvidence(symbol: string) {
       bidNotional, askNotional,
       spreadBps: ((bestAsk - bestBid) / mid) * 10000,
       observedAt: Date.now(),
-      source: "BINANCE_DEPTH"
+      source: "BINANCE_DEPTH" as const
    };
    setCached(depthCache, symbol, book, 2000);
    return book;
@@ -799,7 +799,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    if (!isLibyaTradingAllowed()) return { signal: "WAIT", reason: "OUTSIDE_LIBYA_HOURS" };
 
    const w = await readWhale(symbol, ctx.btc_chg);
-   const p = await readPrice(symbol, w.c15, w.c5);
+   const p: any = await readPrice(symbol, w.c15, w.c5);
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
 
