@@ -449,7 +449,7 @@ async function fetchAggressorFlow(market: "spot" | "futures", symbol: string) {
    if (cached) return cached;
    const base = market === "spot" ? "https://api.binance.com" : BINANCE_FAPI;
    const path = market === "spot" ? "/api/v3/aggTrades" : "/fapi/v1/aggTrades";
-   const res = await axios.get(`${base}${path}`, { params: { symbol, limit: 1000 }, timeout: 5000 });
+   const res = await axios.get(`${base}${path}`, { params: { symbol, limit: 100 }, timeout: 5000 });
    if (!Array.isArray(res.data) || res.data.length === 0) throw new Error(`No ${market} aggregate trades`);
    let buyQuote = 0;
    let sellQuote = 0;
@@ -460,7 +460,9 @@ async function fetchAggressorFlow(market: "spot" | "futures", symbol: string) {
       if (trade.m === true) sellQuote += notional;
       else buyQuote += notional;
    }
-   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: Date.now(), source: "BINANCE_AGG_TRADES" };
+   const latestTradeTime = Number(res.data[res.data.length - 1]?.T);
+   if (!Number.isFinite(latestTradeTime)) throw new Error("Aggregate trades have no valid exchange timestamp");
+   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: latestTradeTime, source: "BINANCE_AGG_TRADES" };
    setCached(aggTradeCache, key, flow, 5000);
    return flow;
 }
