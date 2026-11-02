@@ -97,7 +97,7 @@ function tradeFlowValid(flow: AggressorFlow | null, now: number): flow is Aggres
   return !!flow && flow.source === "BINANCE_AGG_TRADES" &&
     finite(flow.buyQuote) && finite(flow.sellQuote) &&
     flow.buyQuote >= 0 && flow.sellQuote >= 0 &&
-    Number.isInteger(flow.tradeCount) && flow.tradeCount > 0 &&
+    Number.isInteger(flow.tradeCount) && flow.tradeCount >= 10 &&
     fresh(flow.observedAt, now, 15_000);
 }
 
@@ -181,7 +181,6 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const shortFutures = futuresShare <= 0.45 && futuresDelta < 0;
   const longOi = oi > 0.001;
   const shortOi = oi > 0.001;
-  const oiFlatOrFalling = oi <= 0.001;
   const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 15 &&
     input.orderBook!.bidNotional + input.orderBook!.askNotional >= 10_000;
   const longBook = liquidityQualified && bookImbalance !== null && bookImbalance >= 0.08;
@@ -270,8 +269,11 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
 
   return {
     symbol: input.symbol, state, direction, canEnter, entryType, management: "NONE",
-    evidenceFor, evidenceAgainst, missingEvidence: !bookOk ? ["fresh order-book snapshot (context only)"] :
-      !liquidityQualified ? ["minimum executable depth of 10,000 USDT and spread <= 15 bps"] : [],
+    evidenceFor, evidenceAgainst, missingEvidence: [
+      ...missing.filter(item => item === "valid funding rate"),
+      ...(!bookOk ? ["fresh order-book snapshot (context only)"] :
+        !liquidityQualified ? ["minimum executable depth of 10,000 USDT and spread <= 15 bps"] : [])
+    ],
     dataQuality: { spotTrades: spotOk, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: "UNAVAILABLE" },
     metrics: {
       spotDeltaQuote: spotDelta, futuresDeltaQuote: futuresDelta, spotBuyShare: spotShare,
