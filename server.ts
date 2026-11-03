@@ -72,6 +72,7 @@ async function startServer() {
         institutionalExitEnabled: req.body.institutionalExitEnabled,
         iceExitScore: req.body.iceExitScore,
         iceContinueScore: req.body.iceContinueScore,
+        flowEntryGateEnabled: req.body.flowEntryGateEnabled,
      });
      res.json({ success: true });
   });

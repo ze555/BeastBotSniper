@@ -2,6 +2,7 @@ import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
 import { evaluateExecutionFilter } from "./executionFilter.js";
+import { evaluateFlowEntryGate, configureFlowEntryGate, getFlowEntryGateConfig } from "./flowEntryGate.js";
 import {
    normalizeCvdSlope, updateTakerRatio, updateFunding,
    getLiquidationSnapshot, recordLiqBaseline,
@@ -122,6 +123,7 @@ let crashRiskMult = 0.80;          // Risk multiplier for with-tape cascade entr
 let institutionalExitEnabled = true; // ICE master switch (replaces scattered reversal exits when ON)
 let iceExitScore = -55;              // cross-layer condemnation floor for EXIT without a hard pair
 let iceContinueScore = 50;           // consensus needed for ride mode
+let flowEntryGateEnabled = true;     // v3.2.1 flow entry gate (G1 positioning / G2 war-zone / G3 exhausted regime)
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -207,6 +209,11 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
          });
          iceExitScore = getIceConfig().exitScore;
          iceContinueScore = getIceConfig().continueScore;
+      }
+      // v3.2.1 flow entry gate
+      if (opts.flowEntryGateEnabled !== undefined) {
+         flowEntryGateEnabled = !!opts.flowEntryGateEnabled;
+         configureFlowEntryGate({ enabled: flowEntryGateEnabled });
       }
       if (opts.crashDrop45Pct !== undefined || opts.crashDrop90Pct !== undefined || opts.crashHoldMinutes !== undefined) {
          configureCrashRadar({
@@ -308,6 +315,7 @@ export function getStats() {
     institutionalExitEnabled,
     iceExitScore,
     iceContinueScore,
+    flowEntryGateEnabled,
     violence: getViolenceState(),
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
     fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
@@ -357,7 +365,9 @@ export function getConfig() {
     // v3.2 ICE
     institutionalExitEnabled,
     iceExitScore,
-    iceContinueScore
+    iceContinueScore,
+    // v3.2.1 flow entry gate
+    flowEntryGateEnabled
   };
 }
 export function setConfig(config: any) {
@@ -406,6 +416,10 @@ export function setConfig(config: any) {
   // v3.1.2 crash mode
   if (config.crashMode !== undefined) crashMode = !!config.crashMode;
   if (config.crashRiskMult !== undefined) crashRiskMult = Math.min(1.0, Math.max(0.3, Number(config.crashRiskMult) || 0.8));
+  if (config.flowEntryGateEnabled !== undefined) {
+     flowEntryGateEnabled = !!config.flowEntryGateEnabled;
+     configureFlowEntryGate({ enabled: flowEntryGateEnabled });
+  }
   if (config.crashDrop45Pct !== undefined || config.crashDrop90Pct !== undefined || config.crashHoldMinutes !== undefined) {
      configureCrashRadar({
         drop45Pct: config.crashDrop45Pct !== undefined ? Number(config.crashDrop45Pct) : undefined,
@@ -1167,6 +1181,35 @@ async function scoreEntry(symbol: string, ctx: any) {
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
          }
 
+         // ═══ FLOW ENTRY GATE (v3.2.1) — اركب بداية الموجة لا بقاياها ═══
+         // G1 fresh accumulation only / G2 liquidity war-zone / G3 exhausted regime
+         if (flowEntryGateEnabled) {
+            const flowGate = evaluateFlowEntryGate({
+               side: "LONG",
+               flowState: reasoning.flow.state,
+               distanceToSupportPct: reasoning.location?.distanceToSupportPct,
+               distanceToResistancePct: reasoning.location?.distanceToResistancePct,
+               btcRegime: ctx.regime,
+               violenceActive: (ctx as any).violence?.active === true,
+               violenceDirection: (ctx as any).violence?.direction
+            });
+            if (flowGate.blocked) {
+               addLog(`🐉 [FLOW ENTRY GATE] LONG ${symbol} blocked: ${flowGate.reason}`, "warn");
+               logRejectedSignal({
+                  symbol,
+                  timeframe: "15m",
+                  direction: "LONG",
+                  signal_score: sl,
+                  rejection_reason: flowGate.reason,
+                  p,
+                  w,
+                  ctx,
+                  reasoning
+               });
+               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            }
+         }
+
          apexPredatorStats.acceptedLongs++;
          if (setupType === "PULLBACK_SNIPER") apexPredatorStats.pullbackSetups++;
          else apexPredatorStats.breakoutSetups++;
@@ -1222,6 +1265,35 @@ async function scoreEntry(symbol: string, ctx: any) {
                reasoning
             });
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+         }
+
+         // ═══ FLOW ENTRY GATE (v3.2.1) — اركب بداية الموجة لا بقاياها ═══
+         // G1 fresh accumulation only / G2 liquidity war-zone / G3 exhausted regime
+         if (flowEntryGateEnabled) {
+            const flowGate = evaluateFlowEntryGate({
+               side: "SHORT",
+               flowState: reasoning.flow.state,
+               distanceToSupportPct: reasoning.location?.distanceToSupportPct,
+               distanceToResistancePct: reasoning.location?.distanceToResistancePct,
+               btcRegime: ctx.regime,
+               violenceActive: (ctx as any).violence?.active === true,
+               violenceDirection: (ctx as any).violence?.direction
+            });
+            if (flowGate.blocked) {
+               addLog(`🐉 [FLOW ENTRY GATE] SHORT ${symbol} blocked: ${flowGate.reason}`, "warn");
+               logRejectedSignal({
+                  symbol,
+                  timeframe: "15m",
+                  direction: "SHORT",
+                  signal_score: ss,
+                  rejection_reason: flowGate.reason,
+                  p,
+                  w,
+                  ctx,
+                  reasoning
+               });
+               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            }
          }
 
          apexPredatorStats.acceptedShorts++;
@@ -1660,7 +1732,7 @@ async function exitBrain(trade: any, ctx: any) {
 
       if (iceDecision.state === "EXIT") {
          addLog(`🧠 [ICE] خروج مؤكد ${t.symbol} (${t.direction}) | ${iceDecision.reason}`, "warn");
-         closeTradeFull(t, `ICE Reversal Confirmed (${iceDecision.hardReversal})`);
+         closeTradeFull(t, `ICE Reversal Confirmed (${iceDecision.hardReversal ?? "S6:SustainedDanger — إجماع سلبي متواصل عبر الطبقات المؤسسية"})`);
          return;
       }
       if (iceDecision.state === "CONTINUE") {
@@ -1799,7 +1871,10 @@ async function exitBrain(trade: any, ctx: any) {
    // bar relaxes — explosions breathe, retracements are noise, and the ICE
    // reversal signatures remain the true exit (user mandate: ride the collapse,
    // leave at the REAL turn, not at the first bounce).
-   const givebackFactor = (iceRideMode || isIceRiding(t.symbol)) ? 0.35 : 0.55;
+   // v3.2.1 impulse-bank: non-ride winners tighten to 0.45 — the fresh-log
+   // forensics showed median time-to-MFE 21 min then surrender; banking more
+   // of the impulse (counterfactual S4: +37.06$ vs +31.77$ on the old log).
+   const givebackFactor = (iceRideMode || isIceRiding(t.symbol)) ? 0.35 : 0.45;
    const spikeFadeFactor = (iceRideMode || isIceRiding(t.symbol)) ? 0.30 : 0.45;
    if (t.a_closed && t.peak_r >= 0.8 && profitR <= t.peak_r * givebackFactor) {
       addLog(`🎯 [GIVEBACK EXIT] ${t.symbol} | peak +${t.peak_r.toFixed(2)}R → now +${profitR.toFixed(2)}R. Locking remaining gains.`, 'success');
