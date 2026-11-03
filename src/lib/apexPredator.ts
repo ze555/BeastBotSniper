@@ -452,27 +452,40 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
-async function fetchAggressorFlow(market: "spot" | "futures", symbol: string) {
-   const key = `${market}:${symbol}`;
+async function fetchFuturesAggressorFlow(symbol: string) {
+   const key = `futures:${symbol}`;
    const cached = getCached<any>(aggTradeCache, key);
    if (cached) return cached;
-   const base = market === "spot" ? "https://api.binance.com" : BINANCE_FAPI;
-   const path = market === "spot" ? "/api/v3/aggTrades" : "/fapi/v1/aggTrades";
-   const res = await axios.get(`${base}${path}`, { params: { symbol, limit: 100 }, timeout: 5000 });
-   if (!Array.isArray(res.data) || res.data.length === 0) throw new Error(`No ${market} aggregate trades`);
-   let buyQuote = 0;
-   let sellQuote = 0;
+   const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/aggTrades`, {
+      params: { symbol, limit: 100 }, timeout: 5000
+   });
+   if (!Array.isArray(res.data) || res.data.length === 0) throw new Error("No Futures aggregate trades");
+   const now = Date.now();
+   let buyQuote = 0, sellQuote = 0, trades30s = 0;
+   let buyQuote5s = 0, sellQuote5s = 0, trades5s = 0;
+   let latestTradeTime = 0;
    for (const trade of res.data) {
+      const at = Number(trade.T);
       const notional = Number(trade.p) * Number(trade.q);
-      if (!Number.isFinite(notional) || notional < 0) continue;
-      // m=true means buyer is maker, therefore the seller was the aggressor.
-      if (trade.m === true) sellQuote += notional;
-      else buyQuote += notional;
+      if (!Number.isFinite(at) || !Number.isFinite(notional) || notional <= 0 || at > now + 2_000) continue;
+      latestTradeTime = Math.max(latestTradeTime, at);
+      if (at < now - 30_000) continue;
+      trades30s++;
+      if (trade.m === true) sellQuote += notional; else buyQuote += notional;
+      if (at >= now - 5_000) {
+         trades5s++;
+         if (trade.m === true) sellQuote5s += notional; else buyQuote5s += notional;
+      }
    }
-   const latestTradeTime = Number(res.data[res.data.length - 1]?.T);
-   if (!Number.isFinite(latestTradeTime)) throw new Error("Aggregate trades have no valid exchange timestamp");
-   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: latestTradeTime, source: "BINANCE_AGG_TRADES" as const };
-   setCached(aggTradeCache, key, flow, 5000);
+   if (!latestTradeTime || now - latestTradeTime > 30_000 || trades30s < 5) {
+      throw new Error("Insufficient fresh Futures aggressor trades in the last 30 seconds");
+   }
+   const flow = {
+      buyQuote, sellQuote, tradeCount: trades30s, observedAt: latestTradeTime,
+      buyQuote5s, sellQuote5s, trades5s, buyQuote30s: buyQuote, sellQuote30s: sellQuote,
+      trades30s, source: "BINANCE_AGG_TRADES" as const
+   };
+   setCached(aggTradeCache, key, flow, 2_000);
    return flow;
 }
 
@@ -655,12 +668,11 @@ async function readWhale(symbol: string, btc_chg: number) {
    const oi_available = Boolean(oiData && oiData.length >= 4 &&
       Number.isFinite(oi_chg) && Number.isFinite(oi0Safe(oiData)) &&
       (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 20 * 60 * 1000));
-   const [spotFlowResult, futuresFlowResult, orderBookResult] = await Promise.allSettled([
-      fetchAggressorFlow("spot", symbol),
-      fetchAggressorFlow("futures", symbol),
+   // Futures-only evidence collection. Spot is intentionally not queried.
+   const [futuresFlowResult, orderBookResult] = await Promise.allSettled([
+      fetchFuturesAggressorFlow(symbol),
       fetchOrderBookEvidence(symbol)
    ]);
-   const spotFlow = spotFlowResult.status === "fulfilled" ? spotFlowResult.value : null;
    const futuresFlow = futuresFlowResult.status === "fulfilled" ? futuresFlowResult.value : null;
    const orderBook = orderBookResult.status === "fulfilled" ? orderBookResult.value : null;
    
@@ -671,7 +683,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, oi_available, p_chg, fund, spotFlow, futuresFlow, orderBook,
+      scenario, oi_chg, oi_available, p_chg, fund, spotFlow: null, futuresFlow, orderBook,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
@@ -795,7 +807,7 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
 // --- SEC 4: INSTITUTIONAL EVIDENCE ENTRY ENGINE (NO SCORE) ---
 async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
-   if (!ctx.tradeable || ctx.btc_whipsaw) return { signal: "WAIT", reason: "BTC_WHIPSaw_CONTEXT" };
+   // BTC is context only: a market-wide BTC whipsaw must not suppress an independently violent altcoin Futures wave.
    if (!isLibyaTradingAllowed()) return { signal: "WAIT", reason: "OUTSIDE_LIBYA_HOURS" };
 
    const w = await readWhale(symbol, ctx.btc_chg);
@@ -804,7 +816,8 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    updateDirectionTracking(symbol, p.price);
 
    // Only completed candles are eligible. The current, still-forming candle is excluded.
-   const closedCandles = (p.klines || []).filter((c: any) => Number(c.closeTime) < Date.now());
+   // Include the live forming 1m Futures candle: waiting for candle close is too late for early ignition detection.
+   const closedCandles = (p.klines || []).slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
    const institutional = evaluateInstitutionalMarket({
       symbol,
@@ -853,7 +866,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          rangeHigh: p.res10,
          rangeLow: p.sup10
       },
-      flow: { state: "EXECUTED_SPOT_FUTURES_ALIGNMENT", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
+      flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
       scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: "CONFIRMED", bias: direction } },
       confirmation: { isConfirmed: true, confirmedSignal: direction, reason: institutional.reason },
       institutional
@@ -1082,7 +1095,6 @@ async function exitBrain(trade: any, ctx: any) {
       entry: t.entry,
       stop: t.sl,
       structureInvalidated,
-      spotFlow: w.spotFlow || null,
       futuresFlow: w.futuresFlow || null,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
       timestamp: Date.now()
@@ -1090,7 +1102,7 @@ async function exitBrain(trade: any, ctx: any) {
 
    if (exitEvidence.action === "EXIT") {
       addLog(`🚨 [INSTITUTIONAL REVERSAL CONFIRMED] ${t.symbol} ${t.direction} at ${profitR.toFixed(2)}R | ${exitEvidence.reasons.join(" | ")}`, "warn");
-      closeTradeFull(t, "Institutional Structure + Spot/Futures Flow Reversal");
+      closeTradeFull(t, "Institutional Structure + Futures Flow Reversal");
       return;
    }
    if (exitEvidence.action === "PROTECT") {
@@ -1105,11 +1117,8 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   const spotDelta = w.spotFlow ? w.spotFlow.buyQuote - w.spotFlow.sellQuote : 0;
    const futuresDelta = w.futuresFlow ? w.futuresFlow.buyQuote - w.futuresFlow.sellQuote : 0;
-   const supportiveFlow = t.direction === "LONG"
-      ? spotDelta > 0 && futuresDelta > 0
-      : spotDelta < 0 && futuresDelta < 0;
+   const supportiveFlow = t.direction === "LONG" ? futuresDelta > 0 : futuresDelta < 0;
    const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
    const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
 
