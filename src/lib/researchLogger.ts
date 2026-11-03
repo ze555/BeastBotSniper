@@ -374,10 +374,20 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (trade.direction === "SHORT" && loc && loc.distanceToSupportPct < 0.002) {
       return "BAD_LOCATION";
    }
-   if (trade.score < 7.0 || timingGate?.state === "WAITING_FOR_CONFIRMATION") {
+   if (trade.reasoning?.entryQuality?.cvdState === "OPPOSING") {
       return "WEAK_CONFIRMATION";
    }
-   return "GOOD_ENTRY";
+   if ((timingGate?.state === "IN_TIME" && flow?.persistenceState === "ALIGNED") ||
+       (timingGate?.state === "CONFIRMED" && flow?.persistenceState === "STRONG")) {
+      return "GOOD_ENTRY";
+   }
+   if (timingGate?.state === "EARLY_FLOW_REVERSAL" && flow?.persistenceState === "EARLY_REVERSAL") {
+      return "GOOD_ENTRY";
+   }
+   if (timingGate?.state === "WAITING_FOR_CONFIRMATION" || flow?.persistenceState === "MODERATE") {
+      return "WEAK_CONFIRMATION";
+   }
+   return "UNKNOWN";
 }
 
 // ----------------------------------------------------------------------------
@@ -771,6 +781,9 @@ export function logTradeDecision(trade: any, exitContext: {
          symbol: trade.symbol,
          exchange: "Binance Futures (Paper)",
          timeframe: "15m",
+         entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_before_entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_during_trade_timeframe: "15m",
          side: trade.direction,
          signal_type: trade.setupType || "BREAKOUT_MOMENTUM",
          market_regime: marketRegimeContext.strategy_regime,
@@ -778,9 +791,9 @@ export function logTradeDecision(trade: any, exitContext: {
          // ═══ ENTRY TIMING & REGIME ANALYTICS ═══
          entry_timing: entryTiming,
          market_context: marketRegimeContext,
-         timing_gate_state: trade.reasoning?.timingGate?.state || "CONFIRMED",
-         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "MODERATE",
-         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? 75,
+         timing_gate_state: trade.reasoning?.timingGate?.state || "NOT_RECORDED",
+         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "NOT_RECORDED",
+         flow_persistence_score: Number.isFinite(trade.reasoning?.flow?.persistenceScore) ? trade.reasoning.flow.persistenceScore : null,
          entry_quality: entryQuality,
 
          entry_price: entryPrice,
@@ -834,6 +847,12 @@ export function logTradeDecision(trade: any, exitContext: {
             alternative_scenario: trade.reasoning?.scenario?.alternative?.type || null,
             indicators_at_entry: trade.priceData || null,
             orderflow_at_entry: trade.whaleData || null,
+            futures_flow_at_entry: trade.reasoning?.futuresFlowAtEntry || null,
+            open_interest_change_at_entry: Number.isFinite(trade.reasoning?.openInterestChangeAtEntry) ? trade.reasoning.openInterestChangeAtEntry : null,
+            order_book_at_entry: trade.reasoning?.orderBookAtEntry || null,
+            liquidation_flow_at_entry: trade.reasoning?.liquidationFlowAtEntry || null,
+            institutional_evidence_at_entry: trade.reasoning?.institutional || null,
+            entry_quality_at_entry: trade.reasoning?.entryQuality || null,
             location_at_entry: trade.reasoning?.location || null
          },
          

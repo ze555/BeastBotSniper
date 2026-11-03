@@ -21,6 +21,21 @@ function snapshot(overrides: Partial<InstitutionalSnapshot> = {}): Institutional
   };
 }
 
+const liquidationAware = evaluateInstitutionalMarket(snapshot({
+  liquidationFlow: { longLiquidationQuote: 25_000, shortLiquidationQuote: 2_000, eventCount: 3, observedAt: now, source: "BINANCE_FORCE_ORDER" },
+  liquidationFeedConnected: true
+}));
+assert.equal(liquidationAware.dataQuality.liquidationFeed, "OBSERVED");
+assert.equal(liquidationAware.metrics.longLiquidationQuote, 25_000);
+const noLiquidations = evaluateInstitutionalMarket(snapshot({ liquidationFeedConnected: true }));
+assert.equal(noLiquidations.dataQuality.liquidationFeed, "NO_RECENT_EVENTS");
+const staleLiquidation = evaluateInstitutionalMarket(snapshot({
+  liquidationFlow: { longLiquidationQuote: 25_000, shortLiquidationQuote: 2_000, eventCount: 3, observedAt: now - 60_000, source: "BINANCE_FORCE_ORDER" },
+  liquidationFeedConnected: true
+}));
+assert.equal(staleLiquidation.dataQuality.liquidationFeed, "NO_RECENT_EVENTS");
+assert.equal(staleLiquidation.metrics.longLiquidationQuote, null, "stale liquidation data must not be treated as observed");
+
 const long = evaluateInstitutionalMarket(snapshot());
 assert.equal(long.state, "BREAKOUT_CONFIRMED");
 assert.equal(long.direction, "LONG");
@@ -56,6 +71,16 @@ const earlyBeforeVolumeClose = evaluateInstitutionalMarket(snapshot({
   oiChange: 0.001
 }));
 assert.equal(earlyBeforeVolumeClose.canEnter, true, "Directional 30-second Futures flow plus a 0.4% live impulse should not wait for the 1m candle-volume ratio");
+
+const noBookStillWorks = evaluateInstitutionalMarket(snapshot({ orderBook: null }));
+assert.equal(noBookStillWorks.canEnter, false, "Missing depth must not create a fake executable entry");
+assert.equal(noBookStillWorks.state, "PRE_IGNITION", "A promising signal without depth remains on watch instead of being discarded as dormant");
+const sampledDepth = evaluateInstitutionalMarket(snapshot({
+  orderBook: { bidNotional: 500_000, askNotional: 200_000, spreadBps: 2, observedAt: now,
+    source: "BINANCE_DEPTH", bidDepthChangePct: -18, askDepthChangePct: -22 }
+}));
+assert.equal(sampledDepth.metrics.sampledBidDepthChangePct, -18);
+assert.equal(sampledDepth.metrics.sampledAskDepthChangePct, -22);
 
 const noSpotStillWorks = evaluateInstitutionalMarket(snapshot());
 assert.equal(noSpotStillWorks.canEnter, true, "Missing Spot data must never block a Futures-only signal");

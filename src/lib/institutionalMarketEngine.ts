@@ -23,10 +23,17 @@ export interface AggressorFlow {
   sellQuote30s?: number;
   trades30s?: number;
 }
+export interface LiquidationFlowEvidence {
+  longLiquidationQuote: number; shortLiquidationQuote: number; eventCount: number;
+  observedAt: number; source: "BINANCE_FORCE_ORDER";
+}
 export interface OrderBookEvidence {
   bidNotional: number;
   askNotional: number;
   spreadBps: number;
+  /** Sampled REST snapshot deltas; not exchange depth-diff events. */
+  bidDepthChangePct?: number | null;
+  askDepthChangePct?: number | null;
   observedAt: number;
   source: "BINANCE_DEPTH";
 }
@@ -41,6 +48,8 @@ export interface InstitutionalSnapshot {
   fundingRate: number | null;
   btcChange: number | null;
   oiAvailable: boolean;
+  liquidationFlow?: LiquidationFlowEvidence | null;
+  liquidationFeedConnected?: boolean;
   previousState?: MarketState;
   previousDirection?: Side | "NONE";
 }
@@ -60,7 +69,7 @@ export interface EvidenceDecision {
     orderBook: boolean;
     openInterest: boolean;
     funding: boolean;
-    liquidationFeed: "UNAVAILABLE";
+    liquidationFeed: "OBSERVED" | "NO_RECENT_EVENTS" | "UNAVAILABLE";
   };
   metrics: {
     spotDeltaQuote: null;
@@ -71,6 +80,10 @@ export interface EvidenceDecision {
     oiChange: number | null;
     fundingRate: number | null;
     bookImbalance: number | null;
+    sampledBidDepthChangePct: number | null;
+    sampledAskDepthChangePct: number | null;
+    longLiquidationQuote: number | null;
+    shortLiquidationQuote: number | null;
     btcChange: number | null;
     breakoutLevel: number | null;
     invalidationLevel: number | null;
@@ -91,11 +104,19 @@ function bookValid(book: OrderBookEvidence | null, now: number): book is OrderBo
     book.bidNotional >= 0 && book.askNotional >= 0 && finite(book.spreadBps) && book.spreadBps >= 0 &&
     fresh(book.observedAt, now, 8_000);
 }
+function liquidationValid(flow: LiquidationFlowEvidence | null | undefined, now: number): flow is LiquidationFlowEvidence {
+  return !!flow && flow.source === "BINANCE_FORCE_ORDER" &&
+    finite(flow.longLiquidationQuote) && flow.longLiquidationQuote >= 0 &&
+    finite(flow.shortLiquidationQuote) && flow.shortLiquidationQuote >= 0 &&
+    Number.isInteger(flow.eventCount) && flow.eventCount > 0 &&
+    fresh(flow.observedAt, now, 30_000);
+}
 export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): EvidenceDecision {
   const now = input.timestamp;
   const candles = input.candles || [];
   const futuresOk = tradeFlowValid(input.futuresFlow, now);
   const bookOk = bookValid(input.orderBook, now);
+  const liquidationOk = liquidationValid(input.liquidationFlow, now);
   const oiOk = input.oiAvailable && finite(input.oiChange);
   const fundingOk = finite(input.fundingRate);
   const validCandles = candles.length >= 9 && candles.slice(-9).every(c =>
@@ -105,7 +126,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const empty = (state: MarketState, reason: string, missingEvidence: string[]): EvidenceDecision => ({
     symbol: input.symbol, state, direction: "NONE", canEnter: false, entryType: "NONE",
     management: "NONE", evidenceFor: [], evidenceAgainst: [], missingEvidence,
-    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: "UNAVAILABLE" },
+    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: liquidationOk ? "OBSERVED" : input.liquidationFeedConnected ? "NO_RECENT_EVENTS" : "UNAVAILABLE" },
     metrics: {
       spotDeltaQuote: null,
       futuresDeltaQuote: futuresOk ? input.futuresFlow!.buyQuote - input.futuresFlow!.sellQuote : null,
@@ -114,6 +135,10 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
       relativeVolume: null, oiChange: oiOk ? input.oiChange : null,
       fundingRate: fundingOk ? input.fundingRate! : null,
       bookImbalance: bookOk ? (input.orderBook!.bidNotional - input.orderBook!.askNotional) / Math.max(input.orderBook!.bidNotional + input.orderBook!.askNotional, 1e-12) : null,
+      sampledBidDepthChangePct: bookOk && finite(input.orderBook!.bidDepthChangePct) ? input.orderBook!.bidDepthChangePct : null,
+      sampledAskDepthChangePct: bookOk && finite(input.orderBook!.askDepthChangePct) ? input.orderBook!.askDepthChangePct : null,
+      longLiquidationQuote: liquidationOk ? input.liquidationFlow!.longLiquidationQuote : null,
+      shortLiquidationQuote: liquidationOk ? input.liquidationFlow!.shortLiquidationQuote : null,
       btcChange: finite(input.btcChange) ? input.btcChange : null, breakoutLevel: null, invalidationLevel: null
     },
     reason
@@ -140,13 +165,19 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const oi = oiOk ? input.oiChange! : null;
   const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 20 &&
     input.orderBook!.bidNotional + input.orderBook!.askNotional >= 10_000;
-  const longFlow = buyShare >= 0.60 && delta > 0 && total >= 5_000;
-  const shortFlow = buyShare <= 0.40 && delta < 0 && total >= 5_000;
-  const volumeSurge = relativeVolume !== null && relativeVolume >= 1.40;
+  // Per-symbol flow floor adapts to its own recent Futures quote-volume baseline.
+  const flowMinNotional = Math.max(1_000, Math.min(5_000, avgQuoteVolume * 0.03));
+  const volumeSurge = relativeVolume !== null && relativeVolume >= 1.25;
   const fastLongFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
-    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.buyQuote5s! > flow.sellQuote5s! * 1.8;
+    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) &&
+    flow.buyQuote5s! + flow.sellQuote5s! >= Math.max(750, flowMinNotional * 0.20) &&
+    flow.buyQuote5s! > flow.sellQuote5s! * 1.6;
   const fastShortFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
-    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.sellQuote5s! > flow.buyQuote5s! * 1.8;
+    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) &&
+    flow.buyQuote5s! + flow.sellQuote5s! >= Math.max(750, flowMinNotional * 0.20) &&
+    flow.sellQuote5s! > flow.buyQuote5s! * 1.6;
+  const longFlow = (buyShare >= 0.57 && delta > 0 && total >= flowMinNotional) || fastLongFlow;
+  const shortFlow = (buyShare <= 0.43 && delta < 0 && total >= flowMinNotional) || fastShortFlow;
   const fastFlow = fastLongFlow || fastShortFlow;
   const longBreak = recent.close > priorHigh || (priceReturn >= 0.003 && recent.close > recent.open);
   const shortBreak = recent.close < priorLow || (priceReturn <= -0.003 && recent.close < recent.open);
@@ -174,6 +205,10 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   if (shortLiquidation) evidenceFor.push("Price/flow indicate a downward long-liquidation impulse while open interest contracts.");
   if (bookOk && bookImbalance !== null && bookImbalance > 0.12) evidenceFor.push("Displayed bid depth is supportive (context only).");
   if (bookOk && bookImbalance !== null && bookImbalance < -0.12) evidenceFor.push("Displayed ask depth is supportive (context only).");
+  if (bookOk && finite(input.orderBook!.askDepthChangePct) && input.orderBook!.askDepthChangePct < -15 && longFlow) evidenceFor.push("Sampled ask depth fell sharply during aggressive buying; possible offer depletion, but cancellations cannot be distinguished from fills.");
+  if (bookOk && finite(input.orderBook!.bidDepthChangePct) && input.orderBook!.bidDepthChangePct < -15 && shortFlow) evidenceFor.push("Sampled bid depth fell sharply during aggressive selling; possible bid depletion, but cancellations cannot be distinguished from fills.");
+  if (liquidationOk && input.liquidationFlow!.longLiquidationQuote > input.liquidationFlow!.shortLiquidationQuote * 1.5 && input.liquidationFlow!.longLiquidationQuote >= 5_000) evidenceFor.push("Recent Binance force-order events show long liquidations; this is squeeze context, not standalone direction proof.");
+  if (liquidationOk && input.liquidationFlow!.shortLiquidationQuote > input.liquidationFlow!.longLiquidationQuote * 1.5 && input.liquidationFlow!.shortLiquidationQuote >= 5_000) evidenceFor.push("Recent Binance force-order events show short liquidations; this is squeeze context, not standalone direction proof.");
   if (longExhaustion) evidenceAgainst.push("Crowded positive funding and fading buyer aggression warn of long exhaustion.");
   if (shortExhaustion) evidenceAgainst.push("Crowded negative funding and fading seller aggression warn of short exhaustion.");
   if (!oiOk) evidenceAgainst.push("Open-interest evidence is unavailable; direction is based on executed Futures flow and price/volume only.");
@@ -182,9 +217,9 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let state: MarketState = "DORMANT", direction: Side | "NONE" = "NONE";
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
-  const executable = bookOk && liquidityQualified;
-  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= 15_000)) && (longBreak || (compressedBefore && priceReturn > 0.001));
-  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= 15_000)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
+  const executable = bookOk && liquidityQualified; // A fresh executable Futures depth snapshot remains mandatory before order placement.
+  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= flowMinNotional * 2.5)) && (longBreak || (compressedBefore && priceReturn > 0.001));
+  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= flowMinNotional * 2.5)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
@@ -223,13 +258,18 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     evidenceFor, evidenceAgainst,
     missingEvidence: [
       ...(!oiOk ? ["open-interest history (context, not an entry blocker)"] : []),
-      ...(!bookOk ? ["order-book snapshot (optional context; execution spread/depth should be checked before order placement)"] : [])
+      ...(!bookOk ? ["fresh executable Futures order-book snapshot (spread <= 20 bps and depth >= 10,000 USDT)"] : [])
     ],
-    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: "UNAVAILABLE" },
+    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: liquidationOk ? "OBSERVED" : input.liquidationFeedConnected ? "NO_RECENT_EVENTS" : "UNAVAILABLE" },
     metrics: {
       spotDeltaQuote: null, futuresDeltaQuote: delta, spotBuyShare: null, futuresBuyShare: buyShare,
       relativeVolume, oiChange: oi, fundingRate: fundingOk ? input.fundingRate! : null,
-      bookImbalance, btcChange: finite(input.btcChange) ? input.btcChange : null,
+      bookImbalance,
+      sampledBidDepthChangePct: bookOk && finite(input.orderBook!.bidDepthChangePct) ? input.orderBook!.bidDepthChangePct : null,
+      sampledAskDepthChangePct: bookOk && finite(input.orderBook!.askDepthChangePct) ? input.orderBook!.askDepthChangePct : null,
+      longLiquidationQuote: liquidationOk ? input.liquidationFlow!.longLiquidationQuote : null,
+      shortLiquidationQuote: liquidationOk ? input.liquidationFlow!.shortLiquidationQuote : null,
+      btcChange: finite(input.btcChange) ? input.btcChange : null,
       breakoutLevel: direction === "LONG" ? priorHigh : direction === "SHORT" ? priorLow : null,
       invalidationLevel: direction === "LONG" ? Math.min(recent.low, priorHigh) : direction === "SHORT" ? Math.max(recent.high, priorLow) : null
     },

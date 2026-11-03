@@ -15,7 +15,8 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
-import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates } from "./futuresWaveFeed.js";
+import { evaluateEntryQuality } from "./entryQualityEngine.js";
+import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
@@ -374,6 +375,7 @@ const fundingCache = new Map<string, CacheEntry>();
 const oiCache = new Map<string, CacheEntry>();
 const aggTradeCache = new Map<string, CacheEntry>();
 const depthCache = new Map<string, CacheEntry>();
+const priorDepthBySymbol = new Map<string, { bidNotional: number; askNotional: number; observedAt: number }>();
 
 function oi0Safe(data: any[]) { return Number(data?.[0]?.sumOpenInterest); }
 
@@ -508,10 +510,16 @@ async function fetchOrderBookEvidence(symbol: string) {
       throw new Error("Malformed order book");
    }
    const mid = (bestBid + bestAsk) / 2;
+   const observedAt = Date.now();
+   const previous = priorDepthBySymbol.get(symbol);
+   const sampleFresh = previous && observedAt - previous.observedAt <= 60_000;
+   const bidDepthChangePct = sampleFresh ? ((bidNotional - previous.bidNotional) / Math.max(previous.bidNotional, 1)) * 100 : null;
+   const askDepthChangePct = sampleFresh ? ((askNotional - previous.askNotional) / Math.max(previous.askNotional, 1)) * 100 : null;
+   priorDepthBySymbol.set(symbol, { bidNotional, askNotional, observedAt });
    const book = {
-      bidNotional, askNotional,
+      bidNotional, askNotional, bidDepthChangePct, askDepthChangePct,
       spreadBps: ((bestAsk - bestBid) / mid) * 10000,
-      observedAt: Date.now(),
+      observedAt,
       source: "BINANCE_DEPTH" as const
    };
    setCached(depthCache, symbol, book, 2000);
@@ -826,15 +834,27 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    // Include the still-forming 1m Futures candle to avoid waiting for candle close.
    const closedCandles = waveCandles.slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
+   // Re-fetch a missing/stale depth snapshot before allowing an executable entry.
+   let executionOrderBook = w.orderBook;
+   if (!executionOrderBook || !Number.isFinite(executionOrderBook.observedAt) ||
+       Date.now() - executionOrderBook.observedAt > 8_000) {
+      try { executionOrderBook = await fetchOrderBookEvidence(symbol); }
+      catch { executionOrderBook = null; }
+   }
+   w.orderBook = executionOrderBook;
+   const liquidationFlowAtEntry = getFuturesLiquidationFlow(symbol);
+   const liquidationFeedConnected = getFuturesWaveFeedStatus().liquidationFeedConnected;
    const institutional = evaluateInstitutionalMarket({
       symbol,
       timestamp: Date.now(),
       price: wavePrice,
       candles: closedCandles,
       futuresFlow: w.futuresFlow,
-      orderBook: w.orderBook,
+      orderBook: executionOrderBook,
       oiChange: w.oi_chg,
       oiAvailable: w.oi_available === true,
+      liquidationFlow: liquidationFlowAtEntry,
+      liquidationFeedConnected,
       previousState: previousInstitutionalState?.state as any,
       previousDirection: previousInstitutionalState?.direction as any,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
@@ -845,6 +865,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       institutionalStateBySymbol.set(symbol, { state: institutional.state, direction: institutional.direction });
    }
    p.institutionalEvidence = institutional;
+   p.institutionalEntryCandles = waveCandles;
    p.institutionalInvalidation = institutional.metrics.invalidationLevel;
    if (institutional.state === "DATA_INSUFFICIENT") {
       addLog(`⛔ ${symbol}: Institutional entry blocked — ${institutional.reason} Missing: ${institutional.missingEvidence.join(", ")}`, "warn");
@@ -858,6 +879,24 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    }
 
    const direction = institutional.direction;
+   const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop() || p.atr14;
+   const entryQuality = evaluateEntryQuality({
+      side: direction,
+      price: wavePrice,
+      atr: waveAtr,
+      now: Date.now(),
+      candles: waveCandles.slice(-3),
+      flow: w.futuresFlow,
+      oiChange: w.oi_available ? w.oi_chg : null,
+      oiPriceChange: Number.isFinite(w.p_chg) ? w.p_chg : null,
+      cvd5mSlope: Number.isFinite(w.slope5) ? w.slope5 : null,
+      cvd15mSlope: Number.isFinite(w.slope15) ? w.slope15 : null,
+      cvd4hSlope: Number.isFinite(w.slope4h) ? w.slope4h : null
+   });
+   if (!entryQuality.allowed) {
+      addLog(`⛔ ${symbol}: Entry quality gate — ${entryQuality.quality}: ${entryQuality.reasons.join(" | ")}`, "warn");
+      return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality };
+   }
    const invalidation = institutional.metrics.invalidationLevel;
    if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(p.atr14 > 0)) {
       addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
@@ -873,11 +912,25 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          rangeLow: p.sup10
       },
       flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
-      scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: "CONFIRMED", bias: direction } },
-      confirmation: { isConfirmed: true, confirmedSignal: direction, reason: institutional.reason },
+      scenario: { primary: { type: direction === "LONG" ? (institutional.entryType === "EARLY_IGNITION" ? "IGNITION_LONG" : "BREAKOUT_LONG") : (institutional.entryType === "EARLY_IGNITION" ? "IGNITION_SHORT" : "BREAKOUT_SHORT"), state: institutional.entryType === "CONFIRMED_BREAKOUT" ? "CONFIRMED" : "EARLY", bias: direction } },
+      confirmation: { isConfirmed: institutional.entryType === "CONFIRMED_BREAKOUT", isEarlyIgnition: institutional.entryType === "EARLY_IGNITION", confirmedSignal: direction, reason: institutional.reason },
+      timingGate: entryQuality.timingGate,
+      flow: {
+         state: "FUTURES_EXECUTED_AGGRESSOR_FLOW",
+         evidenceFor: institutional.evidenceFor,
+         evidenceAgainst: institutional.evidenceAgainst,
+         persistenceState: entryQuality.flow.persistenceState,
+         persistenceScore: entryQuality.flow.persistenceScore
+      },
+      entryQuality,
+      entryTimeframe: "1m",
+      futuresFlowAtEntry: w.futuresFlow,
+      liquidationFlowAtEntry: liquidationFlowAtEntry,
+      openInterestChangeAtEntry: w.oi_available ? w.oi_chg : null,
+      orderBookAtEntry: institutional.dataQuality.orderBook ? w.orderBook : null,
       institutional
    };
-   const grade = { label: "INSTITUTIONAL_CONFIRMED", risk: 0.007, mult: 1.0 };
+   const grade = { label: institutional.entryType === "CONFIRMED_BREAKOUT" ? "INSTITUTIONAL_CONFIRMED" : "INSTITUTIONAL_EARLY", risk: 0.007, mult: 1.0 };
    if (direction === "LONG") apexPredatorStats.acceptedLongs++;
    else apexPredatorStats.acceptedShorts++;
 
@@ -968,18 +1021,18 @@ function executeTrade(symbol: string, decision: any) {
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
-         candlesBeforeEntry: formatCandles(p.klines || [], 40),
+         candlesBeforeEntry: formatCandles(p.institutionalEntryCandles || p.klines || [], 40),
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
             strongAcc: w.strong_acc ? "حركة مستويات السيولة العالية" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (مفتوحة)" : "تصريف عقود",
+            institutionalBias: !w.oi_available ? "غير متاح" : w.oi_chg > 0.001 ? "ارتفاع العقود المفتوحة" : w.oi_chg < -0.002 ? "انخفاض العقود المفتوحة" : "تغير محايد",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
             adx: p.adx.toFixed(2),
-            marketAlignment: p.bull_align ? "متوافق مع الصعود" : "فوضوي"
+            marketAlignment: p.bull_align ? "متوافق مع الصعود" : p.bear_align ? "متعارض مع الصعود" : "غير واضح"
          }
       };
       activeTrades.push(newTrade);
@@ -1045,12 +1098,12 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
             strongAcc: w.strong_dis ? "تفريغ السيولة المؤسساتي" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (شورت)" : "إغلاق صفقات",
+            institutionalBias: !w.oi_available ? "غير متاح" : w.oi_chg > 0.001 ? "ارتفاع العقود المفتوحة" : w.oi_chg < -0.002 ? "انخفاض العقود المفتوحة" : "تغير محايد",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
             adx: p.adx.toFixed(2),
-            marketAlignment: p.bear_align ? "متوافق مع الهبوط" : "فوضوي"
+            marketAlignment: p.bear_align ? "متوافق مع الهبوط" : p.bull_align ? "متعارض مع الهبوط" : "غير واضح"
          }
       };
       activeTrades.push(newTrade);
