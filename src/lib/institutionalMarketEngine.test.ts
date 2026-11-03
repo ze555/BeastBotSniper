@@ -29,6 +29,12 @@ assert.equal(liquidationAware.dataQuality.liquidationFeed, "OBSERVED");
 assert.equal(liquidationAware.metrics.longLiquidationQuote, 25_000);
 const noLiquidations = evaluateInstitutionalMarket(snapshot({ liquidationFeedConnected: true }));
 assert.equal(noLiquidations.dataQuality.liquidationFeed, "NO_RECENT_EVENTS");
+const staleLiquidation = evaluateInstitutionalMarket(snapshot({
+  liquidationFlow: { longLiquidationQuote: 25_000, shortLiquidationQuote: 2_000, eventCount: 3, observedAt: now - 60_000, source: "BINANCE_FORCE_ORDER" },
+  liquidationFeedConnected: true
+}));
+assert.equal(staleLiquidation.dataQuality.liquidationFeed, "NO_RECENT_EVENTS");
+assert.equal(staleLiquidation.metrics.longLiquidationQuote, null, "stale liquidation data must not be treated as observed");
 
 const long = evaluateInstitutionalMarket(snapshot());
 assert.equal(long.state, "BREAKOUT_CONFIRMED");
