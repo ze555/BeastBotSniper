@@ -137,10 +137,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const buy = flow.buyQuote, sell = flow.sellQuote, total = buy + sell;
   const buyShare = total > 0 ? buy / total : 0.5;
   const delta = buy - sell;
-  const deltaShare = total > 0 ? delta / total : 0;
   const bookImbalance = bookOk ? (input.orderBook!.bidNotional - input.orderBook!.askNotional) / Math.max(input.orderBook!.bidNotional + input.orderBook!.askNotional, 1e-12) : null;
   const priceReturn = (recent.close - recent.open) / Math.max(recent.open, 1e-12);
-  const rangePct = (recent.high - recent.low) / Math.max(recent.open, 1e-12);
   const oi = oiOk ? input.oiChange! : null;
   const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 20 &&
     input.orderBook!.bidNotional + input.orderBook!.askNotional >= 10_000;
@@ -184,7 +182,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let state: MarketState = "DORMANT", direction: Side | "NONE" = "NONE";
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
-  const executable = !bookOk || liquidityQualified;
+  const executable = bookOk && liquidityQualified;
   const longEarly = longFlow && executable && (volumeSurge || fastFlow) && (longBreak || (compressedBefore && priceReturn > 0.001));
   const shortEarly = shortFlow && executable && (volumeSurge || fastFlow) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
