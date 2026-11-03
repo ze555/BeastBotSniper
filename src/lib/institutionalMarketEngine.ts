@@ -23,6 +23,10 @@ export interface AggressorFlow {
   sellQuote30s?: number;
   trades30s?: number;
 }
+export interface LiquidationFlowEvidence {
+  longLiquidationQuote: number; shortLiquidationQuote: number; eventCount: number;
+  observedAt: number; source: "BINANCE_FORCE_ORDER";
+}
 export interface OrderBookEvidence {
   bidNotional: number;
   askNotional: number;
@@ -41,6 +45,8 @@ export interface InstitutionalSnapshot {
   fundingRate: number | null;
   btcChange: number | null;
   oiAvailable: boolean;
+  liquidationFlow?: LiquidationFlowEvidence | null;
+  liquidationFeedConnected?: boolean;
   previousState?: MarketState;
   previousDirection?: Side | "NONE";
 }
@@ -60,7 +66,7 @@ export interface EvidenceDecision {
     orderBook: boolean;
     openInterest: boolean;
     funding: boolean;
-    liquidationFeed: "UNAVAILABLE";
+    liquidationFeed: "OBSERVED" | "NO_RECENT_EVENTS" | "UNAVAILABLE";
   };
   metrics: {
     spotDeltaQuote: null;
@@ -71,6 +77,8 @@ export interface EvidenceDecision {
     oiChange: number | null;
     fundingRate: number | null;
     bookImbalance: number | null;
+    longLiquidationQuote: number | null;
+    shortLiquidationQuote: number | null;
     btcChange: number | null;
     breakoutLevel: number | null;
     invalidationLevel: number | null;
@@ -105,7 +113,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const empty = (state: MarketState, reason: string, missingEvidence: string[]): EvidenceDecision => ({
     symbol: input.symbol, state, direction: "NONE", canEnter: false, entryType: "NONE",
     management: "NONE", evidenceFor: [], evidenceAgainst: [], missingEvidence,
-    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: "UNAVAILABLE" },
+    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: input.liquidationFlow ? "OBSERVED" : input.liquidationFeedConnected ? "NO_RECENT_EVENTS" : "UNAVAILABLE" },
     metrics: {
       spotDeltaQuote: null,
       futuresDeltaQuote: futuresOk ? input.futuresFlow!.buyQuote - input.futuresFlow!.sellQuote : null,
@@ -114,6 +122,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
       relativeVolume: null, oiChange: oiOk ? input.oiChange : null,
       fundingRate: fundingOk ? input.fundingRate! : null,
       bookImbalance: bookOk ? (input.orderBook!.bidNotional - input.orderBook!.askNotional) / Math.max(input.orderBook!.bidNotional + input.orderBook!.askNotional, 1e-12) : null,
+      longLiquidationQuote: input.liquidationFlow?.longLiquidationQuote ?? null,
+      shortLiquidationQuote: input.liquidationFlow?.shortLiquidationQuote ?? null,
       btcChange: finite(input.btcChange) ? input.btcChange : null, breakoutLevel: null, invalidationLevel: null
     },
     reason
@@ -180,6 +190,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   if (shortLiquidation) evidenceFor.push("Price/flow indicate a downward long-liquidation impulse while open interest contracts.");
   if (bookOk && bookImbalance !== null && bookImbalance > 0.12) evidenceFor.push("Displayed bid depth is supportive (context only).");
   if (bookOk && bookImbalance !== null && bookImbalance < -0.12) evidenceFor.push("Displayed ask depth is supportive (context only).");
+  if (input.liquidationFlow && input.liquidationFlow.longLiquidationQuote > input.liquidationFlow.shortLiquidationQuote * 1.5 && input.liquidationFlow.longLiquidationQuote >= 5_000) evidenceFor.push("Recent Binance force-order events show long liquidations; this is squeeze context, not standalone direction proof.");
+  if (input.liquidationFlow && input.liquidationFlow.shortLiquidationQuote > input.liquidationFlow.longLiquidationQuote * 1.5 && input.liquidationFlow.shortLiquidationQuote >= 5_000) evidenceFor.push("Recent Binance force-order events show short liquidations; this is squeeze context, not standalone direction proof.");
   if (longExhaustion) evidenceAgainst.push("Crowded positive funding and fading buyer aggression warn of long exhaustion.");
   if (shortExhaustion) evidenceAgainst.push("Crowded negative funding and fading seller aggression warn of short exhaustion.");
   if (!oiOk) evidenceAgainst.push("Open-interest evidence is unavailable; direction is based on executed Futures flow and price/volume only.");
@@ -235,7 +247,10 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     metrics: {
       spotDeltaQuote: null, futuresDeltaQuote: delta, spotBuyShare: null, futuresBuyShare: buyShare,
       relativeVolume, oiChange: oi, fundingRate: fundingOk ? input.fundingRate! : null,
-      bookImbalance, btcChange: finite(input.btcChange) ? input.btcChange : null,
+      bookImbalance,
+      longLiquidationQuote: input.liquidationFlow?.longLiquidationQuote ?? null,
+      shortLiquidationQuote: input.liquidationFlow?.shortLiquidationQuote ?? null,
+      btcChange: finite(input.btcChange) ? input.btcChange : null,
       breakoutLevel: direction === "LONG" ? priorHigh : direction === "SHORT" ? priorLow : null,
       invalidationLevel: direction === "LONG" ? Math.min(recent.low, priorHigh) : direction === "SHORT" ? Math.max(recent.high, priorLow) : null
     },
