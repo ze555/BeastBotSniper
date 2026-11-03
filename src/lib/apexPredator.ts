@@ -872,7 +872,8 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       now: Date.now(),
       candles: waveCandles.slice(-3),
       flow: w.futuresFlow,
-      oiChange: w.oi_available ? w.oi_chg : null
+      oiChange: w.oi_available ? w.oi_chg : null,
+      oiPriceChange: Number.isFinite(w.p_chg) ? w.p_chg : null
    });
    if (!entryQuality.allowed) {
       addLog(`⛔ ${symbol}: Entry quality gate — ${entryQuality.quality}: ${entryQuality.reasons.join(" | ")}`, "warn");
