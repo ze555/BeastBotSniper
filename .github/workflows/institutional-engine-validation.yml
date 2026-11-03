@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/institutional-full-trading-engine
+      - feat/futures-only-violent-wave-engine
   pull_request:
     branches:
       - main
