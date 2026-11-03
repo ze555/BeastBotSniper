@@ -14,7 +14,6 @@ function snapshot(overrides: Partial<InstitutionalSnapshot> = {}): Institutional
   candles[22] = { ...candles[22], open: 100, high: 104, low: 100, close: 103.5, volume: 250, quoteVolume: 25_000 };
   return {
     symbol: "TESTUSDT", timestamp: now, price: 103.5, candles,
-    spotFlow: null,
     futuresFlow: flow(75_000, 25_000, { buyQuote5s: 20_000, sellQuote5s: 2_000, trades5s: 8 }),
     orderBook: { bidNotional: 500_000, askNotional: 200_000, spreadBps: 2, observedAt: now, source: "BINANCE_DEPTH" },
     oiChange: 0.01, fundingRate: 0.0001, btcChange: -0.01, oiAvailable: true,
@@ -48,7 +47,7 @@ const earlyLong = evaluateInstitutionalMarket(snapshot({
 assert.equal(earlyLong.canEnter, true, "A genuine short-squeeze impulse with aggressive Futures buying can be traded");
 assert.equal(earlyLong.direction, "LONG");
 
-const noSpotStillWorks = evaluateInstitutionalMarket(snapshot({ spotFlow: null }));
+const noSpotStillWorks = evaluateInstitutionalMarket(snapshot());
 assert.equal(noSpotStillWorks.canEnter, true, "Missing Spot data must never block a Futures-only signal");
 
 const quietCandles = snapshot().candles.map(c => ({ ...c }));
@@ -82,7 +81,7 @@ assert.equal(continuation.canEnter, false, "Do not chase an already-running wave
 
 const exit = evaluateInstitutionalExit({
   direction: "LONG", price: 98, entry: 100, stop: 95, structureInvalidated: true,
-  timestamp: now, fundingRate: 0, spotFlow: null, futuresFlow: flow(10, 90)
+  timestamp: now, fundingRate: 0, futuresFlow: flow(10, 90)
 });
 assert.equal(exit.action, "EXIT", "Exit must work with Futures flow only");
 
