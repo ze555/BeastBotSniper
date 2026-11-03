@@ -35,8 +35,6 @@ export interface InstitutionalSnapshot {
   timestamp: number;
   price: number;
   candles: Array<{ openTime: number; open: number; high: number; low: number; close: number; volume: number; quoteVolume?: number }>;
-  /** Deprecated compatibility field. Never read by this engine. */
-  spotFlow?: AggressorFlow | null;
   futuresFlow: AggressorFlow | null;
   orderBook: OrderBookEvidence | null;
   oiChange: number | null;
@@ -145,9 +143,11 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const longFlow = buyShare >= 0.60 && delta > 0 && total >= 5_000;
   const shortFlow = buyShare <= 0.40 && delta < 0 && total >= 5_000;
   const volumeSurge = relativeVolume !== null && relativeVolume >= 1.40;
-  const fastFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
-    ((finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.buyQuote5s! > flow.sellQuote5s! * 1.8) ||
-     (finite(flow.sellQuote5s) && finite(flow.buyQuote5s) && flow.sellQuote5s! > flow.buyQuote5s! * 1.8));
+  const fastLongFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
+    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.buyQuote5s! > flow.sellQuote5s! * 1.8;
+  const fastShortFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
+    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.sellQuote5s! > flow.buyQuote5s! * 1.8;
+  const fastFlow = fastLongFlow || fastShortFlow;
   const longBreak = recent.close > priorHigh || (priceReturn >= 0.003 && recent.close > recent.open);
   const shortBreak = recent.close < priorLow || (priceReturn <= -0.003 && recent.close < recent.open);
   const compressedBefore = (() => {
@@ -183,8 +183,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
   const executable = bookOk && liquidityQualified;
-  const longEarly = longFlow && executable && (volumeSurge || fastFlow) && (longBreak || (compressedBefore && priceReturn > 0.001));
-  const shortEarly = shortFlow && executable && (volumeSurge || fastFlow) && (shortBreak || (compressedBefore && priceReturn < -0.001));
+  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow) && (longBreak || (compressedBefore && priceReturn > 0.001));
+  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
@@ -239,8 +239,6 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
 
 export interface ExitSnapshot {
   direction: Side; price: number; entry: number; stop: number;
-  /** Deprecated compatibility field. Never read by this engine. */
-  spotFlow?: AggressorFlow | null;
   futuresFlow: AggressorFlow | null;
   structureInvalidated: boolean; fundingRate: number | null; timestamp: number;
 }
