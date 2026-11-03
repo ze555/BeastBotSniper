@@ -3,7 +3,7 @@ import { evaluateEntryQuality } from "./entryQualityEngine.js";
 const now = 1_800_000_000_000;
 const candles = [{ open: 100, high: 101, low: 99, close: 100.5 }, { open: 100.5, high: 102, low: 100, close: 101.5 }, { open: 101.5, high: 103, low: 101, close: 102.5 }];
 const base = {
-  side: "LONG" as const, price: 102.5, atr: 2, now, candles, oiChange: 0.002, oiPriceChange: 0.002,
+  side: "LONG" as const, price: 102.5, atr: 2, now, candles, oiChange: 0.002, oiPriceChange: 0.002, cvd5mSlope: 10, cvd15mSlope: 20, cvd4hSlope: 30,
   flow: { buyQuote: 70_000, sellQuote: 30_000, tradeCount: 30, observedAt: now,
     source: "BINANCE_AGG_TRADES" as const, buyQuote5s: 20_000, sellQuote5s: 2_000, trades5s: 8,
     buyQuote30s: 70_000, sellQuote30s: 30_000, trades30s: 30 }
@@ -12,6 +12,10 @@ const aligned = evaluateEntryQuality(base);
 assert.equal(aligned.allowed, true);
 assert.equal(aligned.quality, "FLOW_ALIGNED");
 assert.equal(aligned.positioning, "NEW_POSITIONS_WITH_MOVE");
+assert.equal(aligned.cvdState, "ALIGNED");
+const cvdConflict = evaluateEntryQuality({ ...base, cvd5mSlope: -10, cvd15mSlope: -20, cvd4hSlope: 5 });
+assert.equal(cvdConflict.allowed, true, "Opposing slower CVD is context, not an automatic ban on a genuine fast ignition");
+assert.equal(cvdConflict.cvdState, "OPPOSING");
 const oiConflict = evaluateEntryQuality({ ...base, oiChange: 0.01, oiPriceChange: -0.01 });
 assert.equal(oiConflict.positioning, "OI_NOT_DIRECTIONAL", "OI expansion without same-period price alignment must not be called directional");
 const conflict = evaluateEntryQuality({ ...base, flow: { ...base.flow, buyQuote: 20_000, sellQuote: 80_000, buyQuote30s: 20_000, sellQuote30s: 80_000, buyQuote5s: 1_000, sellQuote5s: 9_000 } });
