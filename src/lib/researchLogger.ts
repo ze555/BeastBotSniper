@@ -771,6 +771,9 @@ export function logTradeDecision(trade: any, exitContext: {
          symbol: trade.symbol,
          exchange: "Binance Futures (Paper)",
          timeframe: "15m",
+         entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_before_entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_during_trade_timeframe: "15m",
          side: trade.direction,
          signal_type: trade.setupType || "BREAKOUT_MOMENTUM",
          market_regime: marketRegimeContext.strategy_regime,
@@ -834,6 +837,11 @@ export function logTradeDecision(trade: any, exitContext: {
             alternative_scenario: trade.reasoning?.scenario?.alternative?.type || null,
             indicators_at_entry: trade.priceData || null,
             orderflow_at_entry: trade.whaleData || null,
+            futures_flow_at_entry: trade.reasoning?.futuresFlowAtEntry || null,
+            open_interest_change_at_entry: Number.isFinite(trade.reasoning?.openInterestChangeAtEntry) ? trade.reasoning.openInterestChangeAtEntry : null,
+            order_book_at_entry: trade.reasoning?.orderBookAtEntry || null,
+            institutional_evidence_at_entry: trade.reasoning?.institutional || null,
+            entry_quality_at_entry: trade.reasoning?.entryQuality || null,
             location_at_entry: trade.reasoning?.location || null
          },
          
