@@ -5,6 +5,7 @@ on:
     branches:
       - feat/institutional-full-trading-engine
       - feat/futures-only-violent-wave-engine
+      - feat/early-wave-entry-quality-v2
   pull_request:
     branches:
       - main
