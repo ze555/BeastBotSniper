@@ -172,6 +172,8 @@ function connectLiquidationStream() {
     } catch { /* malformed liquidation event is ignored; no synthetic events are created */ }
   });
   const reconnect = () => {
+    const staleIndex = sockets.indexOf(state);
+    if (staleIndex >= 0) sockets.splice(staleIndex, 1);
     if (!started || state.reconnect) return;
     state.reconnect = setTimeout(() => {
       state.reconnect = undefined;
