@@ -82,7 +82,7 @@ export function getFuturesWaveCandidates(now = Date.now(), limit = 40): string[]
     const first = recent[0].price, last = recent[recent.length - 1].price;
     const move = first > 0 ? (last - first) / first : 0;
     const priorPer30s = prior.length ? prior.reduce((n, t) => n + t.quote, 0) / 9 : 0;
-    const volumeBurst = priorPer30s > 0 && notional >= priorPer30s * 2.2;
+    const volumeBurst = prior.length >= 20 && priorPer30s > 0 && notional >= priorPer30s * 2.2;
     const directionalFlow = share >= 0.60 || share <= 0.40;
     const priceImpulse = Math.abs(move) >= 0.0035;
     if (!directionalFlow || (!volumeBurst && !priceImpulse)) continue;
@@ -141,6 +141,7 @@ export function stopFuturesWaveFeed() {
   started = false;
   configuredSymbols = "";
   closeSockets();
+  tapeBySymbol.clear();
 }
 export function getFuturesWaveFeedStatus() {
   return { configured: started, symbols: configuredSymbols ? configuredSymbols.split(",").length : 0, connections: sockets.length };
