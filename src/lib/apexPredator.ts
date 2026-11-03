@@ -15,6 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
+import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
@@ -282,7 +283,7 @@ export function setConfig(config: any) {
   if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
   if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
-export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
+export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
 
 // --- DATA FETCHING ---
@@ -306,6 +307,8 @@ async function updateDynamicWatchlist() {
             .filter((item: any) => item.contractType === "PERPETUAL" && item.quoteAsset === "USDT" && item.status === "TRADING")
             .map((item: any) => item.symbol)
       );
+      // Continuous aggTrade streams watch the entire active USDT-M perpetual universe between REST scan cycles.
+      startFuturesWaveFeed(Array.from(activeUsdtPerpetuals));
       
       const excludedBases = [
          'USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT',
@@ -323,13 +326,14 @@ async function updateDynamicWatchlist() {
 
       // 1. Dynamic Fast Momentum Queue (HOT_WATCHLIST)
       if (needsHotUpdate) {
-         const coreCryptoMajors = [
-            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
-            "SUIUSDT", "NEARUSDT", "AVAXUSDT", "DOGEUSDT"
-         ];
-
+         // Priority queue contains only contracts already showing abnormal movement.
+         // Do not spend the fast lane repeatedly scanning quiet majors by default.
          const activeMovers = [...validTickers]
-            .filter((s: any) => Math.abs(parseFloat(s.priceChangePercent) || 0) >= 2.0)
+            .filter((s: any) => {
+               const move = Math.abs(parseFloat(s.priceChangePercent) || 0);
+               const quoteVol = parseFloat(s.quoteVolume) || 0;
+               return move >= 1.0 && quoteVol >= 1_000_000;
+            })
             .sort((a: any, b: any) => {
                const moveA = Math.abs(parseFloat(a.priceChangePercent) || 0);
                const moveB = Math.abs(parseFloat(b.priceChangePercent) || 0);
@@ -337,11 +341,9 @@ async function updateDynamicWatchlist() {
             })
             .map((s: any) => s.symbol);
 
-         const combinedHot = Array.from(new Set([...activeMovers.slice(0, 14), ...coreCryptoMajors])).slice(0, 20);
-         if (combinedHot.length >= 5) {
-            HOT_WATCHLIST = combinedHot;
-            lastHotWatchlistUpdate = now;
-         }
+         const activeHot = Array.from(new Set(activeMovers)).slice(0, 20);
+         HOT_WATCHLIST = activeHot;
+         lastHotWatchlistUpdate = now;
       }
 
       // 2. Full WATCHLIST (Broader Liquid Universe)
@@ -452,27 +454,42 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
    } catch { return []; }
 }
 
-async function fetchAggressorFlow(market: "spot" | "futures", symbol: string) {
-   const key = `${market}:${symbol}`;
+async function fetchFuturesAggressorFlow(symbol: string) {
+   const liveFlow = getFuturesTapeFlow(symbol);
+   if (liveFlow) return liveFlow;
+   const key = `futures:${symbol}`;
    const cached = getCached<any>(aggTradeCache, key);
    if (cached) return cached;
-   const base = market === "spot" ? "https://api.binance.com" : BINANCE_FAPI;
-   const path = market === "spot" ? "/api/v3/aggTrades" : "/fapi/v1/aggTrades";
-   const res = await axios.get(`${base}${path}`, { params: { symbol, limit: 100 }, timeout: 5000 });
-   if (!Array.isArray(res.data) || res.data.length === 0) throw new Error(`No ${market} aggregate trades`);
-   let buyQuote = 0;
-   let sellQuote = 0;
+   const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/aggTrades`, {
+      params: { symbol, limit: 100 }, timeout: 5000
+   });
+   if (!Array.isArray(res.data) || res.data.length === 0) throw new Error("No Futures aggregate trades");
+   const now = Date.now();
+   let buyQuote = 0, sellQuote = 0, trades30s = 0;
+   let buyQuote5s = 0, sellQuote5s = 0, trades5s = 0;
+   let latestTradeTime = 0;
    for (const trade of res.data) {
+      const at = Number(trade.T);
       const notional = Number(trade.p) * Number(trade.q);
-      if (!Number.isFinite(notional) || notional < 0) continue;
-      // m=true means buyer is maker, therefore the seller was the aggressor.
-      if (trade.m === true) sellQuote += notional;
-      else buyQuote += notional;
+      if (!Number.isFinite(at) || !Number.isFinite(notional) || notional <= 0 || at > now + 2_000) continue;
+      latestTradeTime = Math.max(latestTradeTime, at);
+      if (at < now - 30_000) continue;
+      trades30s++;
+      if (trade.m === true) sellQuote += notional; else buyQuote += notional;
+      if (at >= now - 5_000) {
+         trades5s++;
+         if (trade.m === true) sellQuote5s += notional; else buyQuote5s += notional;
+      }
    }
-   const latestTradeTime = Number(res.data[res.data.length - 1]?.T);
-   if (!Number.isFinite(latestTradeTime)) throw new Error("Aggregate trades have no valid exchange timestamp");
-   const flow = { buyQuote, sellQuote, tradeCount: res.data.length, observedAt: latestTradeTime, source: "BINANCE_AGG_TRADES" as const };
-   setCached(aggTradeCache, key, flow, 5000);
+   if (!latestTradeTime || now - latestTradeTime > 30_000 || trades30s < 5) {
+      throw new Error("Insufficient fresh Futures aggressor trades in the last 30 seconds");
+   }
+   const flow = {
+      buyQuote, sellQuote, tradeCount: trades30s, observedAt: latestTradeTime,
+      buyQuote5s, sellQuote5s, trades5s, buyQuote30s: buyQuote, sellQuote30s: sellQuote,
+      trades30s, source: "BINANCE_AGG_TRADES" as const
+   };
+   setCached(aggTradeCache, key, flow, 2_000);
    return flow;
 }
 
@@ -655,12 +672,11 @@ async function readWhale(symbol: string, btc_chg: number) {
    const oi_available = Boolean(oiData && oiData.length >= 4 &&
       Number.isFinite(oi_chg) && Number.isFinite(oi0Safe(oiData)) &&
       (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 20 * 60 * 1000));
-   const [spotFlowResult, futuresFlowResult, orderBookResult] = await Promise.allSettled([
-      fetchAggressorFlow("spot", symbol),
-      fetchAggressorFlow("futures", symbol),
+   // Futures-only evidence collection. Spot is intentionally not queried.
+   const [futuresFlowResult, orderBookResult] = await Promise.allSettled([
+      fetchFuturesAggressorFlow(symbol),
       fetchOrderBookEvidence(symbol)
    ]);
-   const spotFlow = spotFlowResult.status === "fulfilled" ? spotFlowResult.value : null;
    const futuresFlow = futuresFlowResult.status === "fulfilled" ? futuresFlowResult.value : null;
    const orderBook = orderBookResult.status === "fulfilled" ? orderBookResult.value : null;
    
@@ -671,7 +687,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, oi_available, p_chg, fund, spotFlow, futuresFlow, orderBook,
+      scenario, oi_chg, oi_available, p_chg, fund, futuresFlow, orderBook,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
@@ -795,23 +811,26 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
 // --- SEC 4: INSTITUTIONAL EVIDENCE ENTRY ENGINE (NO SCORE) ---
 async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
-   if (!ctx.tradeable || ctx.btc_whipsaw) return { signal: "WAIT", reason: "BTC_WHIPSaw_CONTEXT" };
+   // BTC is context only: a market-wide BTC whipsaw must not suppress an independently violent altcoin Futures wave.
    if (!isLibyaTradingAllowed()) return { signal: "WAIT", reason: "OUTSIDE_LIBYA_HOURS" };
 
    const w = await readWhale(symbol, ctx.btc_chg);
    const p: any = await readPrice(symbol, w.c15, w.c5);
+   // readPrice uses 15m context; ignition detection requires a separate live 1m Futures feed.
+   const waveCandles = await fetchKl(symbol, "1m", 30);
+   const wavePrice = waveCandles.length ? waveCandles[waveCandles.length - 1].close : p.price;
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
+   p.price = wavePrice;
 
-   // Only completed candles are eligible. The current, still-forming candle is excluded.
-   const closedCandles = (p.klines || []).filter((c: any) => Number(c.closeTime) < Date.now());
+   // Include the still-forming 1m Futures candle to avoid waiting for candle close.
+   const closedCandles = waveCandles.slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
    const institutional = evaluateInstitutionalMarket({
       symbol,
       timestamp: Date.now(),
-      price: p.price,
+      price: wavePrice,
       candles: closedCandles,
-      spotFlow: w.spotFlow,
       futuresFlow: w.futuresFlow,
       orderBook: w.orderBook,
       oiChange: w.oi_chg,
@@ -853,7 +872,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          rangeHigh: p.res10,
          rangeLow: p.sup10
       },
-      flow: { state: "EXECUTED_SPOT_FUTURES_ALIGNMENT", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
+      flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
       scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: "CONFIRMED", bias: direction } },
       confirmation: { isConfirmed: true, confirmedSignal: direction, reason: institutional.reason },
       institutional
@@ -1082,7 +1101,6 @@ async function exitBrain(trade: any, ctx: any) {
       entry: t.entry,
       stop: t.sl,
       structureInvalidated,
-      spotFlow: w.spotFlow || null,
       futuresFlow: w.futuresFlow || null,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
       timestamp: Date.now()
@@ -1090,7 +1108,7 @@ async function exitBrain(trade: any, ctx: any) {
 
    if (exitEvidence.action === "EXIT") {
       addLog(`🚨 [INSTITUTIONAL REVERSAL CONFIRMED] ${t.symbol} ${t.direction} at ${profitR.toFixed(2)}R | ${exitEvidence.reasons.join(" | ")}`, "warn");
-      closeTradeFull(t, "Institutional Structure + Spot/Futures Flow Reversal");
+      closeTradeFull(t, "Institutional Structure + Futures Flow Reversal");
       return;
    }
    if (exitEvidence.action === "PROTECT") {
@@ -1105,11 +1123,8 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   const spotDelta = w.spotFlow ? w.spotFlow.buyQuote - w.spotFlow.sellQuote : 0;
    const futuresDelta = w.futuresFlow ? w.futuresFlow.buyQuote - w.futuresFlow.sellQuote : 0;
-   const supportiveFlow = t.direction === "LONG"
-      ? spotDelta > 0 && futuresDelta > 0
-      : spotDelta < 0 && futuresDelta < 0;
+   const supportiveFlow = t.direction === "LONG" ? futuresDelta > 0 : futuresDelta < 0;
    const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
    const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
 
@@ -1300,17 +1315,9 @@ export async function runApexLoop() {
          return; // Only skip scanning and new trade entry for this cycle, keeping bot active to manage existing trades!
       }
 
-      // BTC Violent Regime check: if BTC is an erratic two-way whipsaw, block new trades
-      if (ctx.tradeable === false || ctx.btc_whipsaw) {
-         addLog("⚠️ BTC Violent Whipsaw: تم حظر فتح صفقات جديدة نظراً للتذبذب العشوائي العنيف في بيتكوين (Whipsaw).", "warn");
-         isLoopRunning = false;
-         return;
-      }
-
-      if (ctx.btc_dump) {
-         addLog(`⚡ [BTC DUMP REGIME] تم رصد هبوط عنيف لبيتكوين (${(ctx.btc_chg * 100).toFixed(2)}%). تم توجيه الروبوت لصفقات الـ SHORT وحظر الـ LONG بنسبة 100%!`, "info");
-      } else if (ctx.btc_pump) {
-         addLog(`⚡ [BTC PUMP REGIME] تم رصد صعود عنيف لبيتكوين (+${(ctx.btc_chg * 100).toFixed(2)}%). تم توجيه الروبوت لصفقات الـ LONG وحظر الـ SHORT بنسبة 100%!`, "info");
+      // BTC is a context variable only. It must not veto an independently confirmed violent Futures move in an altcoin.
+      if (ctx.btc_whipsaw || ctx.btc_dump || ctx.btc_pump) {
+         addLog(`🌐 BTC context noted (whipsaw=${Boolean(ctx.btc_whipsaw)}, dump=${Boolean(ctx.btc_dump)}, pump=${Boolean(ctx.btc_pump)}); independent Futures wave signals remain eligible.`, "info");
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
@@ -1335,7 +1342,8 @@ export async function runApexLoop() {
 
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
-      const hotCandidates = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
+      const hotCandidates = Array.from(new Set([...getFuturesWaveCandidates( Date.now(), 20), ...HOT_WATCHLIST]))
+         .filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
       const hotChunkSize = 5;
       for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
          if (!canOpenMore()) break;
@@ -1393,7 +1401,7 @@ export async function runApexLoop() {
          const promises = chunk.map(async (sym: string) => {
             if (activeTrades.some(t => t.symbol === sym)) return null;
             try {
-               const dec = await scoreEntry(sym, ctx);
+               const dec = await evaluateInstitutionalEntry(sym, ctx);
                return { sym, dec };
             } catch {
                return null;
