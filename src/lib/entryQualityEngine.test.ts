@@ -12,6 +12,8 @@ const aligned = evaluateEntryQuality(base);
 assert.equal(aligned.allowed, true);
 assert.equal(aligned.quality, "FLOW_ALIGNED");
 assert.equal(aligned.positioning, "NEW_POSITIONS_WITH_MOVE");
+const oiConflict = evaluateEntryQuality({ ...base, oiChange: 0.01, oiPriceChange: -0.01 });
+assert.equal(oiConflict.positioning, "OI_NOT_DIRECTIONAL", "OI expansion without same-period price alignment must not be called directional");
 const conflict = evaluateEntryQuality({ ...base, flow: { ...base.flow, buyQuote: 20_000, sellQuote: 80_000, buyQuote30s: 20_000, sellQuote30s: 80_000, buyQuote5s: 1_000, sellQuote5s: 9_000 } });
 assert.equal(conflict.allowed, false);
 assert.equal(conflict.quality, "CONFLICTED_FLOW");
