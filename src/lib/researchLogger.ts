@@ -377,7 +377,7 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (trade.score < 7.0 || timingGate?.state === "WAITING_FOR_CONFIRMATION") {
       return "WEAK_CONFIRMATION";
    }
-   return "GOOD_ENTRY";
+   return "UNKNOWN";
 }
 
 // ----------------------------------------------------------------------------
@@ -778,9 +778,9 @@ export function logTradeDecision(trade: any, exitContext: {
          // ═══ ENTRY TIMING & REGIME ANALYTICS ═══
          entry_timing: entryTiming,
          market_context: marketRegimeContext,
-         timing_gate_state: trade.reasoning?.timingGate?.state || "CONFIRMED",
-         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "MODERATE",
-         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? 75,
+         timing_gate_state: trade.reasoning?.timingGate?.state || "NOT_RECORDED",
+         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "NOT_RECORDED",
+         flow_persistence_score: Number.isFinite(trade.reasoning?.flow?.persistenceScore) ? trade.reasoning.flow.persistenceScore : null,
          entry_quality: entryQuality,
 
          entry_price: entryPrice,
