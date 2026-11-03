@@ -140,13 +140,19 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const oi = oiOk ? input.oiChange! : null;
   const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 20 &&
     input.orderBook!.bidNotional + input.orderBook!.askNotional >= 10_000;
-  const longFlow = buyShare >= 0.60 && delta > 0 && total >= 5_000;
-  const shortFlow = buyShare <= 0.40 && delta < 0 && total >= 5_000;
-  const volumeSurge = relativeVolume !== null && relativeVolume >= 1.40;
+  // Per-symbol flow floor adapts to its own recent Futures quote-volume baseline.
+  const flowMinNotional = Math.max(1_000, Math.min(5_000, avgQuoteVolume * 0.03));
+  const volumeSurge = relativeVolume !== null && relativeVolume >= 1.25;
   const fastLongFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
-    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.buyQuote5s! > flow.sellQuote5s! * 1.8;
+    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) &&
+    flow.buyQuote5s! + flow.sellQuote5s! >= Math.max(750, flowMinNotional * 0.20) &&
+    flow.buyQuote5s! > flow.sellQuote5s! * 1.6;
   const fastShortFlow = finite(flow.trades5s) && flow.trades5s! >= 3 &&
-    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) && flow.sellQuote5s! > flow.buyQuote5s! * 1.8;
+    finite(flow.buyQuote5s) && finite(flow.sellQuote5s) &&
+    flow.buyQuote5s! + flow.sellQuote5s! >= Math.max(750, flowMinNotional * 0.20) &&
+    flow.sellQuote5s! > flow.buyQuote5s! * 1.6;
+  const longFlow = (buyShare >= 0.57 && delta > 0 && total >= flowMinNotional) || fastLongFlow;
+  const shortFlow = (buyShare <= 0.43 && delta < 0 && total >= flowMinNotional) || fastShortFlow;
   const fastFlow = fastLongFlow || fastShortFlow;
   const longBreak = recent.close > priorHigh || (priceReturn >= 0.003 && recent.close > recent.open);
   const shortBreak = recent.close < priorLow || (priceReturn <= -0.003 && recent.close < recent.open);
@@ -182,9 +188,9 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let state: MarketState = "DORMANT", direction: Side | "NONE" = "NONE";
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
-  const executable = bookOk && liquidityQualified;
-  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= 15_000)) && (longBreak || (compressedBefore && priceReturn > 0.001));
-  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= 15_000)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
+  const executable = !bookOk || liquidityQualified;
+  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= flowMinNotional * 2.5)) && (longBreak || (compressedBefore && priceReturn > 0.001));
+  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= flowMinNotional * 2.5)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
