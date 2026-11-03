@@ -381,6 +381,9 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (timingGate?.state === "EARLY_FLOW_REVERSAL" && flow?.persistenceState === "EARLY_REVERSAL") {
       return "GOOD_ENTRY";
    }
+   if (trade.reasoning?.entryQuality?.cvdState === "OPPOSING") {
+      return "WEAK_CONFIRMATION";
+   }
    if (timingGate?.state === "WAITING_FOR_CONFIRMATION" || flow?.persistenceState === "MODERATE") {
       return "WEAK_CONFIRMATION";
    }
