@@ -100,13 +100,13 @@ export function getFuturesWaveCandidates(now = Date.now(), limit = 40): string[]
     const prior = tape.filter(t => t.timestamp >= now - 300_000 && t.timestamp < now - 30_000);
     if (recent.length < 8) continue;
     const notional = recent.reduce((n, t) => n + t.quote, 0);
+    const priorPer30s = prior.length ? prior.reduce((n, t) => n + t.quote, 0) / 9 : 0;
     const adaptiveFloor = priorPer30s > 0 ? Math.max(5_000, priorPer30s * 1.15) : 8_000;
     if (notional < adaptiveFloor) continue;
     const buy = recent.reduce((n, t) => n + (t.buyerIsMaker ? 0 : t.quote), 0);
     const share = buy / Math.max(notional, 1e-9);
     const first = recent[0].price, last = recent[recent.length - 1].price;
     const move = first > 0 ? (last - first) / first : 0;
-    const priorPer30s = prior.length ? prior.reduce((n, t) => n + t.quote, 0) / 9 : 0;
     const volumeBurst = prior.length >= 20 && priorPer30s > 0 && notional >= priorPer30s * 1.8;
     const directionalFlow = share >= 0.56 || share <= 0.44;
     const priceImpulse = Math.abs(move) >= 0.0025;
