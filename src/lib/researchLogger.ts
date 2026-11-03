@@ -374,15 +374,15 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (trade.direction === "SHORT" && loc && loc.distanceToSupportPct < 0.002) {
       return "BAD_LOCATION";
    }
+   if (trade.reasoning?.entryQuality?.cvdState === "OPPOSING") {
+      return "WEAK_CONFIRMATION";
+   }
    if ((timingGate?.state === "IN_TIME" && flow?.persistenceState === "ALIGNED") ||
        (timingGate?.state === "CONFIRMED" && flow?.persistenceState === "STRONG")) {
       return "GOOD_ENTRY";
    }
    if (timingGate?.state === "EARLY_FLOW_REVERSAL" && flow?.persistenceState === "EARLY_REVERSAL") {
       return "GOOD_ENTRY";
-   }
-   if (trade.reasoning?.entryQuality?.cvdState === "OPPOSING") {
-      return "WEAK_CONFIRMATION";
    }
    if (timingGate?.state === "WAITING_FOR_CONFIRMATION" || flow?.persistenceState === "MODERATE") {
       return "WEAK_CONFIRMATION";
