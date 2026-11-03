@@ -816,17 +816,19 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
 
    const w = await readWhale(symbol, ctx.btc_chg);
    const p: any = await readPrice(symbol, w.c15, w.c5);
+   // readPrice uses 15m context; ignition detection requires a separate live 1m Futures feed.
+   const waveCandles = await fetchKl(symbol, "1m", 30);
+   const wavePrice = waveCandles.length ? waveCandles[waveCandles.length - 1].close : p.price;
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
 
-   // The live forming Futures candle is included for early ignition detection.
-   // Include the live forming 1m Futures candle: waiting for candle close is too late for early ignition detection.
-   const closedCandles = (p.klines || []).slice(-30);
+   // Include the still-forming 1m Futures candle to avoid waiting for candle close.
+   const closedCandles = waveCandles.slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
    const institutional = evaluateInstitutionalMarket({
       symbol,
       timestamp: Date.now(),
-      price: p.price,
+      price: wavePrice,
       candles: closedCandles,
       futuresFlow: w.futuresFlow,
       orderBook: w.orderBook,
