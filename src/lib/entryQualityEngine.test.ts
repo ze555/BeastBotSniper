@@ -3,7 +3,7 @@ import { evaluateEntryQuality } from "./entryQualityEngine.js";
 const now = 1_800_000_000_000;
 const candles = [{ open: 100, high: 101, low: 99, close: 100.5 }, { open: 100.5, high: 102, low: 100, close: 101.5 }, { open: 101.5, high: 103, low: 101, close: 102.5 }];
 const base = {
-  side: "LONG" as const, price: 102.5, atr: 2, now, candles, oiChange: 0.002,
+  side: "LONG" as const, price: 102.5, atr: 2, now, candles, oiChange: 0.002, oiPriceChange: 0.002,
   flow: { buyQuote: 70_000, sellQuote: 30_000, tradeCount: 30, observedAt: now,
     source: "BINANCE_AGG_TRADES" as const, buyQuote5s: 20_000, sellQuote5s: 2_000, trades5s: 8,
     buyQuote30s: 70_000, sellQuote30s: 30_000, trades30s: 30 }
@@ -21,7 +21,7 @@ assert.equal(earlyReversal.quality, "EARLY_FLOW_REVERSAL");
 const late = evaluateEntryQuality({ ...base, price: 112, atr: 2, flow: { ...base.flow, buyQuote5s: 1_000, sellQuote5s: 9_000 } });
 assert.equal(late.allowed, false);
 assert.equal(late.quality, "LATE_ENTRY");
-const missingOI = evaluateEntryQuality({ ...base, oiChange: null });
+const missingOI = evaluateEntryQuality({ ...base, oiChange: null, oiPriceChange: null });
 assert.equal(missingOI.allowed, true);
 assert.equal(missingOI.positioning, "OI_UNAVAILABLE");
 const missingFlow = evaluateEntryQuality({ ...base, flow: null });
