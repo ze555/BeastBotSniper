@@ -21,6 +21,15 @@ function snapshot(overrides: Partial<InstitutionalSnapshot> = {}): Institutional
   };
 }
 
+const liquidationAware = evaluateInstitutionalMarket(snapshot({
+  liquidationFlow: { longLiquidationQuote: 25_000, shortLiquidationQuote: 2_000, eventCount: 3, observedAt: now, source: "BINANCE_FORCE_ORDER" },
+  liquidationFeedConnected: true
+}));
+assert.equal(liquidationAware.dataQuality.liquidationFeed, "OBSERVED");
+assert.equal(liquidationAware.metrics.longLiquidationQuote, 25_000);
+const noLiquidations = evaluateInstitutionalMarket(snapshot({ liquidationFeedConnected: true }));
+assert.equal(noLiquidations.dataQuality.liquidationFeed, "NO_RECENT_EVENTS");
+
 const long = evaluateInstitutionalMarket(snapshot());
 assert.equal(long.state, "BREAKOUT_CONFIRMED");
 assert.equal(long.direction, "LONG");
