@@ -183,8 +183,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
   const executable = bookOk && liquidityQualified;
-  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow) && (longBreak || (compressedBefore && priceReturn > 0.001));
-  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow) && (shortBreak || (compressedBefore && priceReturn < -0.001));
+  const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= 15_000)) && (longBreak || (compressedBefore && priceReturn > 0.001));
+  const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= 15_000)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
