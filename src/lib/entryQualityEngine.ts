@@ -8,7 +8,7 @@ export interface EntryFlowSnapshot {
 export interface EntryQualityInput {
   side: EntrySide; price: number; atr: number; now: number;
   candles: Array<{ open: number; high: number; low: number; close: number }>;
-  flow: EntryFlowSnapshot | null; oiChange: number | null;
+  flow: EntryFlowSnapshot | null; oiChange: number | null; oiPriceChange: number | null;
 }
 export interface EntryQualityDecision {
   allowed: boolean;
@@ -50,9 +50,12 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
   const sign = input.side === "LONG" ? 1 : -1;
   const directed30 = impulse30s * sign;
   const directed5 = impulse5s === null ? null : impulse5s * sign;
+  const first = input.candles[input.candles.length - 3];
+  const directionalMoveAtr = ((input.price - first.open) / input.atr) * sign;
+  const oiPriceAligned = finite(input.oiPriceChange) && input.oiPriceChange * sign > 0;
   const positioning = !finite(input.oiChange) ? "OI_UNAVAILABLE"
-    : input.oiChange > 0.001 ? "NEW_POSITIONS_WITH_MOVE"
-    : input.oiChange < -0.002 ? "SQUEEZE_OR_LIQUIDATION" : "OI_NOT_DIRECTIONAL";
+    : input.oiChange > 0.001 && oiPriceAligned ? "NEW_POSITIONS_WITH_MOVE"
+    : input.oiChange < -0.002 && oiPriceAligned ? "SQUEEZE_OR_LIQUIDATION" : "OI_NOT_DIRECTIONAL";
   if (directed30 <= -0.20 && directed5 !== null && directed5 <= -0.20) {
     return {
       allowed: false, quality: "CONFLICTED_FLOW",
@@ -61,8 +64,6 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
       positioning, reasons: ["Both 30-second and 5-second executed Futures aggression oppose the proposed direction."]
     };
   }
-  const first = input.candles[input.candles.length - 3];
-  const directionalMoveAtr = ((input.price - first.open) / input.atr) * sign;
   const fading = directed5 !== null && directed5 < Math.max(0.05, directed30 * 0.45);
   if (directionalMoveAtr >= 1.75 && fading && directed30 > 0.15) {
     return {
