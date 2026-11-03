@@ -16,7 +16,7 @@ import {
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
 import { evaluateEntryQuality } from "./entryQualityEngine.js";
-import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates } from "./futuresWaveFeed.js";
+import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
@@ -836,6 +836,8 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       orderBook: w.orderBook,
       oiChange: w.oi_chg,
       oiAvailable: w.oi_available === true,
+      liquidationFlow: getFuturesLiquidationFlow(symbol),
+      liquidationFeedConnected: getFuturesWaveFeedStatus().liquidationFeedConnected,
       previousState: previousInstitutionalState?.state as any,
       previousDirection: previousInstitutionalState?.direction as any,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
@@ -901,6 +903,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       entryQuality,
       entryTimeframe: "1m",
       futuresFlowAtEntry: w.futuresFlow,
+      liquidationFlowAtEntry: institutional.dataQuality.liquidationFeed === "OBSERVED" ? institutional.metrics : null,
       openInterestChangeAtEntry: w.oi_available ? w.oi_chg : null,
       orderBookAtEntry: institutional.dataQuality.orderBook ? w.orderBook : null,
       institutional
