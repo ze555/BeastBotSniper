@@ -323,13 +323,14 @@ async function updateDynamicWatchlist() {
 
       // 1. Dynamic Fast Momentum Queue (HOT_WATCHLIST)
       if (needsHotUpdate) {
-         const coreCryptoMajors = [
-            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
-            "SUIUSDT", "NEARUSDT", "AVAXUSDT", "DOGEUSDT"
-         ];
-
+         // Priority queue contains only contracts already showing abnormal movement.
+         // Do not spend the fast lane repeatedly scanning quiet majors by default.
          const activeMovers = [...validTickers]
-            .filter((s: any) => Math.abs(parseFloat(s.priceChangePercent) || 0) >= 2.0)
+            .filter((s: any) => {
+               const move = Math.abs(parseFloat(s.priceChangePercent) || 0);
+               const quoteVol = parseFloat(s.quoteVolume) || 0;
+               return move >= 1.0 && quoteVol >= 1_000_000;
+            })
             .sort((a: any, b: any) => {
                const moveA = Math.abs(parseFloat(a.priceChangePercent) || 0);
                const moveB = Math.abs(parseFloat(b.priceChangePercent) || 0);
@@ -337,11 +338,9 @@ async function updateDynamicWatchlist() {
             })
             .map((s: any) => s.symbol);
 
-         const combinedHot = Array.from(new Set([...activeMovers.slice(0, 14), ...coreCryptoMajors])).slice(0, 20);
-         if (combinedHot.length >= 5) {
-            HOT_WATCHLIST = combinedHot;
-            lastHotWatchlistUpdate = now;
-         }
+         const activeHot = Array.from(new Set(activeMovers)).slice(0, 20);
+         HOT_WATCHLIST = activeHot;
+         lastHotWatchlistUpdate = now;
       }
 
       // 2. Full WATCHLIST (Broader Liquid Universe)
@@ -815,7 +814,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
 
-   // Only completed candles are eligible. The current, still-forming candle is excluded.
+   // The live forming Futures candle is included for early ignition detection.
    // Include the live forming 1m Futures candle: waiting for candle close is too late for early ignition detection.
    const closedCandles = (p.klines || []).slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
@@ -1308,17 +1307,9 @@ export async function runApexLoop() {
          return; // Only skip scanning and new trade entry for this cycle, keeping bot active to manage existing trades!
       }
 
-      // BTC Violent Regime check: if BTC is an erratic two-way whipsaw, block new trades
-      if (ctx.tradeable === false || ctx.btc_whipsaw) {
-         addLog("⚠️ BTC Violent Whipsaw: تم حظر فتح صفقات جديدة نظراً للتذبذب العشوائي العنيف في بيتكوين (Whipsaw).", "warn");
-         isLoopRunning = false;
-         return;
-      }
-
-      if (ctx.btc_dump) {
-         addLog(`⚡ [BTC DUMP REGIME] تم رصد هبوط عنيف لبيتكوين (${(ctx.btc_chg * 100).toFixed(2)}%). تم توجيه الروبوت لصفقات الـ SHORT وحظر الـ LONG بنسبة 100%!`, "info");
-      } else if (ctx.btc_pump) {
-         addLog(`⚡ [BTC PUMP REGIME] تم رصد صعود عنيف لبيتكوين (+${(ctx.btc_chg * 100).toFixed(2)}%). تم توجيه الروبوت لصفقات الـ LONG وحظر الـ SHORT بنسبة 100%!`, "info");
+      // BTC is a context variable only. It must not veto an independently confirmed violent Futures move in an altcoin.
+      if (ctx.btc_whipsaw || ctx.btc_dump || ctx.btc_pump) {
+         addLog(`🌐 BTC context noted (whipsaw=${Boolean(ctx.btc_whipsaw)}, dump=${Boolean(ctx.btc_dump)}, pump=${Boolean(ctx.btc_pump)}); independent Futures wave signals remain eligible.`, "info");
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
@@ -1401,7 +1392,7 @@ export async function runApexLoop() {
          const promises = chunk.map(async (sym: string) => {
             if (activeTrades.some(t => t.symbol === sym)) return null;
             try {
-               const dec = await scoreEntry(sym, ctx);
+               const dec = await evaluateInstitutionalEntry(sym, ctx);
                return { sym, dec };
             } catch {
                return null;
