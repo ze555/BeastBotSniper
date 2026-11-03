@@ -188,7 +188,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let state: MarketState = "DORMANT", direction: Side | "NONE" = "NONE";
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
-  const executable = !bookOk || liquidityQualified;
+  const executable = !bookOk || liquidityQualified; // Missing depth is contextual; final execution filter still checks spread/liquidity.
   const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= flowMinNotional * 2.5)) && (longBreak || (compressedBefore && priceReturn > 0.001));
   const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= flowMinNotional * 2.5)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
