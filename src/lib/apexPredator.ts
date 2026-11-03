@@ -827,6 +827,8 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    // Include the still-forming 1m Futures candle to avoid waiting for candle close.
    const closedCandles = waveCandles.slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
+   const liquidationFlowAtEntry = getFuturesLiquidationFlow(symbol);
+   const liquidationFeedConnected = getFuturesWaveFeedStatus().liquidationFeedConnected;
    const institutional = evaluateInstitutionalMarket({
       symbol,
       timestamp: Date.now(),
@@ -836,8 +838,8 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       orderBook: w.orderBook,
       oiChange: w.oi_chg,
       oiAvailable: w.oi_available === true,
-      liquidationFlow: getFuturesLiquidationFlow(symbol),
-      liquidationFeedConnected: getFuturesWaveFeedStatus().liquidationFeedConnected,
+      liquidationFlow: liquidationFlowAtEntry,
+      liquidationFeedConnected,
       previousState: previousInstitutionalState?.state as any,
       previousDirection: previousInstitutionalState?.direction as any,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
@@ -862,10 +864,11 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    }
 
    const direction = institutional.direction;
+   const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop() || p.atr14;
    const entryQuality = evaluateEntryQuality({
       side: direction,
       price: wavePrice,
-      atr: p.atr14,
+      atr: waveAtr,
       now: Date.now(),
       candles: waveCandles.slice(-3),
       flow: w.futuresFlow,
@@ -903,7 +906,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       entryQuality,
       entryTimeframe: "1m",
       futuresFlowAtEntry: w.futuresFlow,
-      liquidationFlowAtEntry: institutional.dataQuality.liquidationFeed === "OBSERVED" ? institutional.metrics : null,
+      liquidationFlowAtEntry: liquidationFlowAtEntry,
       openInterestChangeAtEntry: w.oi_available ? w.oi_chg : null,
       orderBookAtEntry: institutional.dataQuality.orderBook ? w.orderBook : null,
       institutional
