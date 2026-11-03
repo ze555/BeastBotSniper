@@ -75,6 +75,12 @@ assert.equal(earlyBeforeVolumeClose.canEnter, true, "Directional 30-second Futur
 const noBookStillWorks = evaluateInstitutionalMarket(snapshot({ orderBook: null }));
 assert.equal(noBookStillWorks.canEnter, false, "Missing depth must not create a fake executable entry");
 assert.equal(noBookStillWorks.state, "PRE_IGNITION", "A promising signal without depth remains on watch instead of being discarded as dormant");
+const sampledDepth = evaluateInstitutionalMarket(snapshot({
+  orderBook: { bidNotional: 500_000, askNotional: 200_000, spreadBps: 2, observedAt: now,
+    source: "BINANCE_DEPTH", bidDepthChangePct: -18, askDepthChangePct: -22 }
+}));
+assert.equal(sampledDepth.metrics.sampledBidDepthChangePct, -18);
+assert.equal(sampledDepth.metrics.sampledAskDepthChangePct, -22);
 
 const noSpotStillWorks = evaluateInstitutionalMarket(snapshot());
 assert.equal(noSpotStillWorks.canEnter, true, "Missing Spot data must never block a Futures-only signal");
