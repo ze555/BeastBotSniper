@@ -31,6 +31,9 @@ export interface OrderBookEvidence {
   bidNotional: number;
   askNotional: number;
   spreadBps: number;
+  /** Sampled REST snapshot deltas; not exchange depth-diff events. */
+  bidDepthChangePct?: number | null;
+  askDepthChangePct?: number | null;
   observedAt: number;
   source: "BINANCE_DEPTH";
 }
@@ -77,6 +80,8 @@ export interface EvidenceDecision {
     oiChange: number | null;
     fundingRate: number | null;
     bookImbalance: number | null;
+    sampledBidDepthChangePct: number | null;
+    sampledAskDepthChangePct: number | null;
     longLiquidationQuote: number | null;
     shortLiquidationQuote: number | null;
     btcChange: number | null;
@@ -130,6 +135,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
       relativeVolume: null, oiChange: oiOk ? input.oiChange : null,
       fundingRate: fundingOk ? input.fundingRate! : null,
       bookImbalance: bookOk ? (input.orderBook!.bidNotional - input.orderBook!.askNotional) / Math.max(input.orderBook!.bidNotional + input.orderBook!.askNotional, 1e-12) : null,
+      sampledBidDepthChangePct: bookOk && finite(input.orderBook!.bidDepthChangePct) ? input.orderBook!.bidDepthChangePct : null,
+      sampledAskDepthChangePct: bookOk && finite(input.orderBook!.askDepthChangePct) ? input.orderBook!.askDepthChangePct : null,
       longLiquidationQuote: liquidationOk ? input.liquidationFlow!.longLiquidationQuote : null,
       shortLiquidationQuote: liquidationOk ? input.liquidationFlow!.shortLiquidationQuote : null,
       btcChange: finite(input.btcChange) ? input.btcChange : null, breakoutLevel: null, invalidationLevel: null
@@ -198,6 +205,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   if (shortLiquidation) evidenceFor.push("Price/flow indicate a downward long-liquidation impulse while open interest contracts.");
   if (bookOk && bookImbalance !== null && bookImbalance > 0.12) evidenceFor.push("Displayed bid depth is supportive (context only).");
   if (bookOk && bookImbalance !== null && bookImbalance < -0.12) evidenceFor.push("Displayed ask depth is supportive (context only).");
+  if (bookOk && finite(input.orderBook!.askDepthChangePct) && input.orderBook!.askDepthChangePct < -15 && longFlow) evidenceFor.push("Sampled ask depth fell sharply during aggressive buying; possible offer depletion, but cancellations cannot be distinguished from fills.");
+  if (bookOk && finite(input.orderBook!.bidDepthChangePct) && input.orderBook!.bidDepthChangePct < -15 && shortFlow) evidenceFor.push("Sampled bid depth fell sharply during aggressive selling; possible bid depletion, but cancellations cannot be distinguished from fills.");
   if (liquidationOk && input.liquidationFlow!.longLiquidationQuote > input.liquidationFlow!.shortLiquidationQuote * 1.5 && input.liquidationFlow!.longLiquidationQuote >= 5_000) evidenceFor.push("Recent Binance force-order events show long liquidations; this is squeeze context, not standalone direction proof.");
   if (liquidationOk && input.liquidationFlow!.shortLiquidationQuote > input.liquidationFlow!.longLiquidationQuote * 1.5 && input.liquidationFlow!.shortLiquidationQuote >= 5_000) evidenceFor.push("Recent Binance force-order events show short liquidations; this is squeeze context, not standalone direction proof.");
   if (longExhaustion) evidenceAgainst.push("Crowded positive funding and fading buyer aggression warn of long exhaustion.");
@@ -256,6 +265,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
       spotDeltaQuote: null, futuresDeltaQuote: delta, spotBuyShare: null, futuresBuyShare: buyShare,
       relativeVolume, oiChange: oi, fundingRate: fundingOk ? input.fundingRate! : null,
       bookImbalance,
+      sampledBidDepthChangePct: bookOk && finite(input.orderBook!.bidDepthChangePct) ? input.orderBook!.bidDepthChangePct : null,
+      sampledAskDepthChangePct: bookOk && finite(input.orderBook!.askDepthChangePct) ? input.orderBook!.askDepthChangePct : null,
       longLiquidationQuote: liquidationOk ? input.liquidationFlow!.longLiquidationQuote : null,
       shortLiquidationQuote: liquidationOk ? input.liquidationFlow!.shortLiquidationQuote : null,
       btcChange: finite(input.btcChange) ? input.btcChange : null,
