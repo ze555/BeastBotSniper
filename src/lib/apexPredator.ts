@@ -894,8 +894,8 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          rangeLow: p.sup10
       },
       flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
-      scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: "CONFIRMED", bias: direction } },
-      confirmation: { isConfirmed: true, confirmedSignal: direction, reason: institutional.reason },
+      scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: institutional.entryType === "CONFIRMED_BREAKOUT" ? "CONFIRMED" : "EARLY", bias: direction } },
+      confirmation: { isConfirmed: institutional.entryType === "CONFIRMED_BREAKOUT", isEarlyIgnition: institutional.entryType === "EARLY_IGNITION", confirmedSignal: direction, reason: institutional.reason },
       timingGate: entryQuality.timingGate,
       flow: {
          state: "FUTURES_EXECUTED_AGGRESSOR_FLOW",
@@ -912,7 +912,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       orderBookAtEntry: institutional.dataQuality.orderBook ? w.orderBook : null,
       institutional
    };
-   const grade = { label: "INSTITUTIONAL_CONFIRMED", risk: 0.007, mult: 1.0 };
+   const grade = { label: institutional.entryType === "CONFIRMED_BREAKOUT" ? "INSTITUTIONAL_CONFIRMED" : "INSTITUTIONAL_EARLY", risk: 0.007, mult: 1.0 };
    if (direction === "LONG") apexPredatorStats.acceptedLongs++;
    else apexPredatorStats.acceptedShorts++;
 
