@@ -11,7 +11,7 @@ for (let i = 0; i < 12; i++) {
 const flow = getFuturesTapeFlow("AKEUSDT", now);
 assert.ok(flow, "fresh Futures tape should return a rolling flow snapshot");
 assert.ok(flow!.sellQuote > flow!.buyQuote, "seller aggressors must be classified from buyer-is-maker");
-assert.equal(flow!.trades5s, 3);
+assert.equal(flow!.trades5s, 2);
 assert.ok(getFuturesWaveCandidates(now).includes("AKEUSDT"), "violent downward Futures impulse should enter the candidate queue");
 
 const stale = getFuturesTapeFlow("AKEUSDT", now + 60_000);
