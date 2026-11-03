@@ -47,6 +47,16 @@ const earlyLong = evaluateInstitutionalMarket(snapshot({
 assert.equal(earlyLong.canEnter, true, "A genuine short-squeeze impulse with aggressive Futures buying can be traded");
 assert.equal(earlyLong.direction, "LONG");
 
+const earlyBeforeVolumeClose = evaluateInstitutionalMarket(snapshot({
+  price: 100.4,
+  candles: snapshot().candles.map((c, i, all) => i === all.length - 1
+    ? { ...c, open: 100, high: 100.5, low: 100, close: 100.4, quoteVolume: 10_000, volume: 100 }
+    : c),
+  futuresFlow: flow(18_000, 2_000),
+  oiChange: 0.001
+}));
+assert.equal(earlyBeforeVolumeClose.canEnter, true, "Directional 30-second Futures flow plus a 0.4% live impulse should not wait for the 1m candle-volume ratio");
+
 const noSpotStillWorks = evaluateInstitutionalMarket(snapshot());
 assert.equal(noSpotStillWorks.canEnter, true, "Missing Spot data must never block a Futures-only signal");
 
