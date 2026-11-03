@@ -73,7 +73,8 @@ const earlyBeforeVolumeClose = evaluateInstitutionalMarket(snapshot({
 assert.equal(earlyBeforeVolumeClose.canEnter, true, "Directional 30-second Futures flow plus a 0.4% live impulse should not wait for the 1m candle-volume ratio");
 
 const noBookStillWorks = evaluateInstitutionalMarket(snapshot({ orderBook: null }));
-assert.equal(noBookStillWorks.canEnter, true, "Missing optional depth snapshot must not put the scanner to sleep; execution filter validates the order separately");
+assert.equal(noBookStillWorks.canEnter, false, "Missing depth must not create a fake executable entry");
+assert.equal(noBookStillWorks.state, "PRE_IGNITION", "A promising signal without depth remains on watch instead of being discarded as dormant");
 
 const noSpotStillWorks = evaluateInstitutionalMarket(snapshot());
 assert.equal(noSpotStillWorks.canEnter, true, "Missing Spot data must never block a Futures-only signal");
