@@ -840,6 +840,7 @@ export function logTradeDecision(trade: any, exitContext: {
             futures_flow_at_entry: trade.reasoning?.futuresFlowAtEntry || null,
             open_interest_change_at_entry: Number.isFinite(trade.reasoning?.openInterestChangeAtEntry) ? trade.reasoning.openInterestChangeAtEntry : null,
             order_book_at_entry: trade.reasoning?.orderBookAtEntry || null,
+            liquidation_flow_at_entry: trade.reasoning?.liquidationFlowAtEntry || null,
             institutional_evidence_at_entry: trade.reasoning?.institutional || null,
             entry_quality_at_entry: trade.reasoning?.entryQuality || null,
             location_at_entry: trade.reasoning?.location || null
