@@ -827,6 +827,14 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    // Include the still-forming 1m Futures candle to avoid waiting for candle close.
    const closedCandles = waveCandles.slice(-30);
    const previousInstitutionalState = institutionalStateBySymbol.get(symbol);
+   // Re-fetch a missing/stale depth snapshot before allowing an executable entry.
+   let executionOrderBook = w.orderBook;
+   if (!executionOrderBook || !Number.isFinite(executionOrderBook.observedAt) ||
+       Date.now() - executionOrderBook.observedAt > 8_000) {
+      try { executionOrderBook = await fetchOrderBookEvidence(symbol); }
+      catch { executionOrderBook = null; }
+   }
+   w.orderBook = executionOrderBook;
    const liquidationFlowAtEntry = getFuturesLiquidationFlow(symbol);
    const liquidationFeedConnected = getFuturesWaveFeedStatus().liquidationFeedConnected;
    const institutional = evaluateInstitutionalMarket({
@@ -835,7 +843,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       price: wavePrice,
       candles: closedCandles,
       futuresFlow: w.futuresFlow,
-      orderBook: w.orderBook,
+      orderBook: executionOrderBook,
       oiChange: w.oi_chg,
       oiAvailable: w.oi_available === true,
       liquidationFlow: liquidationFlowAtEntry,
