@@ -15,6 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
+import { startFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
@@ -306,6 +307,8 @@ async function updateDynamicWatchlist() {
             .filter((item: any) => item.contractType === "PERPETUAL" && item.quoteAsset === "USDT" && item.status === "TRADING")
             .map((item: any) => item.symbol)
       );
+      // Continuous aggTrade streams watch the entire active USDT-M perpetual universe between REST scan cycles.
+      startFuturesWaveFeed(Array.from(activeUsdtPerpetuals));
       
       const excludedBases = [
          'USDC', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'PYUSD', 'DAI', 'USDP', 'TRUE', 'EUR', 'GBP', 'AEUR', 'PAXG', 'XAUT',
@@ -452,6 +455,8 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
 }
 
 async function fetchFuturesAggressorFlow(symbol: string) {
+   const liveFlow = getFuturesTapeFlow(symbol);
+   if (liveFlow) return liveFlow;
    const key = `futures:${symbol}`;
    const cached = getCached<any>(aggTradeCache, key);
    if (cached) return cached;
@@ -1334,7 +1339,8 @@ export async function runApexLoop() {
 
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
-      const hotCandidates = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
+      const hotCandidates = Array.from(new Set([...getFuturesWaveCandidates( Date.now(), 20), ...HOT_WATCHLIST]))
+         .filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
       const hotChunkSize = 5;
       for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
          if (!canOpenMore()) break;
