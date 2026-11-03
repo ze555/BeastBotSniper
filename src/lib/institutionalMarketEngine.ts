@@ -208,7 +208,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let state: MarketState = "DORMANT", direction: Side | "NONE" = "NONE";
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
-  const executable = !bookOk || liquidityQualified; // Missing depth is contextual; final execution filter still checks spread/liquidity.
+  const executable = bookOk && liquidityQualified; // A fresh executable Futures depth snapshot remains mandatory before order placement.
   const longEarly = longFlow && executable && (volumeSurge || fastLongFlow || (longBreak && total >= flowMinNotional * 2.5)) && (longBreak || (compressedBefore && priceReturn > 0.001));
   const shortEarly = shortFlow && executable && (volumeSurge || fastShortFlow || (shortBreak && total >= flowMinNotional * 2.5)) && (shortBreak || (compressedBefore && priceReturn < -0.001));
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
@@ -249,7 +249,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     evidenceFor, evidenceAgainst,
     missingEvidence: [
       ...(!oiOk ? ["open-interest history (context, not an entry blocker)"] : []),
-      ...(!bookOk ? ["order-book snapshot (optional context; execution spread/depth should be checked before order placement)"] : [])
+      ...(!bookOk ? ["fresh executable Futures order-book snapshot (spread <= 20 bps and depth >= 10,000 USDT)"] : [])
     ],
     dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: liquidationOk ? "OBSERVED" : input.liquidationFeedConnected ? "NO_RECENT_EVENTS" : "UNAVAILABLE" },
     metrics: {
