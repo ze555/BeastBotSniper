@@ -821,6 +821,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    const wavePrice = waveCandles.length ? waveCandles[waveCandles.length - 1].close : p.price;
    updateRejectedSignalsOutcomes(symbol, p.price, p.klines);
    updateDirectionTracking(symbol, p.price);
+   p.price = wavePrice;
 
    // Include the still-forming 1m Futures candle to avoid waiting for candle close.
    const closedCandles = waveCandles.slice(-30);
