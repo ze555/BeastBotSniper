@@ -139,6 +139,8 @@ function connectShard(symbols: string[]) {
     } catch { /* malformed stream packet is ignored; REST fallback remains available */ }
   });
   const reconnect = () => {
+    const staleIndex = sockets.indexOf(state);
+    if (staleIndex >= 0) sockets.splice(staleIndex, 1);
     if (!started || state.reconnect) return;
     state.reconnect = setTimeout(() => {
       state.reconnect = undefined;
