@@ -375,6 +375,7 @@ const fundingCache = new Map<string, CacheEntry>();
 const oiCache = new Map<string, CacheEntry>();
 const aggTradeCache = new Map<string, CacheEntry>();
 const depthCache = new Map<string, CacheEntry>();
+const priorDepthBySymbol = new Map<string, { bidNotional: number; askNotional: number; observedAt: number }>();
 
 function oi0Safe(data: any[]) { return Number(data?.[0]?.sumOpenInterest); }
 
@@ -509,10 +510,16 @@ async function fetchOrderBookEvidence(symbol: string) {
       throw new Error("Malformed order book");
    }
    const mid = (bestBid + bestAsk) / 2;
+   const observedAt = Date.now();
+   const previous = priorDepthBySymbol.get(symbol);
+   const sampleFresh = previous && observedAt - previous.observedAt <= 60_000;
+   const bidDepthChangePct = sampleFresh ? ((bidNotional - previous.bidNotional) / Math.max(previous.bidNotional, 1)) * 100 : null;
+   const askDepthChangePct = sampleFresh ? ((askNotional - previous.askNotional) / Math.max(previous.askNotional, 1)) * 100 : null;
+   priorDepthBySymbol.set(symbol, { bidNotional, askNotional, observedAt });
    const book = {
-      bidNotional, askNotional,
+      bidNotional, askNotional, bidDepthChangePct, askDepthChangePct,
       spreadBps: ((bestAsk - bestBid) / mid) * 10000,
-      observedAt: Date.now(),
+      observedAt,
       source: "BINANCE_DEPTH" as const
    };
    setCached(depthCache, symbol, book, 2000);
