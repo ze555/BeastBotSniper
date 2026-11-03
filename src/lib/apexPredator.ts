@@ -912,7 +912,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          rangeLow: p.sup10
       },
       flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
-      scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: institutional.entryType === "CONFIRMED_BREAKOUT" ? "CONFIRMED" : "EARLY", bias: direction } },
+      scenario: { primary: { type: direction === "LONG" ? (institutional.entryType === "EARLY_IGNITION" ? "IGNITION_LONG" : "BREAKOUT_LONG") : (institutional.entryType === "EARLY_IGNITION" ? "IGNITION_SHORT" : "BREAKOUT_SHORT"), state: institutional.entryType === "CONFIRMED_BREAKOUT" ? "CONFIRMED" : "EARLY", bias: direction } },
       confirmation: { isConfirmed: institutional.entryType === "CONFIRMED_BREAKOUT", isEarlyIgnition: institutional.entryType === "EARLY_IGNITION", confirmedSignal: direction, reason: institutional.reason },
       timingGate: entryQuality.timingGate,
       flow: {
@@ -1027,12 +1027,12 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
             strongAcc: w.strong_acc ? "حركة مستويات السيولة العالية" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (مفتوحة)" : "تصريف عقود",
+            institutionalBias: !w.oi_available ? "غير متاح" : w.oi_chg > 0.001 ? "ارتفاع العقود المفتوحة" : w.oi_chg < -0.002 ? "انخفاض العقود المفتوحة" : "تغير محايد",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
             adx: p.adx.toFixed(2),
-            marketAlignment: p.bull_align ? "متوافق مع الصعود" : "فوضوي"
+            marketAlignment: p.bull_align ? "متوافق مع الصعود" : p.bear_align ? "متعارض مع الصعود" : "غير واضح"
          }
       };
       activeTrades.push(newTrade);
@@ -1098,12 +1098,12 @@ function executeTrade(symbol: string, decision: any) {
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
             strongAcc: w.strong_dis ? "تفريغ السيولة المؤسساتي" : "طبيعي",
             fund: String((w.fund * 100).toFixed(4)) + "%",
-            institutionalBias: w.oi_chg > 0 ? "تراكم عقود (شورت)" : "إغلاق صفقات",
+            institutionalBias: !w.oi_available ? "غير متاح" : w.oi_chg > 0.001 ? "ارتفاع العقود المفتوحة" : w.oi_chg < -0.002 ? "انخفاض العقود المفتوحة" : "تغير محايد",
          },
          priceData: {
             rsi: p.rsi.toFixed(2),
             adx: p.adx.toFixed(2),
-            marketAlignment: p.bear_align ? "متوافق مع الهبوط" : "فوضوي"
+            marketAlignment: p.bear_align ? "متوافق مع الهبوط" : p.bull_align ? "متعارض مع الهبوط" : "غير واضح"
          }
       };
       activeTrades.push(newTrade);
