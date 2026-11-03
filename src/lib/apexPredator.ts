@@ -15,6 +15,7 @@ import {
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
+import { evaluateEntryQuality } from "./entryQualityEngine.js";
 import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
@@ -858,6 +859,19 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    }
 
    const direction = institutional.direction;
+   const entryQuality = evaluateEntryQuality({
+      side: direction,
+      price: wavePrice,
+      atr: p.atr14,
+      now: Date.now(),
+      candles: waveCandles.slice(-3),
+      flow: w.futuresFlow,
+      oiChange: w.oi_available ? w.oi_chg : null
+   });
+   if (!entryQuality.allowed) {
+      addLog(`⛔ ${symbol}: Entry quality gate — ${entryQuality.quality}: ${entryQuality.reasons.join(" | ")}`, "warn");
+      return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality };
+   }
    const invalidation = institutional.metrics.invalidationLevel;
    if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(p.atr14 > 0)) {
       addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
@@ -875,6 +889,15 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
       scenario: { primary: { type: direction === "LONG" ? "BREAKOUT_LONG" : "BREAKOUT_SHORT", state: "CONFIRMED", bias: direction } },
       confirmation: { isConfirmed: true, confirmedSignal: direction, reason: institutional.reason },
+      timingGate: entryQuality.timingGate,
+      flow: {
+         state: "FUTURES_EXECUTED_AGGRESSOR_FLOW",
+         evidenceFor: institutional.evidenceFor,
+         evidenceAgainst: institutional.evidenceAgainst,
+         persistenceState: entryQuality.flow.persistenceState,
+         persistenceScore: entryQuality.flow.persistenceScore
+      },
+      entryQuality,
       institutional
    };
    const grade = { label: "INSTITUTIONAL_CONFIRMED", risk: 0.007, mult: 1.0 };
