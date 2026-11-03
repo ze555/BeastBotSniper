@@ -846,6 +846,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       institutionalStateBySymbol.set(symbol, { state: institutional.state, direction: institutional.direction });
    }
    p.institutionalEvidence = institutional;
+   p.institutionalEntryCandles = waveCandles;
    p.institutionalInvalidation = institutional.metrics.invalidationLevel;
    if (institutional.state === "DATA_INSUFFICIENT") {
       addLog(`⛔ ${symbol}: Institutional entry blocked — ${institutional.reason} Missing: ${institutional.missingEvidence.join(", ")}`, "warn");
@@ -898,6 +899,10 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          persistenceScore: entryQuality.flow.persistenceScore
       },
       entryQuality,
+      entryTimeframe: "1m",
+      futuresFlowAtEntry: w.futuresFlow,
+      openInterestChangeAtEntry: w.oi_available ? w.oi_chg : null,
+      orderBookAtEntry: institutional.dataQuality.orderBook ? w.orderBook : null,
       institutional
    };
    const grade = { label: "INSTITUTIONAL_CONFIRMED", risk: 0.007, mult: 1.0 };
@@ -991,7 +996,7 @@ function executeTrade(symbol: string, decision: any) {
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
-         candlesBeforeEntry: formatCandles(p.klines || [], 40),
+         candlesBeforeEntry: formatCandles(p.institutionalEntryCandles || p.klines || [], 40),
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_buy ? "مخفي (شراء)" : "لا يوجد",
