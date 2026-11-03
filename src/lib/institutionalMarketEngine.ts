@@ -251,13 +251,13 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
       ...(!oiOk ? ["open-interest history (context, not an entry blocker)"] : []),
       ...(!bookOk ? ["order-book snapshot (optional context; execution spread/depth should be checked before order placement)"] : [])
     ],
-    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: "UNAVAILABLE" },
+    dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: liquidationOk ? "OBSERVED" : input.liquidationFeedConnected ? "NO_RECENT_EVENTS" : "UNAVAILABLE" },
     metrics: {
       spotDeltaQuote: null, futuresDeltaQuote: delta, spotBuyShare: null, futuresBuyShare: buyShare,
       relativeVolume, oiChange: oi, fundingRate: fundingOk ? input.fundingRate! : null,
       bookImbalance,
-      longLiquidationQuote: input.liquidationFlow?.longLiquidationQuote ?? null,
-      shortLiquidationQuote: input.liquidationFlow?.shortLiquidationQuote ?? null,
+      longLiquidationQuote: liquidationOk ? input.liquidationFlow!.longLiquidationQuote : null,
+      shortLiquidationQuote: liquidationOk ? input.liquidationFlow!.shortLiquidationQuote : null,
       btcChange: finite(input.btcChange) ? input.btcChange : null,
       breakoutLevel: direction === "LONG" ? priorHigh : direction === "SHORT" ? priorLow : null,
       invalidationLevel: direction === "LONG" ? Math.min(recent.low, priorHigh) : direction === "SHORT" ? Math.max(recent.high, priorLow) : null
