@@ -12,10 +12,10 @@ New entries from both the priority queue and the rotating universe now pass thro
 
 - Binance USD-M combined WebSocket `<symbol>@aggTrade` streams are opened for active USDT perpetual contracts, in small shards.
 - The feed keeps a rolling five-minute tape per symbol.
-- Entry evidence uses the latest 30 seconds of executed aggressor flow and a five-second acceleration window.
+- Entry evidence retains rolling 5m, 1m, 30s and optional 5s executed aggressor windows for every subscribed symbol.
+- The 5m window establishes prevailing pressure; 1m participation and 30s execution plus the actual price response determine entry timing. The 5s window is diagnostic only and is never mandatory.
 - Binance aggregate-trade `m=true` means the buyer was maker and the seller was aggressor; `m=false` means the buyer was aggressor.
-- A candidate is promoted when directional executed flow is accompanied by a meaningful 30-second price impulse or a material volume burst against a sufficiently populated recent baseline.
-- The priority queue checks the top Futures-tape candidates plus active 24-hour movers. The broader universe is also evaluated through the same wave detector in rotating batches.
+- Candidate discovery admits 1m reversals and 30s impulses against a 5m backdrop. It sorts candidates for evaluation order but does not truncate to a Top-N list. The broader universe is also evaluated through the same wave detector in rotating batches.
 - If the WebSocket tape is unavailable for a symbol, the scanner falls back to recent Binance USD-M `/fapi/v1/aggTrades` polling. Stale or insufficient Futures flow fails closed.
 
 This avoids waiting for a 1-minute candle close. The current forming Futures candle is included in the entry snapshot.
@@ -30,9 +30,10 @@ This avoids waiting for a 1-minute candle close. The current forming Futures can
 
 ## Entry logic
 
-- Long ignition: executed Futures buyers dominate (buy share at least 60%), total 30-second executed quote flow is at least 5,000 USDT, and the live candle / recent structure shows an upward impulse or compressed-range release. A five-second buyer acceleration can qualify before a full candle close.
+- Long ignition: 1m Futures buyer participation and 30s executed buying align with a positive 1m price response, while 5m flow/price provide the prevailing context. A 1m/30s reversal can qualify against opposing 5m pressure only after price confirms the turn.
 - Short ignition: the mirrored seller-dominant conditions.
-- A price/flow impulse with falling OI can qualify as a tradable squeeze or liquidation-led wave when executed Futures aggression confirms the direction. It is not automatically rejected merely because OI contracts.
+- Strong aggressor flow without a corresponding price response is treated as possible absorption and does not qualify as a confirmed entry.
+- OI expansion is not assigned a long/short direction by itself. OI contraction is not called a confirmed liquidation/squeeze unless matching Binance force-order events and price/flow direction are observed.
 - New entries require a fresh, executable order book. Thin or wide-spread contracts remain watch-only.
 - Quiet symbols with no directional executed flow and no abnormal participation remain DORMANT.
 - BTC is context only. A BTC whipsaw or opposite BTC direction does not veto a separately confirmed altcoin Futures wave.
@@ -50,7 +51,8 @@ The institutional exit path uses Futures aggressor flow only. A full exit requir
 - OI is 15-minute history, not a live tick stream.
 - Liquidation events and full depth-delta/cancel dynamics are not yet integrated.
 - The rolling tape is in memory and resets on process restart.
-- The engine has not yet completed a historical tick-level replay for AKEUSDT or ARIAUSDT. Existing candle-only records cannot prove early Futures detection or profitability.
+- The engine has not yet completed a historical tick-level replay for AKEUSDT or ARIAUSDT. Existing candle-only records cannot reconstruct historical 5m/1m/30s executed aggressor windows, depth replenishment, or prove early Futures detection and profitability.
+- The rolling 5m tape resets on process restart; REST fallback requests up to 1,000 recent aggregate trades and only reports windows actually covered by those returned prints.
 
 ## Validation
 
