@@ -458,7 +458,8 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
 
 async function fetchFuturesAggressorFlow(symbol: string) {
    const liveFlow = getFuturesTapeFlow(symbol);
-   if (liveFlow) return liveFlow;
+   // Prefer the in-memory tape only after it has a meaningful 5m history; otherwise REST backfills recent prints.
+   if (liveFlow && liveFlow.trades5m >= 10) return liveFlow;
    const key = `futures:${symbol}`;
    const cached = getCached<any>(aggTradeCache, key);
    if (cached) return cached;
