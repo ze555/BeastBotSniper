@@ -28,30 +28,11 @@ let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
 
-// ═══ ANTI-CHURN COOLDOWN SYSTEM ═══
-// Prevents rapid repetitive entries and micro-churn fee burn on the same symbol
-const closedSymbolCooldown = new Map<string, number>();
-const SYMBOL_COOLDOWN_LOSS_MS = 10 * 60 * 1000; // 10 minutes mandatory cooldown after a loss / early exit
-const SYMBOL_COOLDOWN_WIN_MS = 5 * 60 * 1000;   // 5 minutes cooldown after a take profit win
-
-export function isSymbolInCooldown(symbol: string): boolean {
-   const expireAt = closedSymbolCooldown.get(symbol);
-   if (!expireAt) return false;
-   if (Date.now() >= expireAt) {
-      closedSymbolCooldown.delete(symbol);
-      return false;
-   }
-   return true;
-}
-
-export function setSymbolCooldown(symbol: string, isWin: boolean, durationMs?: number) {
-   const duration = durationMs ?? (isWin ? SYMBOL_COOLDOWN_WIN_MS : SYMBOL_COOLDOWN_LOSS_MS);
-   closedSymbolCooldown.set(symbol, Date.now() + duration);
-}
-
-export function clearSymbolCooldowns() {
-   closedSymbolCooldown.clear();
-}
+// Symbol-level cooldowns are disabled. Re-entry is governed by fresh wave evidence,
+// active-position checks, structural invalidation and execution feasibility.
+export function isSymbolInCooldown(_symbol: string): boolean { return false; }
+export function setSymbolCooldown(_symbol: string, _isWin: boolean, _durationMs?: number) { /* intentionally disabled */ }
+export function clearSymbolCooldowns() { /* intentionally disabled */ }
 
 // ═══ CONFIGURATION ═══
 let WATCHLIST: string[] = [
@@ -951,11 +932,6 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
 
 // --- SEC 5: EXECUTION ---
 function executeTrade(symbol: string, decision: any) {
-   if (isSymbolInCooldown(symbol)) {
-      addLog(`⏳ [تبريد رمزي] تم تخطي تنفيذ صفقة على ${symbol} لأن الرمز يخضع لفترة تهدئة بعد إغلاق سابق لمنع التكرار وحرق الرسوم.`, 'info');
-      return;
-   }
-
    const { p, w, grade, setupType, ctx, reasoning, institutional } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
    // Dynamic Risk Sizing based on Market Regime:
@@ -1159,7 +1135,27 @@ async function exitBrain(trade: any, ctx: any) {
       structureInvalidated,
       futuresFlow: w.futuresFlow || null,
       fundingRate: Number.isFinite(w.fund) ? w.fund : null,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      consecutiveAdverseObservations: (() => {
+         const flow = w.futuresFlow;
+         if (!flow) { t.institutionalAdverseCount = 0; return 0; }
+         const sign = t.direction === "LONG" ? 1 : -1;
+         const b30 = Number.isFinite(flow.buyQuote30s) ? flow.buyQuote30s : flow.buyQuote;
+         const s30 = Number.isFinite(flow.sellQuote30s) ? flow.sellQuote30s : flow.sellQuote;
+         const b1 = Number.isFinite(flow.buyQuote1m) ? flow.buyQuote1m : b30;
+         const s1 = Number.isFinite(flow.sellQuote1m) ? flow.sellQuote1m : s30;
+         const d30 = (b30 + s30) > 0 ? ((b30 - s30) / (b30 + s30)) * sign : 0;
+         const d1 = (b1 + s1) > 0 ? ((b1 - s1) / (b1 + s1)) * sign : d30;
+         const p30 = Number.isFinite(flow.priceChange30sPct) ? flow.priceChange30sPct * sign : null;
+         const p1 = Number.isFinite(flow.priceChange1mPct) ? flow.priceChange1mPct * sign : null;
+         const d5 = Number.isFinite(flow.buyQuote5m) && Number.isFinite(flow.sellQuote5m) && (flow.buyQuote5m + flow.sellQuote5m) > 0
+            ? ((flow.buyQuote5m - flow.sellQuote5m) / (flow.buyQuote5m + flow.sellQuote5m)) * sign : null;
+         const p5 = Number.isFinite(flow.priceChange5mPct) ? flow.priceChange5mPct * sign : null;
+         const parentWaveSupported = d5 !== null && d5 >= 0.04 && p5 !== null && p5 > -0.001;
+         const adverse = !parentWaveSupported && d30 <= -0.08 && d1 <= -0.06 && ((p30 !== null && p30 <= -0.0003) || (p1 !== null && p1 <= -0.0006));
+         t.institutionalAdverseCount = adverse ? Math.min(5, (t.institutionalAdverseCount || 0) + 1) : 0;
+         return t.institutionalAdverseCount;
+      })()
    });
 
    if (exitEvidence.action === "EXIT") {
@@ -1303,12 +1299,6 @@ function closeTradeFull(t: any, reason: string = "") {
    todaysStats.pnl += t.finalPnl;
    activeTrades = activeTrades.filter(tr => tr !== t);
 
-   // Anti-Churn Protection: enforce mandatory cooldown before symbol can be traded again
-   const isProfitWin = (t.finalPnl > 0.15 && t.profitR > 0.05);
-   setSymbolCooldown(t.symbol, isProfitWin);
-   const cooldownMins = isProfitWin ? 5 : 10;
-   addLog(`⏳ [مانع الدوران والتكرار - Anti-Churn] تم تفعيل فترة تهدئة ${cooldownMins} دقائق على ${t.symbol} لمنع التكرار السريع وحرق الرسوم.`, 'info');
-
    if (reason) addLog(`🛑 Full Exit ${t.symbol}: ${reason} | Net PnL: $${t.finalPnl.toFixed(2)} (${t.profitR.toFixed(2)}R)`, t.finalPnl >= 0 ? 'success' : 'warn');
 
    // Record full post-trade diagnostic analysis in Research Logger
@@ -1399,7 +1389,7 @@ export async function runApexLoop() {
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
       const hotCandidates = Array.from(new Set([...getFuturesWaveCandidates(Date.now()), ...HOT_WATCHLIST]))
-         .filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
+         .filter(sym => !activeTrades.some(t => t.symbol === sym));
       const hotChunkSize = 5;
       for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
          if (!canOpenMore()) break;
@@ -1441,7 +1431,7 @@ export async function runApexLoop() {
       const batchSize = scanBatchSize;
       const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
       const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex)
-         .filter(sym => !hotCandidates.includes(sym) && !isSymbolInCooldown(sym));
+         .filter(sym => !hotCandidates.includes(sym));
       
       // Advance index for next run
       currentBatchIndex = endBatchIndex;

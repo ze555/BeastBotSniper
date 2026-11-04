@@ -142,14 +142,42 @@ assert.equal(continuation.canEnter, false, "Do not chase an already-running wave
 
 const exit = evaluateInstitutionalExit({
   direction: "LONG", price: 98, entry: 100, stop: 95, structureInvalidated: true,
-  timestamp: now, fundingRate: 0, futuresFlow: flow(10, 90)
+  timestamp: now, fundingRate: 0, consecutiveAdverseObservations: 2,
+  futuresFlow: flow(10, 90, {
+    buyQuote30s: 10, sellQuote30s: 90, buyQuote1m: 30, sellQuote1m: 170,
+    buyQuote5m: 100, sellQuote5m: 900, priceChange30sPct: -0.001, priceChange1mPct: -0.002
+  })
 });
 assert.equal(exit.action, "EXIT", "Exit must work with Futures flow only");
 
 const noExitWithoutStructure = evaluateInstitutionalExit({
   direction: "LONG", price: 99, entry: 100, stop: 95, structureInvalidated: false,
-  timestamp: now, fundingRate: 0, futuresFlow: flow(10, 90)
+  timestamp: now, fundingRate: 0, consecutiveAdverseObservations: 1,
+  futuresFlow: flow(10, 90, {
+    buyQuote30s: 10, sellQuote30s: 90, buyQuote1m: 30, sellQuote1m: 170,
+    priceChange30sPct: -0.001, priceChange1mPct: -0.002
+  })
 });
 assert.equal(noExitWithoutStructure.action, "PROTECT");
+
+const temporaryPullback = evaluateInstitutionalExit({
+  direction: "LONG", price: 101, entry: 100, stop: 95, structureInvalidated: true,
+  timestamp: now, fundingRate: 0, consecutiveAdverseObservations: 0,
+  futuresFlow: flow(10, 90, {
+    buyQuote30s: 10, sellQuote30s: 90, buyQuote1m: 180, sellQuote1m: 20,
+    buyQuote5m: 700, sellQuote5m: 300,
+    priceChange30sPct: -0.001, priceChange1mPct: 0.001, priceChange5mPct: 0.003
+  })
+});
+assert.equal(temporaryPullback.action, "HOLD", "a 30s counter-pulse must not exit while 1m/5m flow and price still support the wave");
+
+const thinBook = evaluateInstitutionalMarket(snapshot({
+  orderBook: { bidNotional: 2_000, askNotional: 1_000, spreadBps: 40, observedAt: now, source: "BINANCE_DEPTH" }
+}));
+assert.equal(thinBook.canEnter, false, "Thin depth / wide spread cannot qualify as executable liquidity");
+const smallExecutableBook = evaluateInstitutionalMarket(snapshot({
+  orderBook: { bidNotional: 2_000, askNotional: 2_000, spreadBps: 15, observedAt: now, source: "BINANCE_DEPTH" }
+}));
+assert.equal(smallExecutableBook.canEnter, true, "a low-liquidity contract with a tight spread and sufficient modest depth remains executable");
 
 console.log("futuresOnlyWaveEngine: all tests passed");

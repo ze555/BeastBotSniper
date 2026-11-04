@@ -168,10 +168,13 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const bookImbalance = bookOk ? (input.orderBook!.bidNotional - input.orderBook!.askNotional) / Math.max(input.orderBook!.bidNotional + input.orderBook!.askNotional, 1e-12) : null;
   const priceReturn = (recent.close - recent.open) / Math.max(recent.open, 1e-12);
   const oi = oiOk ? input.oiChange! : null;
-  const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 20 &&
-    input.orderBook!.bidNotional + input.orderBook!.askNotional >= 10_000;
+  // Keep thin contracts visible to discovery, but require a tighter spread and a
+  // modest executable depth floor before risking capital. Position sizing remains
+  // independently bounded by the execution layer.
+  const liquidityQualified = bookOk && input.orderBook!.spreadBps <= 25 &&
+    input.orderBook!.bidNotional + input.orderBook!.askNotional >= 3_000;
   // Per-symbol flow floor adapts to its own recent Futures quote-volume baseline.
-  const flowMinNotional = Math.max(1_000, Math.min(5_000, avgQuoteVolume * 0.03));
+  const flowMinNotional = Math.max(150, Math.min(1_500, avgQuoteVolume * 0.01));
   const buy1m = finite(flow.buyQuote1m) ? flow.buyQuote1m : buy;
   const sell1m = finite(flow.sellQuote1m) ? flow.sellQuote1m : sell;
   const total1m = buy1m + sell1m;
@@ -239,7 +242,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   if (longExhaustion) evidenceAgainst.push("Crowded positive funding and fading buyer aggression warn of long exhaustion.");
   if (shortExhaustion) evidenceAgainst.push("Crowded negative funding and fading seller aggression warn of short exhaustion.");
   if (!oiOk) evidenceAgainst.push("Open-interest evidence is unavailable; direction is based on executed Futures flow and price/volume only.");
-  if (bookOk && !liquidityQualified) evidenceAgainst.push("Spread/depth is not executable enough for a new position.");
+  if (bookOk && !liquidityQualified) evidenceAgainst.push("Spread/depth is not executable enough for a new position; the symbol remains discoverable and monitored.");
 
   let state: MarketState = "DORMANT", direction: Side | "NONE" = "NONE";
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
@@ -289,7 +292,7 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     evidenceFor, evidenceAgainst,
     missingEvidence: [
       ...(!oiOk ? ["open-interest history (context, not an entry blocker)"] : []),
-      ...(!bookOk ? ["fresh executable Futures order-book snapshot (spread <= 20 bps and depth >= 10,000 USDT)"] : [])
+      ...(!bookOk ? ["fresh executable Futures order-book snapshot"] : [])
     ],
     dataQuality: { spotTrades: false, futuresTrades: futuresOk, orderBook: bookOk, openInterest: oiOk, funding: fundingOk, liquidationFeed: liquidationOk ? "OBSERVED" : input.liquidationFeedConnected ? "NO_RECENT_EVENTS" : "UNAVAILABLE" },
     metrics: {
@@ -312,19 +315,64 @@ export interface ExitSnapshot {
   direction: Side; price: number; entry: number; stop: number;
   futuresFlow: AggressorFlow | null;
   structureInvalidated: boolean; fundingRate: number | null; timestamp: number;
+  /** Consecutive management observations with aligned multi-window adverse evidence. */
+  consecutiveAdverseObservations?: number;
 }
-/** Futures-only exit: spot data is never required or consulted. */
+/**
+ * Futures-only wave persistence exit. A single 30s counter-pulse is a pullback candidate,
+ * not an exit. Exit requires multi-window adverse aggression, adverse price response,
+ * broken post-entry structure and repeated confirmation. The hard stop remains authoritative.
+ */
 export function evaluateInstitutionalExit(input: ExitSnapshot): { action: "HOLD" | "PROTECT" | "EXIT"; reasons: string[] } {
   const flow = tradeFlowValid(input.futuresFlow, input.timestamp) ? input.futuresFlow : null;
   if (!flow) return { action: "HOLD", reasons: ["Fresh executed Futures flow unavailable; retain the hard stop and do not fabricate an exit signal."] };
-  const delta = flow.buyQuote - flow.sellQuote;
-  const adverseFlow = input.direction === "LONG" ? delta < 0 : delta > 0;
-  const adversePrice = input.direction === "LONG" ? input.price < input.entry : input.price > input.entry;
+  const sign = input.direction === "LONG" ? 1 : -1;
+  const delta30 = (flow.buyQuote30s ?? flow.buyQuote) - (flow.sellQuote30s ?? flow.sellQuote);
+  const total30 = (flow.buyQuote30s ?? flow.buyQuote) + (flow.sellQuote30s ?? flow.sellQuote);
+  const delta1m = finite(flow.buyQuote1m) && finite(flow.sellQuote1m)
+    ? flow.buyQuote1m - flow.sellQuote1m : delta30;
+  const total1m = finite(flow.buyQuote1m) && finite(flow.sellQuote1m)
+    ? flow.buyQuote1m + flow.sellQuote1m : total30;
+  const delta5m = finite(flow.buyQuote5m) && finite(flow.sellQuote5m)
+    ? flow.buyQuote5m - flow.sellQuote5m : null;
+  const total5m = finite(flow.buyQuote5m) && finite(flow.sellQuote5m)
+    ? flow.buyQuote5m + flow.sellQuote5m : 0;
+  const directed30 = total30 > 0 ? (delta30 / total30) * sign : 0;
+  const directed1m = total1m > 0 ? (delta1m / total1m) * sign : directed30;
+  const directed5m = delta5m !== null && total5m > 0 ? (delta5m / total5m) * sign : null;
+  const price30 = finite(flow.priceChange30sPct) ? flow.priceChange30sPct * sign : null;
+  const price1m = finite(flow.priceChange1mPct) ? flow.priceChange1mPct * sign : null;
+  const price5m = finite(flow.priceChange5mPct) ? flow.priceChange5mPct * sign : null;
+  const adverse30 = directed30 <= -0.08;
+  const adverse1m = directed1m <= -0.06;
+  const adverse5m = directed5m !== null && directed5m <= -0.04;
+  const adversePrice = (price30 !== null && price30 <= -0.0003) || (price1m !== null && price1m <= -0.0006);
+  const supportiveSlowerFlow = directed1m >= 0.04 || (directed5m !== null && directed5m >= 0.04);
+  // A still-positive 5m tape with non-negative 5m price response is the active wave thesis.
+  // A 30s/1m pullback must not liquidate that runner while the parent wave remains intact.
+  const parentWaveSupported = directed5m !== null && directed5m >= 0.04 && price5m !== null && price5m > -0.001;
+  const counterPulseOnly = adverse30 && (!adverse1m || parentWaveSupported) && supportiveSlowerFlow;
+  const multiWindowAdverse = adverse30 && adverse1m && adversePrice && !parentWaveSupported;
+  const adverseCount = Math.max(0, input.consecutiveAdverseObservations ?? 0);
+  const adversePriceVsEntry = (input.direction === "LONG" ? input.price < input.entry : input.price > input.entry);
   const reasons: string[] = [];
-  if (adverseFlow) reasons.push("Executed Futures aggressor flow is against the position.");
+  if (adverse30) reasons.push("30s executed Futures flow is counter-directional.");
+  if (adverse1m) reasons.push("1m executed Futures flow confirms the counter-directional pressure.");
+  if (adverse5m) reasons.push("5m executed Futures flow also opposes the open position.");
+  if (adversePrice) reasons.push("Price is responding in the adverse direction, not merely printing opposing trades.");
+  if (supportiveSlowerFlow && adverse30) reasons.push("Slower 1m/5m pressure still supports the original wave; treat the 30s move as a possible temporary pullback.");
+  if (parentWaveSupported && adverse30) reasons.push("The parent 5m wave remains supported by both executed flow and price response; do not exit on this pullback.");
   if (input.structureInvalidated) reasons.push("Post-entry market structure invalidated.");
-  if (adversePrice) reasons.push("Position is in adverse territory.");
-  if (input.structureInvalidated && adverseFlow && adversePrice) return { action: "EXIT", reasons };
-  if (adverseFlow || (input.structureInvalidated && adversePrice)) return { action: "PROTECT", reasons };
-  return { action: "HOLD", reasons };
+  if (adversePriceVsEntry) reasons.push("Position is in adverse territory.");
+
+  if (parentWaveSupported || counterPulseOnly || (!multiWindowAdverse && !input.structureInvalidated)) {
+    return { action: "HOLD", reasons: reasons.length ? reasons : ["The original wave has not been invalidated across independent Futures windows."] };
+  }
+  if (multiWindowAdverse && input.structureInvalidated && adversePriceVsEntry && adverseCount >= 2) {
+    return { action: "EXIT", reasons: [...reasons, "Multi-window reversal persisted across repeated observations; the original wave thesis is invalidated."] };
+  }
+  if (multiWindowAdverse || (input.structureInvalidated && adverse30 && adversePrice)) {
+    return { action: "PROTECT", reasons: [...reasons, "Reversal evidence is building but has not yet passed the repeated-confirmation exit threshold."] };
+  }
+  return { action: "HOLD", reasons: reasons.length ? reasons : ["Futures flow and price response do not confirm a durable reversal."] };
 }

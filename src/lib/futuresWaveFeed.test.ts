@@ -27,6 +27,14 @@ for (let symbolIndex = 0; symbolIndex < 25; symbolIndex++) {
   }
 }
 assert.ok(getFuturesWaveCandidates(now, 1).length >= 25, "legacy limit argument must not truncate the candidate universe to Top-N");
+ // Low-notional/new contracts remain visible to discovery; execution liquidity is a separate gate.
+for (let i = 0; i < 12; i++) {
+  recordFuturesTrade("MICROUSDT", {
+    price: 0.01 + i * 0.00008, quantity: 5_000, quote: 50 + i * 0.4,
+    buyerIsMaker: false, timestamp: now - 8_000 + i * 500
+  });
+}
+assert.ok(getFuturesWaveCandidates(now).includes("MICROUSDT"), "low-notional relative impulse must remain discoverable");
 recordFuturesTrade("AKEUSDT", { price: 0.5, quantity: 100, quote: 50, buyerIsMaker: false, timestamp: now + 5_000 });
 const noLookahead = getFuturesTapeFlow("AKEUSDT", now);
 assert.equal(noLookahead!.observedAt, flow!.observedAt, "future trades must not leak into the current 5m/1m/30s snapshot");

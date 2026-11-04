@@ -123,12 +123,18 @@ export function getFuturesWaveCandidates(now = Date.now(), _legacyLimit?: number
     const recent30 = tape.filter(t => t.timestamp >= now - 30_000 && t.timestamp <= now + 2_000);
     const recent1m = tape.filter(t => t.timestamp >= now - 60_000 && t.timestamp <= now + 2_000);
     const prior4m = tape.filter(t => t.timestamp >= now - 300_000 && t.timestamp < now - 60_000);
-    if (recent30.length < 5 || recent1m.length < 8) continue;
+    // Three prints are enough to put a symbol on the discovery radar; the entry engine
+    // still applies its stricter freshness/trade-count requirements before execution.
+    if (recent30.length < 3 || recent1m.length < 5) continue;
     const quote = (rows: FuturesTapeTrade[]) => rows.reduce((n, t) => n + t.quote, 0);
     const buyQuote = (rows: FuturesTapeTrade[]) => rows.reduce((n, t) => n + (t.buyerIsMaker ? 0 : t.quote), 0);
     const notional30 = quote(recent30), notional1m = quote(recent1m);
     const priorPer30s = prior4m.length ? quote(prior4m) / 8 : 0;
-    const adaptiveFloor = priorPer30s > 0 ? Math.max(2_500, priorPer30s * 1.10) : 4_000;
+    // Discovery is intentionally permissive: small/new contracts can produce the strongest
+    // relative expansions. Absolute liquidity is checked later at execution, not here.
+    const adaptiveFloor = priorPer30s > 0
+      ? Math.max(25, Math.min(1_000, priorPer30s * 0.25))
+      : 25;
     if (notional30 < adaptiveFloor && notional1m < adaptiveFloor * 2) continue;
     const share30 = buyQuote(recent30) / Math.max(notional30, 1e-9);
     const share1m = buyQuote(recent1m) / Math.max(notional1m, 1e-9);
@@ -136,7 +142,9 @@ export function getFuturesWaveCandidates(now = Date.now(), _legacyLimit?: number
     const priceMove1m = recent1m[0].price > 0 ? (recent1m[recent1m.length - 1].price - recent1m[0].price) / recent1m[0].price : 0;
     const directionalFlow = share30 >= 0.54 || share30 <= 0.46 || share1m >= 0.56 || share1m <= 0.44;
     const priceImpulse = Math.abs(priceMove30) >= 0.0015 || Math.abs(priceMove1m) >= 0.0020;
-    const volumeBurst = priorPer30s > 0 && (notional30 >= priorPer30s * 1.6 || notional1m >= priorPer30s * 3.2);
+    const volumeBurst = priorPer30s > 0
+      ? (notional30 >= priorPer30s * 1.35 || notional1m >= priorPer30s * 2.7)
+      : notional30 >= 25;
     if (!directionalFlow || (!volumeBurst && !priceImpulse)) continue;
     // Five-minute tape remains available to the entry engine; candidate discovery intentionally admits early 1m reversals.
     ranked.push({ symbol, impulse: Math.max(notional30, notional1m / 2) * (Math.abs(priceMove30) + Math.abs(priceMove1m) + (volumeBurst ? 0.005 : 0)) });
