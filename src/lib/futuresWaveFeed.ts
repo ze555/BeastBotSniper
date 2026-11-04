@@ -23,6 +23,15 @@ export interface FuturesTapeFlow {
   buyQuote30s: number;
   sellQuote30s: number;
   trades30s: number;
+  buyQuote1m: number;
+  sellQuote1m: number;
+  trades1m: number;
+  buyQuote5m: number;
+  sellQuote5m: number;
+  trades5m: number;
+  priceChange30sPct: number | null;
+  priceChange1mPct: number | null;
+  priceChange5mPct: number | null;
 }
 type SocketState = { socket: WebSocket; reconnect?: ReturnType<typeof setTimeout> };
 const tapeBySymbol = new Map<string, FuturesTapeTrade[]>();
@@ -58,18 +67,33 @@ export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTap
   if (recent.length < 5) return null;
   const last = recent[recent.length - 1];
   if (now - last.timestamp > 30_000) return null;
-  let buyQuote = 0, sellQuote = 0, buyQuote5s = 0, sellQuote5s = 0, trades5s = 0;
-  for (const t of recent) {
-    if (t.buyerIsMaker) sellQuote += t.quote; else buyQuote += t.quote;
-    if (t.timestamp >= now - 5_000) {
-      trades5s++;
-      if (t.buyerIsMaker) sellQuote5s += t.quote; else buyQuote5s += t.quote;
+  const windows = [
+    { ms: 5_000, buy: 0, sell: 0, trades: 0, first: null as FuturesTapeTrade | null, last: null as FuturesTapeTrade | null },
+    { ms: 30_000, buy: 0, sell: 0, trades: 0, first: null as FuturesTapeTrade | null, last: null as FuturesTapeTrade | null },
+    { ms: 60_000, buy: 0, sell: 0, trades: 0, first: null as FuturesTapeTrade | null, last: null as FuturesTapeTrade | null },
+    { ms: 300_000, buy: 0, sell: 0, trades: 0, first: null as FuturesTapeTrade | null, last: null as FuturesTapeTrade | null }
+  ];
+  for (const trade of tape) {
+    if (trade.timestamp > now + 2_000) continue;
+    for (const window of windows) {
+      if (trade.timestamp < now - window.ms) continue;
+      if (!window.first) window.first = trade;
+      window.last = trade;
+      window.trades++;
+      if (trade.buyerIsMaker) window.sell += trade.quote; else window.buy += trade.quote;
     }
   }
+  const [w5, w30, w1m, w5m] = windows;
+  const pct = (window: typeof w5) => window.first && window.last && window.first.price > 0
+    ? (window.last.price - window.first.price) / window.first.price : null;
   return {
-    buyQuote, sellQuote, tradeCount: recent.length, observedAt: last.timestamp,
-    source: "BINANCE_AGG_TRADES", buyQuote5s, sellQuote5s, trades5s,
-    buyQuote30s: buyQuote, sellQuote30s: sellQuote, trades30s: recent.length
+    buyQuote: w30.buy, sellQuote: w30.sell, tradeCount: w30.trades,
+    observedAt: last.timestamp, source: "BINANCE_AGG_TRADES",
+    buyQuote5s: w5.buy, sellQuote5s: w5.sell, trades5s: w5.trades,
+    buyQuote30s: w30.buy, sellQuote30s: w30.sell, trades30s: w30.trades,
+    buyQuote1m: w1m.buy, sellQuote1m: w1m.sell, trades1m: w1m.trades,
+    buyQuote5m: w5m.buy, sellQuote5m: w5m.sell, trades5m: w5m.trades,
+    priceChange30sPct: pct(w30), priceChange1mPct: pct(w1m), priceChange5mPct: pct(w5m)
   };
 }
 
@@ -92,28 +116,33 @@ export function getFuturesLiquidationFlow(symbol: string, now = Date.now()): Fut
   };
 }
 
-export function getFuturesWaveCandidates(now = Date.now(), limit = 40): string[] {
+export function getFuturesWaveCandidates(now = Date.now(), _legacyLimit?: number): string[] {
   const ranked: Array<{ symbol: string; impulse: number }> = [];
   for (const [symbol, tape] of tapeBySymbol) {
     pruneTape(symbol, now);
-    const recent = tape.filter(t => t.timestamp >= now - 30_000);
-    const prior = tape.filter(t => t.timestamp >= now - 300_000 && t.timestamp < now - 30_000);
-    if (recent.length < 8) continue;
-    const notional = recent.reduce((n, t) => n + t.quote, 0);
-    const priorPer30s = prior.length ? prior.reduce((n, t) => n + t.quote, 0) / 9 : 0;
-    const adaptiveFloor = priorPer30s > 0 ? Math.max(5_000, priorPer30s * 1.15) : 8_000;
-    if (notional < adaptiveFloor) continue;
-    const buy = recent.reduce((n, t) => n + (t.buyerIsMaker ? 0 : t.quote), 0);
-    const share = buy / Math.max(notional, 1e-9);
-    const first = recent[0].price, last = recent[recent.length - 1].price;
-    const move = first > 0 ? (last - first) / first : 0;
-    const volumeBurst = prior.length >= 20 && priorPer30s > 0 && notional >= priorPer30s * 1.8;
-    const directionalFlow = share >= 0.56 || share <= 0.44;
-    const priceImpulse = Math.abs(move) >= 0.0025;
+    const recent30 = tape.filter(t => t.timestamp >= now - 30_000 && t.timestamp <= now + 2_000);
+    const recent1m = tape.filter(t => t.timestamp >= now - 60_000 && t.timestamp <= now + 2_000);
+    const prior4m = tape.filter(t => t.timestamp >= now - 300_000 && t.timestamp < now - 60_000);
+    if (recent30.length < 5 || recent1m.length < 8) continue;
+    const quote = (rows: FuturesTapeTrade[]) => rows.reduce((n, t) => n + t.quote, 0);
+    const buyQuote = (rows: FuturesTapeTrade[]) => rows.reduce((n, t) => n + (t.buyerIsMaker ? 0 : t.quote), 0);
+    const notional30 = quote(recent30), notional1m = quote(recent1m);
+    const priorPer30s = prior4m.length ? quote(prior4m) / 8 : 0;
+    const adaptiveFloor = priorPer30s > 0 ? Math.max(2_500, priorPer30s * 1.10) : 4_000;
+    if (notional30 < adaptiveFloor && notional1m < adaptiveFloor * 2) continue;
+    const share30 = buyQuote(recent30) / Math.max(notional30, 1e-9);
+    const share1m = buyQuote(recent1m) / Math.max(notional1m, 1e-9);
+    const priceMove30 = recent30[0].price > 0 ? (recent30[recent30.length - 1].price - recent30[0].price) / recent30[0].price : 0;
+    const priceMove1m = recent1m[0].price > 0 ? (recent1m[recent1m.length - 1].price - recent1m[0].price) / recent1m[0].price : 0;
+    const directionalFlow = share30 >= 0.54 || share30 <= 0.46 || share1m >= 0.56 || share1m <= 0.44;
+    const priceImpulse = Math.abs(priceMove30) >= 0.0015 || Math.abs(priceMove1m) >= 0.0020;
+    const volumeBurst = priorPer30s > 0 && (notional30 >= priorPer30s * 1.6 || notional1m >= priorPer30s * 3.2);
     if (!directionalFlow || (!volumeBurst && !priceImpulse)) continue;
-    ranked.push({ symbol, impulse: notional * (Math.abs(move) + (volumeBurst ? 0.01 : 0)) });
+    // Five-minute tape remains available to the entry engine; candidate discovery intentionally admits early 1m reversals.
+    ranked.push({ symbol, impulse: Math.max(notional30, notional1m / 2) * (Math.abs(priceMove30) + Math.abs(priceMove1m) + (volumeBurst ? 0.005 : 0)) });
   }
-  return ranked.sort((a, b) => b.impulse - a.impulse).slice(0, limit).map(x => x.symbol);
+  // Return every qualifying symbol. Sort for evaluation order only; never truncate to Top-N.
+  return ranked.sort((a, b) => b.impulse - a.impulse).map(x => x.symbol);
 }
 
 function closeSockets() {
