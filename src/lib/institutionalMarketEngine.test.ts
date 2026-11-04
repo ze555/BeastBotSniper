@@ -72,6 +72,32 @@ const earlyBeforeVolumeClose = evaluateInstitutionalMarket(snapshot({
 }));
 assert.equal(earlyBeforeVolumeClose.canEnter, true, "Directional 30-second Futures flow plus a 0.4% live impulse should not wait for the 1m candle-volume ratio");
 
+const fiveMinuteReversal = evaluateInstitutionalMarket(snapshot({
+  futuresFlow: flow(60_000, 40_000, {
+    buyQuote30s: 60_000, sellQuote30s: 40_000, trades30s: 30,
+    buyQuote1m: 180_000, sellQuote1m: 20_000, trades1m: 70,
+    buyQuote5m: 250_000, sellQuote5m: 750_000, trades5m: 260,
+    priceChange30sPct: 0.001, priceChange1mPct: 0.002, priceChange5mPct: -0.008
+  })
+}));
+assert.equal(fiveMinuteReversal.canEnter, true, "a price-confirmed 1m/30s reversal may ignite against 5m pressure without 5s data");
+assert.equal(fiveMinuteReversal.direction, "LONG");
+assert.match(fiveMinuteReversal.reason, /reversal ignition/i);
+
+const fiveMinuteBearContinuation = evaluateInstitutionalMarket(snapshot({
+  price: 96.5,
+  candles: snapshot().candles.map((c, i, all) => i === all.length - 1 ? { ...c, open: 100, high: 100, low: 96, close: 96.5, volume: 250, quoteVolume: 25_000 } : c),
+  futuresFlow: flow(40_000, 60_000, {
+    buyQuote30s: 40_000, sellQuote30s: 60_000, trades30s: 25,
+    buyQuote1m: 70_000, sellQuote1m: 130_000, trades1m: 65,
+    buyQuote5m: 200_000, sellQuote5m: 800_000, trades5m: 240,
+    priceChange30sPct: -0.001, priceChange1mPct: -0.003, priceChange5mPct: -0.012
+  }),
+  orderBook: { bidNotional: 200_000, askNotional: 500_000, spreadBps: 2, observedAt: now, source: "BINANCE_DEPTH" }
+}));
+assert.equal(fiveMinuteBearContinuation.canEnter, true, "5m/1m/30s bearish flow should qualify without a 5s trigger");
+assert.equal(fiveMinuteBearContinuation.direction, "SHORT");
+
 const noBookStillWorks = evaluateInstitutionalMarket(snapshot({ orderBook: null }));
 assert.equal(noBookStillWorks.canEnter, false, "Missing depth must not create a fake executable entry");
 assert.equal(noBookStillWorks.state, "PRE_IGNITION", "A promising signal without depth remains on watch instead of being discarded as dormant");
