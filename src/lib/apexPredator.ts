@@ -463,33 +463,35 @@ async function fetchFuturesAggressorFlow(symbol: string) {
    const cached = getCached<any>(aggTradeCache, key);
    if (cached) return cached;
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/aggTrades`, {
-      params: { symbol, limit: 100 }, timeout: 5000
+      params: { symbol, limit: 1000 }, timeout: 5000
    });
    if (!Array.isArray(res.data) || res.data.length === 0) throw new Error("No Futures aggregate trades");
    const now = Date.now();
-   let buyQuote = 0, sellQuote = 0, trades30s = 0;
-   let buyQuote5s = 0, sellQuote5s = 0, trades5s = 0;
-   let latestTradeTime = 0;
-   for (const trade of res.data) {
-      const at = Number(trade.T);
-      const notional = Number(trade.p) * Number(trade.q);
-      if (!Number.isFinite(at) || !Number.isFinite(notional) || notional <= 0 || at > now + 2_000) continue;
-      latestTradeTime = Math.max(latestTradeTime, at);
-      if (at < now - 30_000) continue;
-      trades30s++;
-      if (trade.m === true) sellQuote += notional; else buyQuote += notional;
-      if (at >= now - 5_000) {
-         trades5s++;
-         if (trade.m === true) sellQuote5s += notional; else buyQuote5s += notional;
-      }
-   }
-   if (!latestTradeTime || now - latestTradeTime > 30_000 || trades30s < 5) {
+   const parsed = res.data.map((trade: any) => ({
+      at: Number(trade.T), quote: Number(trade.p) * Number(trade.q), price: Number(trade.p), buyerIsMaker: trade.m === true
+   })).filter((trade: any) => Number.isFinite(trade.at) && Number.isFinite(trade.quote) && trade.quote > 0 && Number.isFinite(trade.price) && trade.price > 0 && trade.at <= now + 2_000);
+   const windowFlow = (ms: number) => {
+      const rows = parsed.filter((trade: any) => trade.at >= now - ms);
+      return {
+         buy: rows.filter((trade: any) => !trade.buyerIsMaker).reduce((sum: number, trade: any) => sum + trade.quote, 0),
+         sell: rows.filter((trade: any) => trade.buyerIsMaker).reduce((sum: number, trade: any) => sum + trade.quote, 0),
+         trades: rows.length,
+         priceChangePct: rows.length >= 2 && rows[0].price > 0 ? (rows[rows.length - 1].price - rows[0].price) / rows[0].price : null
+      };
+   };
+   const w30 = windowFlow(30_000), w5 = windowFlow(5_000), w1m = windowFlow(60_000), w5m = windowFlow(300_000);
+   const latestTradeTime = parsed.reduce((latest: number, trade: any) => Math.max(latest, trade.at), 0);
+   if (!latestTradeTime || now - latestTradeTime > 30_000 || w30.trades < 5) {
       throw new Error("Insufficient fresh Futures aggressor trades in the last 30 seconds");
    }
    const flow = {
-      buyQuote, sellQuote, tradeCount: trades30s, observedAt: latestTradeTime,
-      buyQuote5s, sellQuote5s, trades5s, buyQuote30s: buyQuote, sellQuote30s: sellQuote,
-      trades30s, source: "BINANCE_AGG_TRADES" as const
+      buyQuote: w30.buy, sellQuote: w30.sell, tradeCount: w30.trades, observedAt: latestTradeTime,
+      buyQuote5s: w5.buy, sellQuote5s: w5.sell, trades5s: w5.trades,
+      buyQuote30s: w30.buy, sellQuote30s: w30.sell, trades30s: w30.trades,
+      buyQuote1m: w1m.buy, sellQuote1m: w1m.sell, trades1m: w1m.trades,
+      buyQuote5m: w5m.buy, sellQuote5m: w5m.sell, trades5m: w5m.trades,
+      priceChange30sPct: w30.priceChangePct, priceChange1mPct: w1m.priceChangePct, priceChange5mPct: w5m.priceChangePct,
+      source: "BINANCE_AGG_TRADES" as const
    };
    setCached(aggTradeCache, key, flow, 2_000);
    return flow;
@@ -911,7 +913,6 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          rangeHigh: p.res10,
          rangeLow: p.sup10
       },
-      flow: { state: "FUTURES_EXECUTED_AGGRESSOR_FLOW", evidenceFor: institutional.evidenceFor, evidenceAgainst: institutional.evidenceAgainst },
       scenario: { primary: { type: direction === "LONG" ? (institutional.entryType === "EARLY_IGNITION" ? "IGNITION_LONG" : "BREAKOUT_LONG") : (institutional.entryType === "EARLY_IGNITION" ? "IGNITION_SHORT" : "BREAKOUT_SHORT"), state: institutional.entryType === "CONFIRMED_BREAKOUT" ? "CONFIRMED" : "EARLY", bias: direction } },
       confirmation: { isConfirmed: institutional.entryType === "CONFIRMED_BREAKOUT", isEarlyIgnition: institutional.entryType === "EARLY_IGNITION", confirmedSignal: direction, reason: institutional.reason },
       timingGate: entryQuality.timingGate,
@@ -923,8 +924,9 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          persistenceScore: entryQuality.flow.persistenceScore
       },
       entryQuality,
-      entryTimeframe: "1m",
+      entryTimeframe: "1m+30s execution / 5m context",
       futuresFlowAtEntry: w.futuresFlow,
+      entryDecisionWindows: { context: "5m", confirmation: "1m", execution: "30s", optionalMicrostructure: "5s" },
       liquidationFlowAtEntry: liquidationFlowAtEntry,
       openInterestChangeAtEntry: w.oi_available ? w.oi_chg : null,
       orderBookAtEntry: institutional.dataQuality.orderBook ? w.orderBook : null,
@@ -1395,7 +1397,7 @@ export async function runApexLoop() {
 
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
-      const hotCandidates = Array.from(new Set([...getFuturesWaveCandidates( Date.now(), 20), ...HOT_WATCHLIST]))
+      const hotCandidates = Array.from(new Set([...getFuturesWaveCandidates(Date.now()), ...HOT_WATCHLIST]))
          .filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
       const hotChunkSize = 5;
       for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
