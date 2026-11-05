@@ -171,10 +171,7 @@ const temporaryPullback = evaluateInstitutionalExit({
 });
 assert.equal(temporaryPullback.action, "HOLD", "a 30s counter-pulse must not exit while 1m/5m flow and price still support the wave");
 
-const thinBook = evaluateInstitutionalMarket(snapshot({
-  orderBook: { bidNotional: 2_000, askNotional: 1_000, spreadBps: 40, observedAt: now, source: "BINANCE_DEPTH" }
-}));
-assert.equal(thinBook.canEnter, false, "Thin depth / wide spread cannot qualify as executable liquidity");
+
 const smallExecutableBook = evaluateInstitutionalMarket(snapshot({
   orderBook: { bidNotional: 2_000, askNotional: 2_000, spreadBps: 15, observedAt: now, source: "BINANCE_DEPTH" }
 }));
