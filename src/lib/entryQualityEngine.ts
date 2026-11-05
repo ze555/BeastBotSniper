@@ -17,9 +17,9 @@ export interface EntryQualityInput {
 }
 export interface EntryQualityDecision {
   allowed: boolean;
-  quality: "EARLY_FLOW_REVERSAL" | "FLOW_ALIGNED" | "LATE_ENTRY" | "CONFLICTED_FLOW" | "INSUFFICIENT_DATA";
+  quality: "EARLY_FLOW_REVERSAL" | "FLOW_ALIGNED" | "LATE_ENTRY" | "ABSORPTION" | "FAILED_AUCTION" | "CONFLICTED_FLOW" | "INSUFFICIENT_DATA";
   timingGate: { state: string; isLateEntry: boolean; directionalMoveAtr: number | null };
-  flow: { persistenceState: string; persistenceScore: number | null; impulse5s: number | null; impulse30s: number | null };
+  flow: { persistenceState: string; persistenceScore: number | null; impulse5s: number | null; impulse30s: number | null; priceImpactEfficiency: number | null };
   positioning: "NEW_POSITIONS_WITH_MOVE" | "SQUEEZE_OR_LIQUIDATION" | "OI_UNAVAILABLE" | "OI_NOT_DIRECTIONAL";
   cvdState: "ALIGNED" | "MIXED" | "OPPOSING" | "UNAVAILABLE";
   reasons: string[];
@@ -31,7 +31,7 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
   const insufficient = (reason: string): EntryQualityDecision => ({
     allowed: false, quality: "INSUFFICIENT_DATA",
     timingGate: { state: "DATA_INSUFFICIENT", isLateEntry: false, directionalMoveAtr: null },
-    flow: { persistenceState: "NOT_RECORDED", persistenceScore: null, impulse5s: null, impulse30s: null },
+    flow: { persistenceState: "NOT_RECORDED", persistenceScore: null, impulse5s: null, impulse30s: null, priceImpactEfficiency: null },
     positioning: "OI_UNAVAILABLE", cvdState: "UNAVAILABLE", reasons: [reason]
   });
   const f = input.flow;
@@ -85,17 +85,28 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
     return {
       allowed: false, quality: "CONFLICTED_FLOW",
       timingGate: { state: "OPPOSING_EXECUTED_FLOW", isLateEntry: false, directionalMoveAtr },
-      flow: { persistenceState: "CONFLICTED", persistenceScore: 0, impulse5s: null, impulse30s },
+      flow: { persistenceState: "CONFLICTED", persistenceScore: 0, impulse5s: null, impulse30s, priceImpactEfficiency: null },
       positioning, cvdState, reasons: ["Both 1m and 30s executed Futures flow oppose the proposed direction."]
     };
   }
-  const absorption = directed1m >= 0.18 && priceMove1m <= 0.0001;
-  if (absorption) {
+  // Measure price response in ATR units so the same rule works across symbols and volatility regimes.
+  const signedMove30sAtr = finite(f.priceChange30sPct) ? (f.priceChange30sPct * input.price / input.atr) * sign : null;
+  const signedMove1mAtr = finite(f.priceChange1mPct) ? (f.priceChange1mPct * input.price / input.atr) * sign : null;
+  const priceImpactEfficiency = signedMove1mAtr !== null
+    ? signedMove1mAtr / Math.max(Math.abs(directed1m), 0.05) : null;
+  const strongDirectedFlow = directed1m >= 0.18 && directed30 >= 0.12;
+  const failedAuction = strongDirectedFlow && signedMove1mAtr !== null && signedMove1mAtr <= -0.08;
+  const absorbedFlow = strongDirectedFlow && signedMove1mAtr !== null && signedMove1mAtr >= -0.08 && signedMove1mAtr < 0.10;
+  if (failedAuction || absorbedFlow) {
+    const state = failedAuction ? "FAILED_AUCTION" : "NO_PRICE_RESPONSE_ABSORPTION";
     return {
-      allowed: false, quality: "CONFLICTED_FLOW",
-      timingGate: { state: "NO_PRICE_RESPONSE_ABSORPTION", isLateEntry: false, directionalMoveAtr },
-      flow: { persistenceState: "ABSORBED", persistenceScore: Math.round(directed1m * 100), impulse5s: null, impulse30s },
-      positioning, cvdState, reasons: ["Aggressive Futures flow is strong but price has not responded in the same direction over 1m; possible passive absorption. Wait for actual price response."]
+      allowed: false, quality: failedAuction ? "FAILED_AUCTION" : "ABSORPTION",
+      timingGate: { state, isLateEntry: false, directionalMoveAtr },
+      flow: { persistenceState: failedAuction ? "FAILED_AUCTION" : "ABSORBED", persistenceScore: Math.round(directed1m * 100), impulse5s: null, impulse30s, priceImpactEfficiency },
+      positioning, cvdState,
+      reasons: [failedAuction
+        ? "Aggressive Futures flow is strong but price moved materially against it in ATR terms: failed auction/rejection. Keep the symbol under discovery and wait for a fresh release."
+        : "Aggressive Futures flow is strong but produced less than 0.10 ATR of same-direction price response. Possible passive absorption; wait for a micro-range break and renewed price release before entry."]
     };
   }
   const fading = directed1m < Math.max(0.05, directed5m * 0.45);
@@ -103,7 +114,7 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
     return {
       allowed: false, quality: "LATE_ENTRY",
       timingGate: { state: "LATE_EXPANSION", isLateEntry: true, directionalMoveAtr },
-      flow: { persistenceState: "FADING", persistenceScore: Math.max(0, Math.min(100, Math.round(directed1m * 100))), impulse5s: null, impulse30s },
+      flow: { persistenceState: "FADING", persistenceScore: Math.max(0, Math.min(100, Math.round(directed1m * 100))), impulse5s: null, impulse30s, priceImpactEfficiency: null },
       positioning, cvdState, reasons: ["The move has extended at least 1.75 ATR across recent 1m candles while 1m participation fades versus its 5m baseline."]
     };
   }
@@ -115,7 +126,7 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
     return {
       allowed: false, quality: "CONFLICTED_FLOW",
       timingGate: { state: "NO_MULTI_WINDOW_PRICE_CONFIRMATION", isLateEntry: false, directionalMoveAtr },
-      flow: { persistenceState: "UNCONFIRMED", persistenceScore: null, impulse5s: null, impulse30s },
+      flow: { persistenceState: "UNCONFIRMED", persistenceScore: null, impulse5s: null, impulse30s, priceImpactEfficiency: null },
       positioning, cvdState, reasons: ["The 1m and 30s Futures tape plus directional price response do not yet confirm this entry. Keep scanning; do not force an entry from a single short burst."]
     };
   }
@@ -124,7 +135,7 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
   return {
     allowed: true, quality: earlyReversal ? "EARLY_FLOW_REVERSAL" : "FLOW_ALIGNED",
     timingGate: { state: earlyReversal ? "EARLY_FLOW_REVERSAL" : "IN_TIME", isLateEntry: false, directionalMoveAtr },
-    flow: { persistenceState: earlyReversal ? "EARLY_REVERSAL_5M_TO_1M" : "ALIGNED_1M_30S", persistenceScore, impulse5s: null, impulse30s },
+    flow: { persistenceState: earlyReversal ? "EARLY_REVERSAL_5M_TO_1M" : "ALIGNED_1M_30S", persistenceScore, impulse5s: null, impulse30s, priceImpactEfficiency },
     positioning, cvdState,
     reasons: [
       earlyReversal
