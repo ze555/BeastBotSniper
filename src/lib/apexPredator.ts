@@ -867,6 +867,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
 
    const direction = institutional.direction;
    const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop() || p.atr14;
+   p.waveAtr = waveAtr;
    const entryQuality = evaluateEntryQuality({
       side: direction,
       price: wavePrice,
@@ -1175,7 +1176,7 @@ async function exitBrain(trade: any, ctx: any) {
             flow: reverseCandidate.w?.futuresFlow || null,
             now: Date.now(),
             price: Number.isFinite(reverseCandidate.p?.price) ? reverseCandidate.p.price : NaN,
-            atr: Number.isFinite(reverseCandidate.p?.atr14) ? reverseCandidate.p.atr14 : NaN,
+            atr: Number.isFinite(reverseCandidate.p?.waveAtr) ? reverseCandidate.p.waveAtr : NaN,
             cvd5mSlope: Number.isFinite(reverseCandidate.w?.slope5) ? reverseCandidate.w.slope5 : null,
             cvd15mSlope: Number.isFinite(reverseCandidate.w?.slope15) ? reverseCandidate.w.slope15 : null,
             cvd4hSlope: Number.isFinite(reverseCandidate.w?.slope4h) ? reverseCandidate.w.slope4h : null,
