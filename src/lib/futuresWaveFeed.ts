@@ -32,6 +32,8 @@ export interface FuturesTapeFlow {
   priceChange30sPct: number | null;
   priceChange1mPct: number | null;
   priceChange5mPct: number | null;
+  coverage1mMs: number;
+  coverage5mMs: number;
 }
 type SocketState = { socket: WebSocket; reconnect?: ReturnType<typeof setTimeout> };
 const tapeBySymbol = new Map<string, FuturesTapeTrade[]>();
@@ -86,6 +88,8 @@ export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTap
   const [w5, w30, w1m, w5m] = windows;
   const pct = (window: typeof w5) => window.first && window.last && window.first.price > 0
     ? (window.last.price - window.first.price) / window.first.price : null;
+  const coverage = (window: typeof w5) => window.first && window.last
+    ? Math.max(0, Math.min(window.ms, window.last.timestamp - window.first.timestamp)) : 0;
   return {
     buyQuote: w30.buy, sellQuote: w30.sell, tradeCount: w30.trades,
     observedAt: last.timestamp, source: "BINANCE_AGG_TRADES",
@@ -93,7 +97,8 @@ export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTap
     buyQuote30s: w30.buy, sellQuote30s: w30.sell, trades30s: w30.trades,
     buyQuote1m: w1m.buy, sellQuote1m: w1m.sell, trades1m: w1m.trades,
     buyQuote5m: w5m.buy, sellQuote5m: w5m.sell, trades5m: w5m.trades,
-    priceChange30sPct: pct(w30), priceChange1mPct: pct(w1m), priceChange5mPct: pct(w5m)
+    priceChange30sPct: pct(w30), priceChange1mPct: pct(w1m), priceChange5mPct: pct(w5m),
+    coverage1mMs: coverage(w1m), coverage5mMs: coverage(w5m)
   };
 }
 
