@@ -1210,7 +1210,7 @@ function updateSummaries(lastTrade: any) {
 // 11. PUBLIC ACCESS API EXPORTS
 // ----------------------------------------------------------------------------
 function latestRecords(filePath: string, memory: any[], limit: number, idField: string) {
-   const safeLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit) || 100));
+   const safeLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit) || 100)));
    const merged = [...memory, ...loadJsonlTail(filePath, safeLimit)];
    const seen = new Set<string>();
    return merged.filter(item => {
