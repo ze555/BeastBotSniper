@@ -25,6 +25,7 @@ export interface AggressorFlow {
   buyQuote1m?: number; sellQuote1m?: number; trades1m?: number;
   buyQuote5m?: number; sellQuote5m?: number; trades5m?: number;
   priceChange30sPct?: number | null; priceChange1mPct?: number | null; priceChange5mPct?: number | null;
+  coverage1mMs?: number; coverage5mMs?: number;
 }
 export interface LiquidationFlowEvidence {
   longLiquidationQuote: number; shortLiquidationQuote: number; eventCount: number;
@@ -179,19 +180,20 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const sell1m = finite(flow.sellQuote1m) ? flow.sellQuote1m : sell;
   const total1m = buy1m + sell1m;
   const share1m = total1m > 0 ? buy1m / total1m : 0.5;
-  const buy5m = finite(flow.buyQuote5m) ? flow.buyQuote5m : buy1m;
-  const sell5m = finite(flow.sellQuote5m) ? flow.sellQuote5m : sell1m;
+  const fiveMinuteCovered = !finite(flow.coverage5mMs) || flow.coverage5mMs >= 180_000;
+  const buy5m = fiveMinuteCovered && finite(flow.buyQuote5m) ? flow.buyQuote5m : 0;
+  const sell5m = fiveMinuteCovered && finite(flow.sellQuote5m) ? flow.sellQuote5m : 0;
   const total5m = buy5m + sell5m;
   const share5m = total5m > 0 ? buy5m / total5m : 0.5;
   const priceChange1m = finite(flow.priceChange1mPct) ? flow.priceChange1mPct : priceReturn;
-  const priceChange5m = finite(flow.priceChange5mPct) ? flow.priceChange5mPct : null;
+  const priceChange5m = fiveMinuteCovered && finite(flow.priceChange5mPct) ? flow.priceChange5mPct : null;
   const volumeSurge = relativeVolume !== null && relativeVolume >= 1.25;
   const long30 = buyShare >= 0.54 && total >= flowMinNotional * 0.35;
   const short30 = buyShare <= 0.46 && total >= flowMinNotional * 0.35;
   const long1m = share1m >= 0.54 && total1m >= flowMinNotional;
   const short1m = share1m <= 0.46 && total1m >= flowMinNotional;
-  const long5m = share5m >= 0.54 && total5m >= flowMinNotional * 2;
-  const short5m = share5m <= 0.46 && total5m >= flowMinNotional * 2;
+  const long5m = fiveMinuteCovered && share5m >= 0.54 && total5m >= flowMinNotional * 2;
+  const short5m = fiveMinuteCovered && share5m <= 0.46 && total5m >= flowMinNotional * 2;
   // Five-minute flow establishes the prevailing pressure; the 1m/30s tape plus price response times the entry.
   const fiveMinuteOpposesLong = short5m || (priceChange5m !== null && priceChange5m <= -0.005);
   const fiveMinuteOpposesShort = long5m || (priceChange5m !== null && priceChange5m >= 0.005);
