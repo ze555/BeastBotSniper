@@ -12,11 +12,13 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const SCHEMA_VERSION = "2.4.0";
-const BOT_VERSION = "BeastBot-Apex-v2.4";
+const SCHEMA_VERSION = "2.5.0";
+const BOT_VERSION = "BeastBot-Apex-v2.5";
 
 function getWritableResearchDir(): string {
-   const defaultPath = path.resolve(process.cwd(), "data", "research");
+   const defaultPath = process.env.BEASTBOT_RESEARCH_DIR
+      ? path.resolve(process.env.BEASTBOT_RESEARCH_DIR)
+      : path.resolve(process.cwd(), "data", "research");
    try {
       if (!fs.existsSync(defaultPath)) {
          fs.mkdirSync(defaultPath, { recursive: true });
@@ -54,6 +56,43 @@ const memoryJourneys: any[] = [];
 // Passive tracking maps (Zero Extra API Requests)
 const pendingRejectedMap = new Map<string, any>();
 const activeTradesDirectionMap = new Map<string, any>();
+const rejectedSignalDedup = new Map<string, number>();
+
+function loadJsonlTail(filePath: string, limit: number): any[] {
+   try {
+      if (!fs.existsSync(filePath)) return [];
+      const stat = fs.statSync(filePath);
+      const maxBytes = 64 * 1024 * 1024;
+      const bytesToRead = Math.min(stat.size, maxBytes);
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      const fd = fs.openSync(filePath, "r");
+      try { fs.readSync(fd, buffer, 0, bytesToRead, Math.max(0, stat.size - bytesToRead)); }
+      finally { fs.closeSync(fd); }
+      let content = buffer.toString("utf8");
+      if (stat.size > bytesToRead) {
+         const firstNewline = content.indexOf("\n");
+         content = firstNewline >= 0 ? content.slice(firstNewline + 1) : "";
+      }
+      return content.split("\n").filter(Boolean).slice(-limit).reverse().flatMap(line => {
+         try { return [JSON.parse(line)]; } catch { return []; }
+      });
+   } catch { return []; }
+}
+
+// Restore recent research data and pending rejected-signal outcome trackers on restart.
+memoryDecisions.push(...loadJsonlTail(TRADING_DECISIONS_FILE, 200));
+memoryRejected.push(...loadJsonlTail(REJECTED_SIGNALS_FILE, 200));
+memoryJourneys.push(...loadJsonlTail(TRADE_JOURNEYS_FILE, 300));
+for (const event of loadJsonlTail(REJECTED_SIGNALS_FILE, 10_000)) {
+   const signalTimeMs = new Date(event.timestamp).getTime();
+   const price = Number(event.signal_price);
+   const outcomes = event.future_outcomes || {};
+   if (!event.signal_id || !event.symbol || !Number.isFinite(signalTimeMs) || !Number.isFinite(price) || price <= 0 ||
+       Date.now() - signalTimeMs > 120 * 60_000 || (outcomes.snapshot_60m !== null && outcomes.snapshot_60m !== undefined)) continue;
+   pendingRejectedMap.set(event.signal_id, { signalId: event.signal_id, symbol: event.symbol,
+      direction: event.direction, signalPrice: price, signalTimeMs, highestSinceSignal: price,
+      lowestSinceSignal: price, targetEvent: event, completed: false });
+}
 
 let hasLoggedWriteError = false;
 let cachedSummary: any = null;
@@ -77,7 +116,17 @@ function appendJsonlSafe(filePath: string, obj: any) {
 
 function rewriteJsonlSafe(filePath: string, items: any[]) {
    try {
-      const content = items.map(item => JSON.stringify(item)).join("\n") + "\n";
+      let rows = items;
+      // Update rejection outcomes without truncating older historical records.
+      if (filePath === REJECTED_SIGNALS_FILE && fs.existsSync(filePath)) {
+         const existing = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean).flatMap(line => {
+            try { return [JSON.parse(line)]; } catch { return []; }
+         });
+         const byId = new Map<string, any>(existing.filter(item => item?.signal_id).map(item => [item.signal_id, item]));
+         for (const item of items) if (item?.signal_id) byId.set(item.signal_id, item);
+         rows = Array.from(byId.values());
+      }
+      const content = rows.map(item => JSON.stringify(item)).join("\n") + "\n";
       fs.writeFile(filePath, content, "utf8", (err) => {
          if (err && !hasLoggedWriteError) {
             hasLoggedWriteError = true;
@@ -362,7 +411,7 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    const flow = trade.reasoning?.flow;
    const loc = trade.reasoning?.location;
 
-   if (flow?.persistenceState === "CONFLICTED" || flow?.state === "MIXED") {
+   if (flow?.persistenceState === "CONFLICTED" || flow?.persistenceState === "CONFLICTED_FLOW" || flow?.persistenceState === "UNCONFIRMED" || flow?.persistenceState === "ABSORBED" || flow?.persistenceState === "FAILED_AUCTION" || flow?.state === "MIXED") {
       return "CONFLICTED_FLOW";
    }
    if (timingGate?.isLateEntry || timingGate?.state === "LATE_EXPANSION") {
@@ -374,10 +423,20 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (trade.direction === "SHORT" && loc && loc.distanceToSupportPct < 0.002) {
       return "BAD_LOCATION";
    }
-   if (trade.score < 7.0 || timingGate?.state === "WAITING_FOR_CONFIRMATION") {
+   if (trade.reasoning?.entryQuality?.cvdState === "OPPOSING") {
       return "WEAK_CONFIRMATION";
    }
-   return "GOOD_ENTRY";
+   if ((timingGate?.state === "IN_TIME" && ["ALIGNED", "ALIGNED_1M_30S"].includes(flow?.persistenceState)) ||
+       (timingGate?.state === "CONFIRMED" && flow?.persistenceState === "STRONG")) {
+      return "GOOD_ENTRY";
+   }
+   if (timingGate?.state === "EARLY_FLOW_REVERSAL" && ["EARLY_REVERSAL", "EARLY_REVERSAL_5M_TO_1M"].includes(flow?.persistenceState)) {
+      return "GOOD_ENTRY";
+   }
+   if (["WAITING_FOR_CONFIRMATION", "COUNTERTREND_WAIT_BREAK", "COUNTERTREND_WAIT_RETEST", "NO_MULTI_WINDOW_PRICE_CONFIRMATION"].includes(timingGate?.state) || flow?.persistenceState === "MODERATE") {
+      return "WEAK_CONFIRMATION";
+   }
+   return "UNKNOWN";
 }
 
 // ----------------------------------------------------------------------------
@@ -476,7 +535,13 @@ export function logRejectedSignal(payload: {
 }) {
    try {
       const { symbol, timeframe, direction, signal_score, rejection_reason, p, w, ctx, reasoning } = payload;
-      
+      const dedupKey = `${symbol}:${direction}:${String(rejection_reason).slice(0, 120)}`;
+      const lastLogged = rejectedSignalDedup.get(dedupKey) || 0;
+      if (Date.now() - lastLogged < 30_000) return;
+      rejectedSignalDedup.set(dedupKey, Date.now());
+      if (rejectedSignalDedup.size > 5000) {
+         for (const [key, at] of rejectedSignalDedup) if (Date.now() - at > 10 * 60_000) rejectedSignalDedup.delete(key);
+      }
       const signalTime = new Date();
       const signalPrice = p?.price || (p?.klines?.length ? p.klines[p.klines.length - 1].close : 0);
       const signalId = `REJ_${symbol}_${signalTime.getTime()}`;
@@ -526,6 +591,17 @@ export function logRejectedSignal(payload: {
             btc_chg: ctx?.btc_chg ?? null
          },
 
+         entry_evidence: {
+            institutional: reasoning?.institutional ?? null,
+            market_alignment: reasoning?.marketAlignment ?? null,
+            entry_quality: reasoning?.entryQuality ?? null,
+            futures_flow: w?.futuresFlow ?? null,
+            order_book: w?.orderBook ?? null,
+            oi_change: w?.oi_chg ?? null,
+            oi_available: w?.oi_available ?? false,
+            funding_rate: w?.fund ?? null,
+            cvd_slopes: { slope5m: w?.slope5 ?? null, slope15m: w?.slope15 ?? null, slope4h: w?.slope4h ?? null }
+         },
          indicators: {
             rsi: p?.rsi ?? null,
             macd_hist: p?.hist?.length ? p.hist[p.hist.length - 1] : null,
@@ -771,6 +847,9 @@ export function logTradeDecision(trade: any, exitContext: {
          symbol: trade.symbol,
          exchange: "Binance Futures (Paper)",
          timeframe: "15m",
+         entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_before_entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_during_trade_timeframe: "15m",
          side: trade.direction,
          signal_type: trade.setupType || "BREAKOUT_MOMENTUM",
          market_regime: marketRegimeContext.strategy_regime,
@@ -778,9 +857,9 @@ export function logTradeDecision(trade: any, exitContext: {
          // ═══ ENTRY TIMING & REGIME ANALYTICS ═══
          entry_timing: entryTiming,
          market_context: marketRegimeContext,
-         timing_gate_state: trade.reasoning?.timingGate?.state || "CONFIRMED",
-         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "MODERATE",
-         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? 75,
+         timing_gate_state: trade.reasoning?.timingGate?.state || "NOT_RECORDED",
+         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "NOT_RECORDED",
+         flow_persistence_score: Number.isFinite(trade.reasoning?.flow?.persistenceScore) ? trade.reasoning.flow.persistenceScore : null,
          entry_quality: entryQuality,
 
          entry_price: entryPrice,
@@ -834,6 +913,13 @@ export function logTradeDecision(trade: any, exitContext: {
             alternative_scenario: trade.reasoning?.scenario?.alternative?.type || null,
             indicators_at_entry: trade.priceData || null,
             orderflow_at_entry: trade.whaleData || null,
+            futures_flow_at_entry: trade.reasoning?.futuresFlowAtEntry || null,
+            open_interest_change_at_entry: Number.isFinite(trade.reasoning?.openInterestChangeAtEntry) ? trade.reasoning.openInterestChangeAtEntry : null,
+            order_book_at_entry: trade.reasoning?.orderBookAtEntry || null,
+            liquidation_flow_at_entry: trade.reasoning?.liquidationFlowAtEntry || null,
+            institutional_evidence_at_entry: trade.reasoning?.institutional || null,
+            entry_quality_at_entry: trade.reasoning?.entryQuality || null,
+            market_alignment_at_entry: trade.reasoning?.marketAlignment || null,
             location_at_entry: trade.reasoning?.location || null
          },
          
@@ -1123,16 +1209,30 @@ function updateSummaries(lastTrade: any) {
 // ----------------------------------------------------------------------------
 // 11. PUBLIC ACCESS API EXPORTS
 // ----------------------------------------------------------------------------
+function latestRecords(filePath: string, memory: any[], limit: number, idField: string) {
+   const safeLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit) || 100)));
+   const merged = [...memory, ...loadJsonlTail(filePath, safeLimit)];
+   const seen = new Set<string>();
+   return merged.filter(item => {
+      const id = idField === "journey"
+         ? `${item?.trade_id ?? ""}:${item?.timestamp ?? ""}`
+         : String(item?.[idField] ?? `${item?.symbol ?? ""}:${item?.timestamp ?? ""}`);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+   }).slice(0, safeLimit);
+}
+
 export function getTradingDecisionsData(limit: number = 100) {
-   return memoryDecisions.slice(0, limit);
+   return latestRecords(TRADING_DECISIONS_FILE, memoryDecisions, limit, "trade_id");
 }
 
 export function getRejectedSignalsData(limit: number = 100) {
-   return memoryRejected.slice(0, limit);
+   return latestRecords(REJECTED_SIGNALS_FILE, memoryRejected, limit, "signal_id");
 }
 
 export function getTradeJourneysData(limit: number = 100) {
-   return memoryJourneys.slice(0, limit);
+   return latestRecords(TRADE_JOURNEYS_FILE, memoryJourneys, limit, "journey");
 }
 
 export function getPerformanceSummaryData() {
@@ -1151,14 +1251,28 @@ export function getPerformanceSummaryData() {
    };
 }
 
+export function getResearchDiagnostics() {
+   return {
+      schema_version: SCHEMA_VERSION,
+      bot_version: BOT_VERSION,
+      rejected_signals_recorded: memoryRejected.length,
+      rejected_outcomes_pending: pendingRejectedMap.size,
+      directional_predictions_pending: activeTradesDirectionMap.size,
+      decisions_in_memory: memoryDecisions.length,
+      journeys_in_memory: memoryJourneys.length,
+      storage_mode: RESEARCH_DIR.startsWith(os.tmpdir()) ? "EPHEMERAL_FALLBACK" : "CONFIGURED_OR_LOCAL",
+      write_error_seen: hasLoggedWriteError
+   };
+}
+
 export function getFullExportBundle() {
    return {
       schema_version: SCHEMA_VERSION,
       exported_at: new Date().toISOString(),
       bot_version: BOT_VERSION,
       performance_summary: getPerformanceSummaryData(),
-      trading_decisions: memoryDecisions,
-      rejected_signals: memoryRejected,
-      trade_journeys: memoryJourneys
+      trading_decisions: getTradingDecisionsData(10_000),
+      rejected_signals: getRejectedSignalsData(10_000),
+      trade_journeys: getTradeJourneysData(10_000)
    };
 }

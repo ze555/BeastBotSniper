@@ -338,6 +338,23 @@ console.log("=======================================================\n");
       }
    });
    assert("Test 11b: Late entry is classified as LATE_ENTRY", lateQuality === "LATE_ENTRY");
+
+   const missingTelemetryQuality = classifyEntryQuality({
+      direction: "LONG",
+      score: 10,
+      reasoning: {}
+   });
+   assert("Test 11c: Missing entry telemetry remains UNKNOWN, never fabricated GOOD_ENTRY", missingTelemetryQuality === "UNKNOWN");
+
+   const opposingCvdQuality = classifyEntryQuality({
+      direction: "LONG",
+      reasoning: {
+         timingGate: { state: "IN_TIME", isLateEntry: false },
+         flow: { persistenceState: "ALIGNED" },
+         entryQuality: { cvdState: "OPPOSING" }
+      }
+   });
+   assert("Test 11d: Opposing multi-timeframe CVD downgrades confirmation without blocking the trade", opposingCvdQuality === "WEAK_CONFIRMATION");
 }
 
 // ----------------------------------------------------------------------------
