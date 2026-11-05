@@ -1133,14 +1133,21 @@ export function checkConfirmation(
          };
       }
       if (graduated && btcRegime === "BEAR_WEAK" && !pumpOverride) {
-         const eliteBullFlow = flow.persistenceState === "STRONG" && (w?.slope4hN ?? w?.slope4h ?? 0) > 0;
+         // v3.3: the Nov 3-4 tape was TWO-WAY (11-20 rideable up-waves per
+         // symbol, zero caught — 1 LONG in 2 days). Elite bull flow now also
+         // qualifies via the symbol's OWN strength (price above its 50EMA with
+         // positive 15m CVD) when the 4h CVD hasn't turned yet. BTC weak-bear
+         // no longer blinds us to single-asset explosions.
+         const eliteBullFlow = flow.persistenceState === "STRONG" &&
+            ((w?.slope4hN ?? w?.slope4h ?? 0) > 0 ||
+             ((p?.ema50 ?? 0) > 0 && (p?.price ?? 0) > (p?.ema50 ?? 0) && (w?.slope15N ?? w?.slope15 ?? 0) > 0));
          if (!eliteBullFlow) {
             return {
                isConfirmed: false,
                confirmedSignal: "WAIT",
-               reason: `Graduated Regime: BEAR_WEAK longs require STRONG persistent bullish orderflow with positive 4h CVD (persistence: ${flow.persistenceState}).`,
+               reason: `Graduated Regime: BEAR_WEAK longs require STRONG persistent bullish orderflow (4h CVD > 0, or price above 50EMA with positive 15m CVD) — persistence: ${flow.persistenceState}.`,
                evidence,
-               missingItems: ["STRONG flow persistence with 4h CVD > 0"]
+               missingItems: ["STRONG flow persistence with 4h CVD > 0 or own-structure strength"]
             };
          }
          suggestedRiskMult = 0.5;

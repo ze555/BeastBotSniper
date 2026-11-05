@@ -123,7 +123,14 @@ let crashRiskMult = 0.80;          // Risk multiplier for with-tape cascade entr
 let institutionalExitEnabled = true; // ICE master switch (replaces scattered reversal exits when ON)
 let iceExitScore = -55;              // cross-layer condemnation floor for EXIT without a hard pair
 let iceContinueScore = 50;           // consensus needed for ride mode
-let flowEntryGateEnabled = true;     // v3.2.1 flow entry gate (G1 positioning / G2 war-zone / G3 exhausted regime)
+let flowEntryGateEnabled = true;     // v3.3 flow entry gate (G1 positioning / G2 runway / G3 exhausted regime / G4 late-impulse)
+
+// ═══ v3.3 ICE ARMING (لا دخول وخروج فورا) ═══
+// A fresh position gets a breathing window before any ICE EXIT verdict may
+// close it; early verdicts downgrade to protective trail tightening instead.
+// Validated trigger: NVDA LONG Nov 4 — opened and ICE-closed within 60s.
+export const ICE_ARMING_MIN_MINUTES = 20;  // grace window (median time-to-MFE is 21 min)
+export const ICE_ARMING_FLOOR = -80;       // catastrophic condemnation still fires instantly
 
 // Libya Trading Schedule Config (GMT+2)
 let scheduleEnabled = true;
@@ -961,7 +968,10 @@ async function scoreEntry(symbol: string, ctx: any) {
    let layer1_sl = 0, layer1_ss = 0;
    if (ctx.regime === "BULL_STRONG") { layer1_sl += 3.0; }
    else if (ctx.regime === "BULL_WEAK") { layer1_sl += 2.0; layer1_ss += 0.5; }
-   else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 0.5; layer1_ss += 2.0; }
+   // v3.3: BEAR_WEAK long floor 0.5 → 1.0 — the Nov 3-4 tape was TWO-WAY
+   // (11-20 up-waves per symbol, zero caught) and a confirmed elite long
+   // could mathematically never reach minScore. Weak-bear ≠ one-way.
+   else if (ctx.regime === "BEAR_WEAK") { layer1_sl += 1.0; layer1_ss += 2.0; }
    else if (ctx.regime === "BEAR_STRONG") { layer1_ss += 3.0; }
    sl += layer1_sl; ss += layer1_ss;
    if (layer1_sl > 0 || layer1_ss > 0) apexPredatorStats.rules.market_context.passed++; 
@@ -1181,8 +1191,8 @@ async function scoreEntry(symbol: string, ctx: any) {
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
          }
 
-         // ═══ FLOW ENTRY GATE (v3.2.1) — اركب بداية الموجة لا بقاياها ═══
-         // G1 fresh accumulation only / G2 liquidity war-zone / G3 exhausted regime
+         // ═══ FLOW ENTRY GATE (v3.3) — اركب بداية الموجة لا بقاياها ═══
+         // G1 fresh accumulation / G2 runway / G3 exhausted regime / G4 late-impulse
          if (flowEntryGateEnabled) {
             const flowGate = evaluateFlowEntryGate({
                side: "LONG",
@@ -1191,7 +1201,8 @@ async function scoreEntry(symbol: string, ctx: any) {
                distanceToResistancePct: reasoning.location?.distanceToResistancePct,
                btcRegime: ctx.regime,
                violenceActive: (ctx as any).violence?.active === true,
-               violenceDirection: (ctx as any).violence?.direction
+               violenceDirection: (ctx as any).violence?.direction,
+               tape: { freshExtreme: lastClosedFreshExtreme(p.klines, "LONG") }
             });
             if (flowGate.blocked) {
                addLog(`🐉 [FLOW ENTRY GATE] LONG ${symbol} blocked: ${flowGate.reason}`, "warn");
@@ -1267,8 +1278,8 @@ async function scoreEntry(symbol: string, ctx: any) {
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
          }
 
-         // ═══ FLOW ENTRY GATE (v3.2.1) — اركب بداية الموجة لا بقاياها ═══
-         // G1 fresh accumulation only / G2 liquidity war-zone / G3 exhausted regime
+         // ═══ FLOW ENTRY GATE (v3.3) — اركب بداية الموجة لا بقاياها ═══
+         // G1 fresh accumulation / G2 runway / G3 exhausted regime / G4 late-impulse
          if (flowEntryGateEnabled) {
             const flowGate = evaluateFlowEntryGate({
                side: "SHORT",
@@ -1277,7 +1288,8 @@ async function scoreEntry(symbol: string, ctx: any) {
                distanceToResistancePct: reasoning.location?.distanceToResistancePct,
                btcRegime: ctx.regime,
                violenceActive: (ctx as any).violence?.active === true,
-               violenceDirection: (ctx as any).violence?.direction
+               violenceDirection: (ctx as any).violence?.direction,
+               tape: { freshExtreme: lastClosedFreshExtreme(p.klines, "SHORT") }
             });
             if (flowGate.blocked) {
                addLog(`🐉 [FLOW ENTRY GATE] SHORT ${symbol} blocked: ${flowGate.reason}`, "warn");
@@ -1365,6 +1377,40 @@ async function scoreEntry(symbol: string, ctx: any) {
          // NOTE: no chg10Pct here — fading a range edge is counter-tape BY DESIGN;
          // the reversion engine has its own exhaustion/asymmetry gates.
          const revVetoed = rev.signal === "LONG" ? vetoLong : vetoShort;
+
+         // ═══ FLOW ENTRY GATE (v3.3) — لا مزيد من الالتفاف على البوابة ═══
+         // Live forensics (Nov 3-4): the reversion path bypassed the gate and
+         // opened a SHORT on BUYING_PRESSURE flow (XLM) and a LONG on MIXED
+         // flow (NVDA — ICE-nuked after 60 seconds). Every entry path now
+         // passes the same institutional gate.
+         if (flowEntryGateEnabled) {
+            const revFlowGate = evaluateFlowEntryGate({
+               side: rev.signal,
+               flowState: reasoning.flow.state,
+               distanceToSupportPct: reasoning.location?.distanceToSupportPct,
+               distanceToResistancePct: reasoning.location?.distanceToResistancePct,
+               btcRegime: ctx.regime,
+               violenceActive: (ctx as any).violence?.active === true,
+               violenceDirection: (ctx as any).violence?.direction,
+               tape: { freshExtreme: lastClosedFreshExtreme(p.klines, rev.signal) }
+            });
+            if (revFlowGate.blocked) {
+               addLog(`🐉 [FLOW ENTRY GATE] RANGE-REVERSION ${rev.signal} ${symbol} blocked: ${revFlowGate.reason}`, "warn");
+               logRejectedSignal({
+                  symbol,
+                  timeframe: "15m",
+                  direction: rev.signal,
+                  signal_score: rev.score,
+                  rejection_reason: revFlowGate.reason,
+                  p,
+                  w,
+                  ctx,
+                  reasoning
+               });
+               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            }
+         }
+
          if (!exFilterRev.blocked && !revVetoed) {
             addLog(
                `🔁 [RANGE REVERSION] ${rev.signal} ${symbol} | conviction ${rev.score.toFixed(1)}/10 | RR ${rev.rr.toFixed(2)} | ${rev.evidence.join(" · ")}`,
@@ -1731,9 +1777,23 @@ async function exitBrain(trade: any, ctx: any) {
       t.iceTrap = iceDecision.trapDetected;
 
       if (iceDecision.state === "EXIT") {
-         addLog(`🧠 [ICE] خروج مؤكد ${t.symbol} (${t.direction}) | ${iceDecision.reason}`, "warn");
-         closeTradeFull(t, `ICE Reversal Confirmed (${iceDecision.hardReversal ?? "S6:SustainedDanger — إجماع سلبي متواصل عبر الطبقات المؤسسية"})`);
-         return;
+         // ═══ v3.3 ICE ARMING — لا دخول وخروج فورا ═══
+         // Live forensics Nov 3-4: the only LONG (NVDA) was ICE-nuked 60
+         // seconds after fill ("S6" consensus) — the exact instant in-and-out
+         // anti-pattern the user banned. A fresh position gets a grace window
+         // to breathe; early EXIT verdicts downgrade to protective tightening.
+         // Exception: catastrophic condemnation (score ≤ ICE_ARMING_FLOOR)
+         // may still fire immediately — a real crash doesn't wait.
+         const iceAgeMin = (Date.now() - new Date(t.entryTime).getTime()) / 60000;
+         const catastrophic = (t.iceScore ?? 0) <= ICE_ARMING_FLOOR;
+         if (iceAgeMin < ICE_ARMING_MIN_MINUTES && !catastrophic) {
+            if (iceDecision.trailMult) iceTrailMult = Math.min(iceTrailMult ?? iceDecision.trailMult, iceDecision.trailMult);
+            addLog(`🧠 [ICE-ARMED] ${t.symbol} (${t.direction}): حكم خروج بعد ${iceAgeMin.toFixed(0)} دقيقة فقط — نعطي الصفقة نافذة تنفس (${ICE_ARMING_MIN_MINUTES} د) مع تتبع وقائي مشدد بدل الإغلاق الفوري.`, "info");
+         } else {
+            addLog(`🧠 [ICE] خروج مؤكد ${t.symbol} (${t.direction}) | ${iceDecision.reason}`, "warn");
+            closeTradeFull(t, `ICE Reversal Confirmed (${iceDecision.hardReversal ?? "S6:SustainedDanger — إجماع سلبي متواصل عبر الطبقات المؤسسية"})`);
+            return;
+         }
       }
       if (iceDecision.state === "CONTINUE") {
          iceTrailMult = iceDecision.trailMult;
@@ -1929,6 +1989,26 @@ async function exitBrain(trade: any, ctx: any) {
 }
 
 function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close - klines[klines.length-1].open); }
+
+// ═══ v3.3 LATE-IMPULSE TAPE PROBE ═══
+// Did the last CLOSED 15m candle already print a fresh 4-candle extreme in
+// the trade direction? (SHORT: a fresh low / LONG: a fresh high.)
+// Live forensics Nov 3-4: dead entries (MFE<0.3R) jumped on the printed
+// impulse candle (13/16 fresh extremes, median rvol 1.28) while winners
+// entered on the QUIET stall candle (median rvol 0.64) — the anticipatory
+// seat. G4 uses this to refuse late tickets in mean-reverting regimes.
+function lastClosedFreshExtreme(klines: any[], side: "LONG" | "SHORT"): boolean | undefined {
+   const ks = klines || [];
+   if (ks.length < 5) return undefined;
+   const lc = ks[ks.length - 1];
+   const prev3 = ks.slice(-4, -1);
+   if (side === "SHORT") {
+      const prev3Low = Math.min(...prev3.map((k: any) => k.low));
+      return lc.low < prev3Low;
+   }
+   const prev3High = Math.max(...prev3.map((k: any) => k.high));
+   return lc.high > prev3High;
+}
 
 function closePart(t: any, part: string, pct: number) {
    const size = t.initialPos * pct;

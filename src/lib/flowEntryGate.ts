@@ -1,41 +1,56 @@
 /**
- * FLOW ENTRY GATE v3.2.1 — "اركب بداية الموجة، لا بقاياها"
- * =========================================================
- * Direction-SYMMETRIC institutional entry intelligence, validated on two
- * independent live logs + one real rally window:
+ * FLOW ENTRY GATE v3.3 — "ادخل على بداية الموجة، لا على بقاياها"
+ * ================================================================
+ * Direction-SYMMETRIC institutional entry intelligence, validated across
+ * THREE independent live logs (Oct 43 shorts, Nov-1-3 35 shorts, Nov-3-4
+ * 21 trades on v3.2.1-live) + one real rally window (Aug 19-21 mirror):
  *
- *   FRESH LOG (Nov 1-3, v3.2 live):  35 shorts  -1.89$  →  +14.66$ (G1 alone, 20 trades)
- *   OLD LOG   (Oct 29-31, v3.1.x):   43 shorts  -5.42$  →  +31.77$ (G1+G2, 13 trades, WR 69%)
- *   LONG MIRROR (Aug 19-21 rally):    9 symbols, entries 15-150 min after the true low,
- *                                     100% WR, avg +1.38R with impulse-bank exits.
+ *   OCT  log (v3.1.x, 43 shorts):  all -5.42$  → G1+room +36.10$ (9 trades)
+ *   NOV1 log (v3.2,   35 shorts):  all -1.89$  → G1      +13.77$ (20 trades)
+ *   NOV3 log (v3.2.1, 20 shorts):  all -21.77$ → fresh-impulse block +10.24$
+ *   LONG MIRROR (Aug 19-21 rally):  9 symbols, 100% WR, avg +1.38R.
  *
- * Root cause this gate kills (measured on live logs):
- *   - 15/35 fresh entries were DEAD (MFE<0.3R, no move ever came) = -41.21$
- *   - SELLING_PRESSURE (late/chase) shorts: WR 33%, -15.66$
- *     vs SHORT_BUILDUP (fresh positioning):  WR 55%, +13.77$
- *   - median time-to-MFE 21 min, median entry lag ~2.3h below the 4h high.
+ * v3.3 changes (Nov-3-4 forensics — the "sleeping monster" postmortem):
+ *   - 16/21 entries were DEAD (MFE<0.3R): the bot paid for tickets to moves
+ *     that never started. Winners (MFE>=0.3) entered with median +2.54% room
+ *     above support; dead entries with +0.44% (shelf-sitting or just-under a
+ *     freshly broken support = the exhausted chase of a printed breakdown).
+ *   - 6 trades carried entry_quality=BAD_LOCATION and executed anyway = -11.20$.
+ *   - The one LONG entered and was ICE-nuked after 60 seconds ("دخول وخروج
+ *     فورا" — the exact anti-pattern the user banned).
+ *   - RANGE_REVERSION bypassed this gate entirely (XLM short on
+ *     BUYING_PRESSURE / NVDA long on MIXED flow) — now wired.
  *
  * Rules (all evaluated at entry time — zero hindsight):
  *   G1 POSITIONING — only fresh accumulation states may open:
  *       SHORT needs flow "SHORT_BUILDUP";  LONG needs flow "LONG_BUILDUP".
- *       Chase states (SELLING_PRESSURE / BUYING_PRESSURE) mean WE would be
- *       the exit liquidity for a move already underway → BLOCKED.
- *   G2 WAR-ZONE — never open inside the liquidity shelf itself:
- *       SHORT: distanceToSupportPct    within (-0.30%, +0.12%) → blocked
- *              (standing on the support shelf, or just-under it = hunt zone;
- *               confirmed breakdowns ≤ -0.30% and clean room ≥ +0.12% pass)
- *       LONG:  distanceToResistancePct within (-0.30%, +0.12%) → blocked
- *              (leaning under the resistance wall, or just-poking above it =
- *               fake-break retest zone; confirmed breakouts pass)
+ *       Chase states (SELLING_/BUYING_PRESSURE) mean WE would be the exit
+ *       liquidity of a move already underway → BLOCKED.
+ *   G2 RUNWAY (replaces the v3.2.1 war-zone band — subsumes it):
+ *       SHORT: distanceToSupportPct    >= +1.0%  (clean room to the target)
+ *              OR <= -0.30% (confirmed breakdown) — but the breakdown leg
+ *                  only pays WITH a live DOWN cascade (crash mode); without
+ *                  it we are buying the bottom of an already-printed leg.
+ *              Everything in (-0.30%, +1.0%) = the measured dead zone.
+ *       LONG:  distanceToResistancePct mirrored, cascade must be UP.
  *   G3 EXHAUSTED REGIME — when the 4h BTC regime already screams our
  *       direction, the move is mature and we are the late money:
  *       SHORT blocked in BEAR_STRONG / LONG blocked in BULL_STRONG —
- *       EXCEPT a live cascade WITH our tape (crashRadar violence active in
- *       our direction): the only institutionally-sound time to join late
- *       is while the collapse/rally is still printing (v3.1.2 crash mode).
+ *       EXCEPT a live cascade WITH our tape (crash mode).
+ *   G4 LATE-IMPULSE (new, mean-reverting regimes only):
+ *       In BEAR_WEAK / BULL_WEAK / RANGE / TRANSITION the tape mean-reverts:
+ *       if the last CLOSED 15m candle just printed a fresh 4-candle extreme
+ *       in our trade direction, the impulse already happened and we are the
+ *       exit liquidity of the bounce → BLOCK (live cascade override keeps
+ *       crash riding). In *_STRONG regimes trends pay — the rule sleeps.
  */
 
 export type FlowEntryGateSide = "LONG" | "SHORT";
+
+export interface FlowEntryGateTape {
+   /** last CLOSED 15m candle printed a fresh 4-candle extreme in trade direction */
+   freshExtreme?: boolean;
+}
 
 export interface FlowEntryGateOpts {
    side: FlowEntryGateSide;
@@ -50,17 +65,23 @@ export interface FlowEntryGateOpts {
    /** crashRadar violence state (cascade override) */
    violenceActive?: boolean;
    violenceDirection?: "UP" | "DOWN" | "NONE";
+   /** symbol tape summary (v3.3 G4) */
+   tape?: FlowEntryGateTape;
 }
 
 export interface FlowEntryGateResult {
    blocked: boolean;
-   rule: "G1_POSITIONING" | "G2_WAR_ZONE" | "G3_EXHAUSTED_REGIME" | null;
+   rule: "G1_POSITIONING" | "G2_RUNWAY" | "G3_EXHAUSTED_REGIME" | "G4_LATE_IMPULSE" | null;
    reason: string;
 }
 
-/** Forbidden shelf band around the liquidity level (fractions). */
-export const WARZONE_SHELF_PCT = 0.0012;   // +0.12% on the safe side of the level
-export const WARZONE_BREAK_PCT = 0.0030;   // -0.30% through the level = confirmed break
+/** Minimum clean room to the liquidity target (fraction). Measured: winners
+ *  entered with median +2.54% room; dead entries +0.44%. */
+export const RUNWAY_ROOM_PCT = 0.010;
+/** Through-the-level distance that counts as a confirmed break (fraction). */
+export const WARZONE_BREAK_PCT = 0.0030;
+/** Legacy shelf edge — kept exported for compatibility. */
+export const WARZONE_SHELF_PCT = 0.0012;
 
 let enabled = true;
 
@@ -74,6 +95,12 @@ export function getFlowEntryGateConfig(): { enabled: boolean } {
 
 export function resetFlowEntryGate(): void {
    enabled = true;
+}
+
+function isMeanRevertingRegime(btcRegime: string): boolean {
+   const r = (btcRegime || "").toUpperCase();
+   return r.includes("BEAR_WEAK") || r.includes("BULL_WEAK") ||
+          r.includes("RANGE") || r.includes("TRANSITION") || r === "" || r === "UNKNOWN";
 }
 
 export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateResult {
@@ -95,24 +122,35 @@ export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateRes
       };
    }
 
-   // ── G2 WAR-ZONE: not inside the liquidity shelf ─────────────────────────
+   const cascadeDir = side === "SHORT" ? "DOWN" : "UP";
+   const cascadeLive = opts.violenceActive === true && opts.violenceDirection === cascadeDir;
+
+   // ── G2 RUNWAY: clean room to the target, or a real cascade break ────────
    const d = (side === "SHORT" ? opts.distanceToSupportPct : opts.distanceToResistancePct);
    if (d !== undefined && Number.isFinite(d)) {
-      const insideShelf = d > -WARZONE_BREAK_PCT && d < WARZONE_SHELF_PCT;
-      if (insideShelf) {
-         const level = side === "SHORT" ? "الدعم" : "المقاومة";
+      const level = side === "SHORT" ? "الدعم" : "المقاومة";
+      if (d >= RUNWAY_ROOM_PCT) {
+         // clean room — pass
+      } else if (d <= -WARZONE_BREAK_PCT) {
+         // confirmed structural break — only pays while the cascade is live
+         if (!cascadeLive) {
+            return {
+               blocked: true,
+               rule: "G2_RUNWAY",
+               reason: `Flow Entry Gate [G2-RUNWAY-BREAK]: ${(d * 100).toFixed(2)}% من ${level} — اختراق انطبع بالفعل بدون انهيار/انفجار حي: الساق استُهلكت ودخولك الآن شراء قاعها. يُسمح فقط أثناء كسكيد حي مع التيبر.`
+            };
+         }
+      } else {
          return {
             blocked: true,
-            rule: "G2_WAR_ZONE",
-            reason: `Flow Entry Gate [G2-WAR-ZONE]: ${(d * 100).toFixed(2)}% من ${level} — داخل منطقة الحرب (صيد وقف الخسائر). إما مسافة ≥ +0.12% أو اختراق مؤكد ≤ -0.30%.`
+            rule: "G2_RUNWAY",
+            reason: `Flow Entry Gate [G2-RUNWAY]: ${(d * 100).toFixed(2)}% من ${level} — المنطقة الميتة المقاسة (فوق الرف بلا مساحة كافية): 36% من صفقات نوفمبر ماتت هنا (MFE<0.3R). المطلوب مساحة ≥ +1.0% للهدف، أو اختراق ≤ -0.30% مع كسكيد حي.`
          };
       }
    }
 
    // ── G3 EXHAUSTED REGIME: the move is mature unless a live cascade prints ─
    const exhaustedRegime = side === "SHORT" ? "BEAR_STRONG" : "BULL_STRONG";
-   const cascadeDir = side === "SHORT" ? "DOWN" : "UP";
-   const cascadeLive = opts.violenceActive === true && opts.violenceDirection === cascadeDir;
    if (btcRegime === exhaustedRegime && !cascadeLive) {
       return {
          blocked: true,
@@ -121,5 +159,14 @@ export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateRes
       };
    }
 
-   return { blocked: false, rule: null, reason: side === "SHORT" ? "تراكم شورت طازج خارج منطقة الحرب" : "تراكم لونق طازج خارج منطقة الحرب" };
+   // ── G4 LATE-IMPULSE: never buy the printed candle in mean-reverting tape ─
+   if (opts.tape?.freshExtreme === true && !cascadeLive && isMeanRevertingRegime(btcRegime)) {
+      return {
+         blocked: true,
+         rule: "G4_LATE_IMPULSE",
+         reason: `Flow Entry Gate [G4-LATE-IMPULSE]: آخر شمعة 15m طبعت قمة/قاعاً جديداً في اتجاه الصفقة والنظام (${btcRegime}) ارتادي — الاندفاع انطباع بالفعل؛ الانتظار حتى يرتد/يهدا الشريط ثم نركب البداية التالية (يسري فقط في الأنظمة الضعيفة/العرضية).`
+      };
+   }
+
+   return { blocked: false, rule: null, reason: side === "SHORT" ? "تراكم شورت طازج مع مدرج هبوط نظيف" : "تراكم لونق طازج مع مدرج صعود نظيف" };
 }

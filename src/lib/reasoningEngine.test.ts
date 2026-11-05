@@ -403,8 +403,9 @@ console.log("=======================================================\n");
    assert("Test 14a: LONG blocked when BTC is BEAR_STRONG", conf1.isConfirmed === false);
    assert("Test 14b: Reason mentions Strict Bear Regime", conf1.reason.includes("Strict Bear Regime"));
 
-   // BTC is BEAR_WEAK with RAW negative 4h flow (no normalized evidence) → graduated block
-   const weakWhale = { ...mockWhale, slope4h: -500 };
+   // BTC is BEAR_WEAK with RAW negative 4h flow AND no own-structure strength
+   // (15m CVD negative) → graduated block (v3.3: own-structure is a second path)
+   const weakWhale = { ...mockWhale, slope4h: -500, slope15: -210, slope5: -70 };
    const conf2 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, weakWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
    assert("Test 14c: LONG blocked when BTC is BEAR_WEAK without normalized flow", conf2.isConfirmed === false);
    assert("Test 14d: Reason mentions Graduated Regime", conf2.reason.includes("Graduated Regime"));
@@ -414,6 +415,19 @@ console.log("=======================================================\n");
    const conf3 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, mockPrice, eliteWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
    assert("Test 14e: LONG allowed at BEAR_WEAK with elite bull flow (graduated)", conf3.isConfirmed === true);
    assert("Test 14f: Elite flow long suggests 0.5x risk", conf3.suggestedRiskMult === 0.5);
+
+   // v3.3: own-structure elite path — symbol above its 50EMA with positive 15m
+   // CVD qualifies even when the 4h CVD hasn't turned (two-way tape fix).
+   const ownStrengthWhale = { ...mockWhale, slope4h: -500, slope15N: 0.8 };
+   const ownStrengthPrice = { ...mockPrice, ema50: 99.0 };
+   const conf4 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, ownStrengthPrice, ownStrengthWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
+   assert("Test 14g (v3.3): LONG allowed at BEAR_WEAK via own-structure strength (price>50EMA, 15m CVD>0)", conf4.isConfirmed === true);
+   assert("Test 14h (v3.3): Own-structure long still at 0.5x risk", conf4.suggestedRiskMult === 0.5);
+
+   // v3.3 negative: below the 50EMA the own-structure path must NOT qualify
+   const belowEmaPrice = { ...mockPrice, ema50: 115 };
+   const conf5 = checkConfirmation("TRANSITION", flow, loc, scenario, timing, belowEmaPrice, ownStrengthWhale, { sl: 8.5, ss: 3.0 }, { regime: "BEAR_WEAK" });
+   assert("Test 14i (v3.3): LONG blocked when below 50EMA with negative 4h CVD", conf5.isConfirmed === false);
 }
 
 // ----------------------------------------------------------------------------
