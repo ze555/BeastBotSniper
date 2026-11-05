@@ -7,6 +7,7 @@ export interface EntryFlowSnapshot {
   buyQuote1m?: number; sellQuote1m?: number; trades1m?: number;
   buyQuote5m?: number; sellQuote5m?: number; trades5m?: number;
   priceChange30sPct?: number | null; priceChange1mPct?: number | null; priceChange5mPct?: number | null;
+  coverage1mMs?: number; coverage5mMs?: number;
 }
 export interface EntryQualityInput {
   side: EntrySide; price: number; atr: number; now: number;
@@ -55,8 +56,10 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
   const impulse30s = impulse(buy30, sell30);
   const impulse1m = impulse(buy1m, sell1m);
   const impulse5m = impulse(buy5m, sell5m);
-  const has1m = finite(f.buyQuote1m) && finite(f.sellQuote1m) && finite(f.trades1m) && f.trades1m >= 5;
-  const has5m = finite(f.buyQuote5m) && finite(f.sellQuote5m) && finite(f.trades5m) && f.trades5m >= 10 && buy5m + sell5m > 0;
+  const has1m = finite(f.buyQuote1m) && finite(f.sellQuote1m) && finite(f.trades1m) && f.trades1m >= 5 &&
+    (!finite(f.coverage1mMs) || f.coverage1mMs >= 45_000);
+  const has5m = finite(f.buyQuote5m) && finite(f.sellQuote5m) && finite(f.trades5m) && f.trades5m >= 10 &&
+    (!finite(f.coverage5mMs) || f.coverage5mMs >= 180_000) && buy5m + sell5m > 0;
   if (finite(f.trades1m) && f.trades1m < 5) return insufficient("Not enough executed Futures prints in the 1m confirmation window.");
   const sign = input.side === "LONG" ? 1 : -1;
   const directed30 = impulse30s * sign;
