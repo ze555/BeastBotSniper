@@ -17,7 +17,8 @@ import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
 import { evaluateEntryQuality } from "./entryQualityEngine.js";
 import { evaluateReverseWave } from "./reverseWaveEngine.js";
-import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus } from "./futuresWaveFeed.js";
+import { evaluateMarketAlignment } from "./marketAlignmentEngine.js";
+import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus, getFuturesBookFlow } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
@@ -28,6 +29,7 @@ let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
+let riskLockLoggedAt = 0;
 
 // Symbol-level cooldowns are disabled. Re-entry is governed by fresh wave evidence,
 // active-position checks, structural invalidation and execution feasibility.
@@ -185,6 +187,8 @@ export function getClosedTrades() { return closedTrades; }
 export function getStats() { 
   const freeTradesCount = activeTrades.filter(t => t.be_done).length;
   const riskedTradesCount = activeTrades.filter(t => !t.be_done).length;
+  const todayFloatingPnl = activeTrades.reduce((sum, trade) => sum + (Number(trade.pnl) || 0), 0);
+  const todayNetPnl = todaysStats.pnl + todayFloatingPnl;
 
   return { 
     ...apexPredatorStats,
@@ -215,8 +219,10 @@ export function getStats() {
     libyaClose1,
     libyaOpen2,
     libyaClose2,
-    isSleeping: !isLibyaTradingAllowed(),
-    today: todaysStats 
+    isSleeping: false,
+    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && (virtualBalance - initialVirtualBalance) <= -haltLossTarget) || (haltProfitEnabled && (virtualBalance - initialVirtualBalance) >= haltProfitTarget),
+    scannerMode: "CONTINUOUS_DISCOVERY_WITH_EXECUTION_GUARDS",
+    today: { ...todaysStats, floatingPnl: todayFloatingPnl, netPnl: todayNetPnl } 
   }; 
 }
 export function getConfig() {
@@ -483,6 +489,8 @@ async function fetchFuturesAggressorFlow(symbol: string) {
 }
 
 async function fetchOrderBookEvidence(symbol: string) {
+   const liveBook = getFuturesBookFlow(symbol);
+   if (liveBook && liveBook.sampleCount >= 3 && Date.now() - liveBook.observedAt <= 2_000) return liveBook;
    const cached = getCached<any>(depthCache, symbol);
    if (cached) return cached;
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/depth`, { params: { symbol, limit: 20 }, timeout: 5000 });
@@ -594,6 +602,8 @@ async function getContext() {
 
    return {
       regime,
+      btcCandles4h: btc4h,
+      btcCandles15m: btc15m,
       tradeable: !btc_whipsaw, // Only block completely during erratic 2-way whipsaws!
       tradeableDirection: btc_dump ? "SHORT_ONLY" : (btc_pump ? "LONG_ONLY" : "BOTH"),
       btc_dump,
@@ -688,7 +698,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15, slope4h
+      asset_strong, c15, c5, c4h, slope5, slope15, slope4h
    };
 }
 
@@ -803,11 +813,16 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
    };
 }
 
+// Every rejected candidate is retained for passive outcome measurement. Logger deduplicates repeated scans.
+function recordEntryRejection(symbol: string, direction: "LONG" | "SHORT" | "WAIT", reason: string, p: any, w: any, ctx: any, reasoning?: any) {
+   if (!p || !w) return;
+   logRejectedSignal({ symbol, timeframe: "1m", direction, signal_score: 0, rejection_reason: reason, p, w, ctx, reasoning });
+}
+
 // --- SEC 4: INSTITUTIONAL EVIDENCE ENTRY ENGINE (NO SCORE) ---
 async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
-   // BTC is context only: a market-wide BTC whipsaw must not suppress an independently violent altcoin Futures wave.
-   if (!isLibyaTradingAllowed()) return { signal: "WAIT", reason: "OUTSIDE_LIBYA_HOURS" };
+   // BTC and session are context only; scanner discovery remains continuous.
 
    const w = await readWhale(symbol, ctx.btc_chg);
    const p: any = await readPrice(symbol, w.c15, w.c5);
@@ -856,18 +871,41 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    p.institutionalInvalidation = institutional.metrics.invalidationLevel;
    if (institutional.state === "DATA_INSUFFICIENT") {
       addLog(`⛔ ${symbol}: Institutional entry blocked — ${institutional.reason} Missing: ${institutional.missingEvidence.join(", ")}`, "warn");
+      recordEntryRejection(symbol, institutional.direction === "LONG" || institutional.direction === "SHORT" ? institutional.direction : "WAIT", institutional.reason, p, w, ctx, { institutional });
       return { signal: "WAIT", reason: institutional.reason, p, w, ctx, institutional };
    }
    if (!institutional.canEnter || institutional.direction === "NONE") {
       if (institutional.state !== "DORMANT") {
          addLog(`🔎 ${symbol}: ${institutional.state} — ${institutional.reason}`, "info");
       }
+      recordEntryRejection(symbol, institutional.direction === "LONG" || institutional.direction === "SHORT" ? institutional.direction : "WAIT", institutional.reason, p, w, ctx, { institutional });
       return { signal: "WAIT", reason: institutional.reason, p, w, ctx, institutional };
    }
 
    const direction = institutional.direction;
+   if (direction === "LONG") apexPredatorStats.totalLongScanned++;
+   else apexPredatorStats.totalShortScanned++;
    const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop() || p.atr14;
    p.waveAtr = waveAtr;
+   const flow = w.futuresFlow;
+   const flowImbalance = (buy: number, sell: number) => (buy - sell) / Math.max(buy + sell, 1e-9);
+   const marketAlignment = evaluateMarketAlignment({
+      side: direction,
+      symbol,
+      btcCandles4h: ctx.btcCandles4h || [], btcCandles15m: ctx.btcCandles15m || [], btcRegime: ctx.regime,
+      candles4h: w.c4h || [], candles15m: w.c15 || [], candles5m: w.c5 || [], candles1m: waveCandles,
+      price: wavePrice, atr1m: waveAtr,
+      flowImbalance30s: flow ? flowImbalance(flow.buyQuote30s, flow.sellQuote30s) : 0,
+      flowImbalance1m: flow ? flowImbalance(flow.buyQuote1m, flow.sellQuote1m) : 0,
+      now: Date.now()
+   });
+   p.marketAlignment = marketAlignment;
+   if (!marketAlignment.allowed) {
+      addLog(`⏳ ${symbol} ${direction}: ${marketAlignment.state} | ${marketAlignment.reasons.join(" | ")}`, "info");
+      recordEntryRejection(symbol, direction, marketAlignment.reasons.join(" | "), p, w, ctx, { institutional, marketAlignment });
+      return { signal: "WAIT", reason: marketAlignment.reasons.join(" | "), p, w, ctx, institutional, marketAlignment };
+   }
+
    const entryQuality = evaluateEntryQuality({
       side: direction,
       price: wavePrice,
@@ -883,12 +921,14 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    });
    if (!entryQuality.allowed) {
       addLog(`⛔ ${symbol}: Entry quality gate — ${entryQuality.quality}: ${entryQuality.reasons.join(" | ")}`, "warn");
-      return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality };
+      recordEntryRejection(symbol, direction, entryQuality.reasons.join(" | "), p, w, ctx, { institutional, marketAlignment, entryQuality });
+      return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality, marketAlignment };
    }
    const invalidation = institutional.metrics.invalidationLevel;
    if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(p.atr14 > 0)) {
       addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
-      return { signal: "WAIT", reason: "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, institutional };
+      recordEntryRejection(symbol, direction, "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, { institutional, marketAlignment, entryQuality });
+      return { signal: "WAIT", reason: "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, institutional, marketAlignment, entryQuality };
    }
 
    const reasoning: any = {
@@ -910,6 +950,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
          persistenceScore: entryQuality.flow.persistenceScore
       },
       entryQuality,
+      marketAlignment,
       entryTimeframe: "1m+30s execution / 5m context",
       futuresFlowAtEntry: w.futuresFlow,
       entryDecisionWindows: { context: "5m", confirmation: "1m", execution: "30s", optionalMicrostructure: "5s" },
@@ -930,7 +971,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       signal: direction,
       grade,
       setupType: institutional.entryType === "EARLY_IGNITION" ? "INSTITUTIONAL_IGNITION" : "INSTITUTIONAL_BREAKOUT",
-      p, w, ctx, reasoning, institutional, entryQuality
+      p, w, ctx, reasoning, institutional, entryQuality, marketAlignment
    };
 }
 
@@ -1103,6 +1144,8 @@ async function exitBrain(trade: any, ctx: any) {
    
    const price = p.price;
    t.currentPrice = price;
+   updateDirectionTracking(t.symbol, price);
+   updateRejectedSignalsOutcomes(t.symbol, price, p.klines);
 
    const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
    const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
@@ -1374,18 +1417,11 @@ export async function runApexLoop() {
       }
       let currentNetPnl = totalRealizedPnl + totalFloatingPnl;
       
-      if (haltProfitEnabled && currentNetPnl >= haltProfitTarget) {
-         botActive = false;
-         isLoopRunning = false;
-         addLog(`🛑 تحقيق هدف الربح ($${haltProfitTarget})، تم إيقاف الروبوت.`, "success");
-         return;
-      }
-      
-      if (haltLossEnabled && currentNetPnl <= -haltLossTarget) {
-         botActive = false;
-         isLoopRunning = false;
-         addLog(`🛑 الوصول لحد الخسارة المحدد ($${haltLossTarget})، تم إيقاف الروبوت.`, "error");
-         return;
+      const profitExecutionLocked = haltProfitEnabled && currentNetPnl >= haltProfitTarget;
+      const configuredLossExecutionLocked = haltLossEnabled && currentNetPnl <= -haltLossTarget;
+      if ((profitExecutionLocked || configuredLossExecutionLocked) && Date.now() - riskLockLoggedAt >= 5 * 60_000) {
+         riskLockLoggedAt = Date.now();
+         addLog(`🛡️ EXECUTION LOCK: configured ${profitExecutionLocked ? "profit" : "loss"} threshold reached. Scanner and passive research continue; new entries are paused.`, profitExecutionLocked ? "success" : "error");
       }
 
       // Daily Loss Limit Protection (4% of initial balance, including floating PnL)
@@ -1396,10 +1432,10 @@ export async function runApexLoop() {
       }
       const totalDailyPnl = todaysStats.pnl + openFloatingPnl;
 
-      if (totalDailyPnl <= -dailyLossLimit) {
-         addLog(`🛑 DAILY LOSS LIMIT REACHED: إجمالي خسارة اليوم (محققة + عائمة) $${totalDailyPnl.toFixed(2)} بلغت الحد الأقصى -$${dailyLossLimit.toFixed(2)} (4%). تم منع فتح صفقات جديدة لهذا اليوم مع استمرار إدارة الصفقات المفتوحة.`, "error");
-         isLoopRunning = false;
-         return; // Only skip scanning and new trade entry for this cycle, keeping bot active to manage existing trades!
+      const dailyRiskLocked = totalDailyPnl <= -dailyLossLimit || profitExecutionLocked || configuredLossExecutionLocked;
+      if (dailyRiskLocked && Date.now() - riskLockLoggedAt >= 5 * 60_000) {
+         riskLockLoggedAt = Date.now();
+         addLog(`🛑 DAILY EXECUTION LOCK: PnL ${totalDailyPnl.toFixed(2)} crossed -${dailyLossLimit.toFixed(2)}. Positions remain managed; market discovery and paper signal/outcome logging continue without opening trades.`, "error");
       }
 
       // BTC is a context variable only. It must not veto an independently confirmed violent Futures move in an altcoin.
@@ -1409,6 +1445,7 @@ export async function runApexLoop() {
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
       const canOpenMore = () => {
+         if (dailyRiskLocked) return false;
          const currentRisked = activeTrades.filter(t => !t.be_done).length;
          if (freeTradeSlotEnabled) {
             return currentRisked < maxOpenTradesConfig && activeTrades.length < (maxOpenTradesConfig + 2);
@@ -1416,16 +1453,8 @@ export async function runApexLoop() {
          return activeTrades.length < maxOpenTradesConfig;
       };
 
-      if (!canOpenMore()) {
-         isLoopRunning = false;
-         return;
-      }
-
-      // Check Libya Schedule before opening new trades
-      if (!isLibyaTradingAllowed()) {
-         isLoopRunning = false;
-         return;
-      }
+      // Discovery continues even when execution is risk-locked or all position slots are occupied.
+      // canOpenMore() is consulted only at the moment of execution.
 
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
@@ -1433,7 +1462,6 @@ export async function runApexLoop() {
          .filter(sym => !activeTrades.some(t => t.symbol === sym));
       const hotChunkSize = 5;
       for (let i = 0; i < hotCandidates.length; i += hotChunkSize) {
-         if (!canOpenMore()) break;
          const chunk = hotCandidates.slice(i, i + hotChunkSize);
          const promises = chunk.map(async (sym: string) => {
             if (activeTrades.some(t => t.symbol === sym)) return null;
@@ -1449,20 +1477,13 @@ export async function runApexLoop() {
          for (const res of results) {
             if (res.status === "fulfilled" && res.value) {
                const { sym, dec } = res.value;
-               if (!canOpenMore()) break;
                if (activeTrades.some(t => t.symbol === sym)) continue;
-               if (dec.signal === "LONG" || dec.signal === "SHORT") {
-                  executeTrade(sym, dec);
-               }
+               if (canOpenMore() && (dec.signal === "LONG" || dec.signal === "SHORT")) executeTrade(sym, dec);
             }
          }
       }
 
-      // If available capacity was filled by hot momentum mover, end cycle
-      if (!canOpenMore()) {
-         isLoopRunning = false;
-         return;
-      }
+      // Continue broad-universe discovery regardless of execution capacity.
 
       // ═══ STAGE 2: BROADER UNIVERSE ROTATION (Round-Robin Batch) ═══
       if (currentBatchIndex >= WATCHLIST.length) {
@@ -1483,7 +1504,6 @@ export async function runApexLoop() {
       // Process batch symbols in fast concurrent chunks of 5
       const chunkSize = 5;
       for (let i = 0; i < batchSymbols.length; i += chunkSize) {
-         if (!canOpenMore()) break;
          const chunk = batchSymbols.slice(i, i + chunkSize);
          const promises = chunk.map(async (sym: string) => {
             if (activeTrades.some(t => t.symbol === sym)) return null;
@@ -1499,11 +1519,8 @@ export async function runApexLoop() {
          for (const res of results) {
             if (res.status === "fulfilled" && res.value) {
                const { sym, dec } = res.value;
-               if (!canOpenMore()) break;
                if (activeTrades.some(t => t.symbol === sym)) continue;
-               if (dec.signal === "LONG" || dec.signal === "SHORT") {
-                  executeTrade(sym, dec);
-               }
+               if (canOpenMore() && (dec.signal === "LONG" || dec.signal === "SHORT")) executeTrade(sym, dec);
             }
          }
       }

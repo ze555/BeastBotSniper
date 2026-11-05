@@ -1,3 +1,4 @@
+import { updateDirectionTracking, updateRejectedSignalsOutcomes } from "./researchLogger.js";
 import WebSocket from "ws";
 
 export interface FuturesTapeTrade {
@@ -37,6 +38,8 @@ export interface FuturesTapeFlow {
 }
 type SocketState = { socket: WebSocket; reconnect?: ReturnType<typeof setTimeout> };
 const tapeBySymbol = new Map<string, FuturesTapeTrade[]>();
+type DepthSample = { bidNotional: number; askNotional: number; spreadBps: number; observedAt: number };
+const depthBySymbol = new Map<string, DepthSample[]>();
 const sockets: SocketState[] = [];
 const liquidationTape = new Map<string, Array<{ side: "LONG_LIQUIDATION" | "SHORT_LIQUIDATION"; quote: number; timestamp: number }>>();
 let liquidationSocket: WebSocket | null = null;
@@ -50,6 +53,29 @@ function pruneTape(symbol: string, now: number) {
   if (keep.length) tapeBySymbol.set(symbol, keep);
   else tapeBySymbol.delete(symbol);
 }
+export function recordFuturesDepth(symbol: string, bids: any[], asks: any[], observedAt = Date.now()) {
+  if (!symbol || !Array.isArray(bids) || !Array.isArray(asks) || !bids.length || !asks.length) return;
+  const bidNotional = bids.slice(0, 5).reduce((sum, level) => sum + Number(level[0]) * Number(level[1]), 0);
+  const askNotional = asks.slice(0, 5).reduce((sum, level) => sum + Number(level[0]) * Number(level[1]), 0);
+  const bestBid = Number(bids[0][0]), bestAsk = Number(asks[0][0]);
+  if (![bidNotional, askNotional, bestBid, bestAsk].every(Number.isFinite) || bidNotional <= 0 || askNotional <= 0 || bestBid <= 0 || bestAsk < bestBid) return;
+  const mid = (bestBid + bestAsk) / 2;
+  const rows = depthBySymbol.get(symbol) || [];
+  rows.push({ bidNotional, askNotional, spreadBps: (bestAsk - bestBid) / mid * 10000, observedAt });
+  while (rows.length > 80 || (rows.length && observedAt - rows[0].observedAt > 90_000)) rows.shift();
+  depthBySymbol.set(symbol, rows);
+}
+export function getFuturesBookFlow(symbol: string, now = Date.now()) {
+  const rows = (depthBySymbol.get(symbol) || []).filter(row => now - row.observedAt <= 5_000);
+  if (rows.length < 3) return null;
+  const first = rows[0], last = rows[rows.length - 1];
+  return { bidNotional: last.bidNotional, askNotional: last.askNotional,
+    bidDepthChangePct: (last.bidNotional - first.bidNotional) / Math.max(first.bidNotional, 1) * 100,
+    askDepthChangePct: (last.askNotional - first.askNotional) / Math.max(first.askNotional, 1) * 100,
+    spreadBps: last.spreadBps, observedAt: last.observedAt, sampleCount: rows.length,
+    sampleWindowMs: last.observedAt - first.observedAt, source: "BINANCE_DEPTH5_WS" as const };
+}
+
 export function recordFuturesTrade(symbol: string, trade: FuturesTapeTrade) {
   if (!symbol || ![trade.price, trade.quantity, trade.quote, trade.timestamp].every(Number.isFinite) ||
       trade.price <= 0 || trade.quantity <= 0 || trade.quote <= 0) return;
@@ -165,19 +191,23 @@ function closeSockets() {
   }
 }
 function connectShard(symbols: string[]) {
-  const streams = symbols.map(s => `${s.toLowerCase()}@aggTrade`).join("/");
+  const streams = symbols.flatMap(s => [`${s.toLowerCase()}@aggTrade`, `${s.toLowerCase()}@depth5@100ms`]).join("/");
   const state: SocketState = { socket: new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`) };
   sockets.push(state);
   state.socket.on("message", raw => {
     try {
       const packet = JSON.parse(raw.toString());
       const d = packet?.data;
-      if (!d || d.e !== "aggTrade" || typeof d.s !== "string") return;
-      const price = Number(d.p), quantity = Number(d.q), timestamp = Number(d.T);
-      recordFuturesTrade(d.s, {
-        price, quantity, quote: price * quantity,
-        buyerIsMaker: d.m === true, timestamp
-      });
+      if (!d || typeof d.s !== "string") return;
+      if (d.e === "aggTrade") {
+        const price = Number(d.p), quantity = Number(d.q), timestamp = Number(d.T);
+        recordFuturesTrade(d.s, { price, quantity, quote: price * quantity, buyerIsMaker: d.m === true, timestamp });
+        // Passive outcome tracking uses the live Futures tape; it does not depend on scanner eligibility.
+        updateDirectionTracking(d.s, price);
+        updateRejectedSignalsOutcomes(d.s, price);
+      } else if (Array.isArray(d.b) && Array.isArray(d.a)) {
+        recordFuturesDepth(d.s, d.b, d.a, Number(packet.data?.E || Date.now()));
+      }
     } catch { /* malformed stream packet is ignored; REST fallback remains available */ }
   });
   const reconnect = () => {
@@ -238,7 +268,7 @@ export function startFuturesWaveFeed(symbols: string[]) {
   configuredSymbols = fingerprint;
   closeSockets();
   // Binance combined-stream shards are deliberately kept small for URL/connection resilience.
-  for (let i = 0; i < normalized.length; i += 100) connectShard(normalized.slice(i, i + 100));
+  for (let i = 0; i < normalized.length; i += 50) connectShard(normalized.slice(i, i + 50));
   connectLiquidationStream();
 }
 export function stopFuturesWaveFeed() {
@@ -246,9 +276,16 @@ export function stopFuturesWaveFeed() {
   configuredSymbols = "";
   closeSockets();
   tapeBySymbol.clear();
+  depthBySymbol.clear();
   liquidationTape.clear();
   liquidationSocket = null;
 }
 export function getFuturesWaveFeedStatus() {
-  return { configured: started, symbols: configuredSymbols ? configuredSymbols.split(",").length : 0, connections: sockets.length, liquidationFeedConnected: Boolean(liquidationSocket && liquidationSocket.readyState === WebSocket.OPEN) };
+  const openConnections = sockets.filter(state => state.socket.readyState === WebSocket.OPEN).length;
+  const now = Date.now();
+  const symbolsWithFreshTape = Array.from(tapeBySymbol.values()).filter(rows => rows.length && now - rows[rows.length - 1].timestamp <= 30_000).length;
+  const symbolsWithDepth = Array.from(depthBySymbol.values()).filter(rows => rows.length >= 3 && now - rows[rows.length - 1].observedAt <= 5_000).length;
+  return { configured: started, symbols: configuredSymbols ? configuredSymbols.split(",").length : 0,
+    connections: sockets.length, openConnections, symbolsWithFreshTape, symbolsWithDepth,
+    liquidationFeedConnected: Boolean(liquidationSocket && liquidationSocket.readyState === WebSocket.OPEN) };
 }

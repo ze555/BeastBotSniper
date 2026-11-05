@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getFuturesTapeFlow, getFuturesWaveCandidates, recordFuturesTrade, getFuturesLiquidationFlow, recordFuturesLiquidation } from "./futuresWaveFeed.js";
+import { getFuturesTapeFlow, getFuturesWaveCandidates, recordFuturesTrade, getFuturesLiquidationFlow, recordFuturesLiquidation, recordFuturesDepth, getFuturesBookFlow } from "./futuresWaveFeed.js";
 
 const now = 1_800_000_000_000;
 for (let i = 0; i < 12; i++) {
@@ -39,6 +39,14 @@ assert.ok(getFuturesWaveCandidates(now).includes("MICROUSDT"), "low-notional rel
 recordFuturesTrade("AKEUSDT", { price: 0.5, quantity: 100, quote: 50, buyerIsMaker: false, timestamp: now + 5_000 });
 const noLookahead = getFuturesTapeFlow("AKEUSDT", now);
 assert.equal(noLookahead!.observedAt, flow!.observedAt, "future trades must not leak into the current 5m/1m/30s snapshot");
+
+for (let i = 0; i < 4; i++) {
+  recordFuturesDepth("AKEUSDT", [[1.0, 100 + i * 10]], [[1.01, 100 - i * 5]], now - 600 + i * 200);
+}
+const book = getFuturesBookFlow("AKEUSDT", now);
+assert.ok(book, "repeated depth5 websocket snapshots should produce a book persistence sample");
+assert.equal(book!.sampleCount, 4);
+assert.ok(book!.bidDepthChangePct > 0 && book!.askDepthChangePct < 0);
 
 recordFuturesLiquidation("AKEUSDT", "LONG_LIQUIDATION", 12_500, now);
 recordFuturesLiquidation("AKEUSDT", "SHORT_LIQUIDATION", 2_000, now);

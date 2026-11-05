@@ -35,11 +35,13 @@ export interface OrderBookEvidence {
   bidNotional: number;
   askNotional: number;
   spreadBps: number;
-  /** Sampled REST snapshot deltas; not exchange depth-diff events. */
+  /** Repeated partial-book snapshots; depth changes can reflect fills or cancellations. */
   bidDepthChangePct?: number | null;
   askDepthChangePct?: number | null;
+  sampleCount?: number;
+  sampleWindowMs?: number;
   observedAt: number;
-  source: "BINANCE_DEPTH";
+  source: "BINANCE_DEPTH" | "BINANCE_DEPTH5_WS";
 }
 export interface InstitutionalSnapshot {
   symbol: string;
@@ -104,9 +106,11 @@ function tradeFlowValid(flow: AggressorFlow | null, now: number): flow is Aggres
     fresh(flow.observedAt, now, 30_000);
 }
 function bookValid(book: OrderBookEvidence | null, now: number): book is OrderBookEvidence {
-  return !!book && book.source === "BINANCE_DEPTH" && finite(book.bidNotional) && finite(book.askNotional) &&
-    book.bidNotional >= 0 && book.askNotional >= 0 && finite(book.spreadBps) && book.spreadBps >= 0 &&
-    fresh(book.observedAt, now, 8_000);
+  if (!book || (book.source !== "BINANCE_DEPTH" && book.source !== "BINANCE_DEPTH5_WS") ||
+      !finite(book.bidNotional) || !finite(book.askNotional) || book.bidNotional < 0 || book.askNotional < 0 ||
+      !finite(book.spreadBps) || book.spreadBps < 0 || !fresh(book.observedAt, now, 8_000)) return false;
+  if (book.source === "BINANCE_DEPTH5_WS") return Number.isInteger(book.sampleCount) && book.sampleCount! >= 3 && finite(book.sampleWindowMs) && book.sampleWindowMs! >= 200;
+  return true;
 }
 function liquidationValid(flow: LiquidationFlowEvidence | null | undefined, now: number): flow is LiquidationFlowEvidence {
   return !!flow && flow.source === "BINANCE_FORCE_ORDER" &&
