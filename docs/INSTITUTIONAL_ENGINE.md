@@ -75,3 +75,5 @@ No merge to main or production deployment is part of this branch.
 - The scanner universe, candidate flow, Top-N behavior, cooldowns, session access, and TP/SL settings are unchanged.
 - Rolling Futures tape and REST fallback now report actual 1m/5m time coverage. A partial 5m sample is not misrepresented as a full 5m context; 1m/30s ignition remains eligible.
 - Tick-level replay with historical Futures tape/book/OI data is still required before claiming profitability improvement or deploying to production.
+
+- Multi-timeframe CVD confirmation currently uses Binance Futures kline taker-buy minus taker-sell volume as a candle-derived proxy; it is not a full tick-by-tick exchange-wide CVD feed.
