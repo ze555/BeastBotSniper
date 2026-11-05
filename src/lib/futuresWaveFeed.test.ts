@@ -14,6 +14,7 @@ assert.ok(flow!.sellQuote > flow!.buyQuote, "seller aggressors must be classifie
 assert.equal(flow!.trades5s, 2);
 assert.equal(flow!.trades1m, 12, "1m tape is retained independently from the 30s execution window");
 assert.equal(flow!.trades5m, 12, "5m tape context is retained for entry decisions");
+assert.ok(flow!.coverage5mMs >= 9_000 && flow!.coverage5mMs <= 300_000, "5m context must expose actual observed coverage");
 assert.ok(flow!.sellQuote5m > flow!.buyQuote5m);
 assert.ok(getFuturesWaveCandidates(now).includes("AKEUSDT"), "violent downward Futures impulse should enter the candidate queue");
 
