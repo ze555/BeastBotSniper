@@ -16,6 +16,8 @@ const breakoutCandles = [...base.candles1m.slice(0, -1), { open: 98.0, high: 99.
 const breakout = evaluateMarketAlignment({ ...base, candles1m: breakoutCandles, now: 1_000_015 });
 assert.equal(breakout.allowed, false);
 assert.equal(breakout.state, "COUNTERTREND_WAIT_RETEST");
+const sameCandle = evaluateMarketAlignment({ ...base, candles1m: breakoutCandles, now: 1_000_020 });
+assert.equal(sameCandle.allowed, false, "the same 1m candle that broke structure cannot also count as a retest");
 const retestCandles = [...breakoutCandles.slice(0, -1), { open: 97.9, high: 98.0, low: 97.75, close: 97.85 }];
 const retest = evaluateMarketAlignment({ ...base, candles1m: retestCandles, now: 1_000_030 });
 assert.equal(retest.allowed, true);

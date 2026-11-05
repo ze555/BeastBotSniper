@@ -1,5 +1,5 @@
 export type MarketSide = "LONG" | "SHORT";
-type Candle = { open: number; high: number; low: number; close: number };
+type Candle = { open: number; high: number; low: number; close: number; openTime?: number };
 export interface AlignmentInput {
   side: MarketSide;
   symbol: string;
@@ -27,7 +27,7 @@ export interface AlignmentDecision {
   breakLevel: number | null;
   reasons: string[];
 }
-const pending = new Map<string, { side: MarketSide; level: number; startedAt: number }>();
+const pending = new Map<string, { side: MarketSide; level: number; startedAt: number; breakCandleOpenTime: number }>();
 function trend(candles: Candle[]): "UP" | "DOWN" | "RANGE" {
   const rows = candles.slice(-6);
   if (rows.length < 5) return "RANGE";
@@ -86,17 +86,18 @@ export function evaluateMarketAlignment(input: AlignmentInput): AlignmentDecisio
     : input.flowImbalance30s <= -0.08 && input.flowImbalance1m <= -0.10;
   if (!candidate || candidate.side !== input.side || input.now - candidate.startedAt > 10 * 60_000) {
     const broke = input.side === "LONG" ? last.close > level : last.close < level;
-    if (broke && flowAligned) {
-      pending.set(key, { side: input.side, level, startedAt: input.now });
+    if (broke && flowAligned && Number.isFinite(last.openTime)) {
+      pending.set(key, { side: input.side, level, startedAt: input.now, breakCandleOpenTime: last.openTime! });
       return fail("COUNTERTREND_WAIT_RETEST", "Initial structure break detected. Wait for a successful retest; no immediate countertrend entry.", level);
     }
     return fail("COUNTERTREND_WAIT_BREAK", strongCounter
       ? "4h and 15m oppose this trade. Require 5m turn, 1m structure break and aligned executed flow."
       : "One higher timeframe opposes this trade. Require a confirmed 1m break and retest with aligned flow.", level);
   }
-  const retested = input.side === "LONG"
+  const isLaterOneMinuteCandle = Number.isFinite(last.openTime) && last.openTime! > candidate.breakCandleOpenTime;
+  const retested = isLaterOneMinuteCandle && (input.side === "LONG"
     ? last.low <= candidate.level + input.atr1m * 0.15 && last.close >= candidate.level + input.atr1m * 0.03
-    : last.high >= candidate.level - input.atr1m * 0.15 && last.close <= candidate.level - input.atr1m * 0.03;
+    : last.high >= candidate.level - input.atr1m * 0.15 && last.close <= candidate.level - input.atr1m * 0.03);
   if (retested && flowAligned) {
     pending.delete(key);
     return { allowed: true, state: "COUNTERTREND_CONFIRMED", trend4h, trend15m, trend5m, btcTrend4h, btcTrend15m, breakLevel: candidate.level,
