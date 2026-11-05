@@ -1355,7 +1355,8 @@ export async function runApexLoop() {
       const ctx = await getContext();
       
       // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)
-      for (const t of activeTrades) {
+      for (const t of [...activeTrades]) {
+         if (!activeTrades.includes(t)) continue;
          await exitBrain(t, ctx);
       }
 
