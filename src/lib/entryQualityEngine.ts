@@ -64,7 +64,7 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
   const sign = input.side === "LONG" ? 1 : -1;
   const directed30 = impulse30s * sign;
   const directed1m = impulse1m * sign;
-  const directed5m = impulse5m * sign;
+  const directed5m = has5m ? impulse5m * sign : 0;
   const first = input.candles[input.candles.length - 3];
   const directionalMoveAtr = ((input.price - first.open) / input.atr) * sign;
   const priceMove1m = (finite(f.priceChange1mPct)
