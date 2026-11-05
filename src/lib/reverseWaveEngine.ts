@@ -60,7 +60,8 @@ export function evaluateReverseWave(input: ReverseWaveInput): ReverseWaveDecisio
     reasons: [
       structure ? "Opposite-side institutional structure and executable entry are confirmed." : "Opposite-side structure/entry is not confirmed.",
       executedFlow ? "30s and 1m executed Futures flow agree with the reverse direction." : "30s/1m executed Futures flow do not yet agree.",
-      priceResponse ? "Price responds in the reverse direction in both 30s and 1m." : "Reverse price response is not confirmed in both windows.",\n      priceImpact ? "The reverse-side aggressor flow produces at least 0.08 ATR of price response with sufficient impact efficiency." : "Reverse flow impact is too weak relative to ATR; possible absorption/failed auction, so no reverse entry yet.",
+      priceResponse ? "Price responds in the reverse direction in both 30s and 1m." : "Reverse price response is not confirmed in both windows.",
+      priceImpact ? "The reverse-side aggressor flow produces at least 0.08 ATR of price response with sufficient impact efficiency." : "Reverse flow impact is too weak relative to ATR; possible absorption/failed auction, so no reverse entry yet.",
       cvdConfirmed ? "At least two available CVD horizons confirm the reverse direction." : "Multi-timeframe CVD has not independently confirmed the reverse direction.",
       oiAndBook ? "OI expansion with aligned price and sampled order-book depth change confirm the reverse direction." : "OI plus order-book depth do not jointly confirm the reverse direction.",
       liquidation ? "Fresh Binance force-order events support the reverse squeeze direction." : "No matching fresh liquidation confirmation is available."
