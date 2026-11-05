@@ -90,8 +90,7 @@ export function evaluateEntryQuality(input: EntryQualityInput): EntryQualityDeci
     };
   }
   // Measure price response in ATR units so the same rule works across symbols and volatility regimes.
-  const signedMove30sAtr = finite(f.priceChange30sPct) ? (f.priceChange30sPct * input.price / input.atr) * sign : null;
-  const signedMove1mAtr = finite(f.priceChange1mPct) ? (f.priceChange1mPct * input.price / input.atr) * sign : null;
+  const signedMove1mAtr = (priceMove1m * input.price / input.atr);
   const priceImpactEfficiency = signedMove1mAtr !== null
     ? signedMove1mAtr / Math.max(Math.abs(directed1m), 0.05) : null;
   const strongDirectedFlow = directed1m >= 0.18 && directed30 >= 0.12;
