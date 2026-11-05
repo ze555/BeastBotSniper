@@ -16,6 +16,7 @@ import {
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
 import { evaluateEntryQuality } from "./entryQualityEngine.js";
+import { evaluateReverseWave } from "./reverseWaveEngine.js";
 import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
@@ -458,6 +459,7 @@ async function fetchFuturesAggressorFlow(symbol: string) {
          buy: rows.filter((trade: any) => !trade.buyerIsMaker).reduce((sum: number, trade: any) => sum + trade.quote, 0),
          sell: rows.filter((trade: any) => trade.buyerIsMaker).reduce((sum: number, trade: any) => sum + trade.quote, 0),
          trades: rows.length,
+         coverageMs: rows.length >= 2 ? Math.max(0, Math.min(ms, rows[rows.length - 1].at - rows[0].at)) : 0,
          priceChangePct: rows.length >= 2 && rows[0].price > 0 ? (rows[rows.length - 1].price - rows[0].price) / rows[0].price : null
       };
    };
@@ -473,6 +475,7 @@ async function fetchFuturesAggressorFlow(symbol: string) {
       buyQuote1m: w1m.buy, sellQuote1m: w1m.sell, trades1m: w1m.trades,
       buyQuote5m: w5m.buy, sellQuote5m: w5m.sell, trades5m: w5m.trades,
       priceChange30sPct: w30.priceChangePct, priceChange1mPct: w1m.priceChangePct, priceChange5mPct: w5m.priceChangePct,
+      coverage1mMs: w1m.coverageMs, coverage5mMs: w5m.coverageMs,
       source: "BINANCE_AGG_TRADES" as const
    };
    setCached(aggTradeCache, key, flow, 2_000);
@@ -685,7 +688,7 @@ async function readWhale(symbol: string, btc_chg: number) {
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15
+      asset_strong, c15, c5, slope5, slope15, slope4h
    };
 }
 
@@ -926,7 +929,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       signal: direction,
       grade,
       setupType: institutional.entryType === "EARLY_IGNITION" ? "INSTITUTIONAL_IGNITION" : "INSTITUTIONAL_BREAKOUT",
-      p, w, ctx, reasoning, institutional
+      p, w, ctx, reasoning, institutional, entryQuality
    };
 }
 
@@ -1161,6 +1164,37 @@ async function exitBrain(trade: any, ctx: any) {
    if (exitEvidence.action === "EXIT") {
       addLog(`🚨 [INSTITUTIONAL REVERSAL CONFIRMED] ${t.symbol} ${t.direction} at ${profitR.toFixed(2)}R | ${exitEvidence.reasons.join(" | ")}`, "warn");
       closeTradeFull(t, "Institutional Structure + Futures Flow Reversal");
+      // Close the old side first; only a fresh opposite entry with independent confirmation may reverse.
+      try {
+         const reverseCandidate = await evaluateInstitutionalEntry(t.symbol, ctx);
+         const reverse = evaluateReverseWave({
+            fromSide: t.direction,
+            candidateSide: reverseCandidate.signal === "LONG" || reverseCandidate.signal === "SHORT" ? reverseCandidate.signal : "NONE",
+            entryAllowed: reverseCandidate.signal === (t.direction === "LONG" ? "SHORT" : "LONG"),
+            structureConfirmed: reverseCandidate.institutional?.canEnter === true,
+            flow: reverseCandidate.w?.futuresFlow || null,
+            now: Date.now(),
+            cvd5mSlope: Number.isFinite(reverseCandidate.w?.slope5) ? reverseCandidate.w.slope5 : null,
+            cvd15mSlope: Number.isFinite(reverseCandidate.w?.slope15) ? reverseCandidate.w.slope15 : null,
+            cvd4hSlope: Number.isFinite(reverseCandidate.w?.slope4h) ? reverseCandidate.w.slope4h : null,
+            oiChange: reverseCandidate.w?.oi_available ? reverseCandidate.w.oi_chg : null,
+            oiPriceChange: Number.isFinite(reverseCandidate.w?.p_chg) ? reverseCandidate.w.p_chg : null,
+            book: reverseCandidate.w?.orderBook || null,
+            liquidation: getFuturesLiquidationFlow(t.symbol)
+         });
+         const riskedOpen = activeTrades.filter(open => !open.be_done).length;
+         const capacityAvailable = freeTradeSlotEnabled
+            ? riskedOpen < maxOpenTradesConfig && activeTrades.length < maxOpenTradesConfig + 2
+            : activeTrades.length < maxOpenTradesConfig;
+         if (reverse.confirmed && capacityAvailable && !activeTrades.some(open => open.symbol === t.symbol)) {
+            addLog(`🔁 [REVERSE WAVE CONFIRMED] ${t.symbol}: ${t.direction} → ${reverse.direction}`, "success");
+            executeTrade(t.symbol, reverseCandidate);
+         } else {
+            addLog(`⏳ [REVERSE WAVE NOT ARMED] ${t.symbol} ${t.direction} closed; no opposite position opened. ${reverse.reasons.join(" | ")}`, "info");
+         }
+      } catch (reverseError: any) {
+         addLog(`⚠️ [REVERSE WAVE CHECK FAILED] ${t.symbol}: ${reverseError?.message || "unknown error"}`, "warn");
+      }
       return;
    }
    if (exitEvidence.action === "PROTECT") {
