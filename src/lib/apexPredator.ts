@@ -60,6 +60,27 @@ let WATCHLIST: string[] = [
 let currentBatchIndex = 0;
 let lastWatchlistUpdate = 0;
 
+// ═══ v3.3.1 WIDE NET + IGNITION RADAR ═══
+// User directive: MORE trades without touching entry/exit quality gates.
+// Two levers, both orthogonal to the gates:
+//   1. WIDE NET — the rotation covers top-250-by-volume futures symbols
+//      (was 150). Weak coins at rank 151-250 finally get scanned.
+//   2. IGNITION RADAR — the live websocket feeds EVERY futures symbol's
+//      mark price + liquidations. Any coin (even rank 400) that prints an
+//      explosion/collapse fingerprint at the START of the move is queued
+//      for priority scanning on the next 30s tick. The radar only
+//      nominates: candidates go through the SAME scoreEntry() →
+//      flowEntryGate → executionFilter chain. No quality dilution.
+let ignitionRadarEnabled = true;
+let watchlistSize = 250;
+const IGNITION_MOVE_PCT_60 = 0.9;     // ≥0.9% in 60s = explosion/collapse fingerprint
+const IGNITION_MOVE_PCT_180 = 1.6;    // ≥1.6% in 3min (slower ignitions)
+const IGNITION_LIQ_USD_60S = 40_000;  // ≥$40k liquidated in 60s = cascade starting
+const IGNITION_COOLDOWN_MIN = 15;     // don't re-flag the same coin more often
+const IGNITION_QUEUE_TTL_MIN = 3;     // older than 3min = no longer "start of move"
+const IGNITION_MAX_PER_TICK = 6;      // REST budget guard (6 × ~4 calls ≈ +50% worst case)
+const ignitionQueue = new Map<string, { ts: number; direction: string; movePct: number; liqUsd: number; score: number }>();
+
 
 const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 0.75;
@@ -150,6 +171,10 @@ let apexPredatorStats: any = {
   acceptedShorts: 0,
   pullbackSetups: 0,
   breakoutSetups: 0,
+  // v3.3.1 ignition radar counters
+  ignitionFlags: 0,
+  ignitionScanned: 0,
+  ignitionTraded: 0,
   rules: {
     market_context: { passed: 0, failed: 0 },
     whale_reader: { passed: 0, failed: 0 },
@@ -228,6 +253,12 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
             drop90Pct: opts.crashDrop90Pct !== undefined ? Number(opts.crashDrop90Pct) : undefined,
             holdMinutes: opts.crashHoldMinutes !== undefined ? Number(opts.crashHoldMinutes) : undefined
          });
+      }
+      // v3.3.1 wide net + ignition radar
+      if (opts.ignitionRadarEnabled !== undefined) ignitionRadarEnabled = !!opts.ignitionRadarEnabled;
+      if (opts.watchlistSize !== undefined) {
+         const v = Math.round(Number(opts.watchlistSize));
+         if (v >= 50 && v <= 500) watchlistSize = v;
       }
   }
 }
@@ -323,6 +354,10 @@ export function getStats() {
     iceExitScore,
     iceContinueScore,
     flowEntryGateEnabled,
+    // v3.3.1 wide net + ignition radar
+    ignitionRadarEnabled,
+    watchlistSize,
+    ignitionQueueDepth: ignitionQueue.size,
     violence: getViolenceState(),
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
     fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
@@ -374,7 +409,10 @@ export function getConfig() {
     iceExitScore,
     iceContinueScore,
     // v3.2.1 flow entry gate
-    flowEntryGateEnabled
+    flowEntryGateEnabled,
+    // v3.3.1 wide net + ignition radar
+    ignitionRadarEnabled,
+    watchlistSize
   };
 }
 export function setConfig(config: any) {
@@ -433,6 +471,12 @@ export function setConfig(config: any) {
         drop90Pct: config.crashDrop90Pct !== undefined ? Number(config.crashDrop90Pct) : undefined,
         holdMinutes: config.crashHoldMinutes !== undefined ? Number(config.crashHoldMinutes) : undefined
      });
+  }
+  // v3.3.1 wide net + ignition radar
+  if (config.ignitionRadarEnabled !== undefined) ignitionRadarEnabled = !!config.ignitionRadarEnabled;
+  if (config.watchlistSize !== undefined) {
+     const v = Math.round(Number(config.watchlistSize));
+     if (v >= 50 && v <= 500) watchlistSize = v;
   }
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
@@ -497,8 +541,10 @@ async function updateDynamicWatchlist() {
          .filter((s: any) => !excludedBases.some(base => s.symbol.replace('USDT', '') === base))
          .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)); // Sort by USDT volume
 
-      // Take top 150 symbols to avoid low liquidity garbage
-      symbols = symbols.slice(0, 150).map((s: any) => s.symbol);
+      // Take top-N symbols by liquidity for the rotation (v3.3.1: N=250,
+      // configurable). Weak coins BEYOND this are still covered by the
+      // ignition radar, which watches the entire futures market.
+      symbols = symbols.slice(0, watchlistSize).map((s: any) => s.symbol);
 
       if (symbols.length > 0) {
          // Keep BTC out of the rotation if we want, or just let it rotate. Let's make sure BTC is there? Actually it's fine.
@@ -510,6 +556,55 @@ async function updateDynamicWatchlist() {
    } catch (e: any) {
       addLog(`⚠️ فشل تحديث قائمة العملات: ${e.message}`, "error");
    }
+}
+
+// --- v3.3.1 IGNITION QUEUE ---
+// Radar candidates land here; each scan tick drains up to IGNITION_MAX_PER_TICK
+// into the batch so an ignited weak coin is evaluated ≤30s after its move starts.
+function feedIgnitionQueue(candidates: any[]) {
+   const now = Date.now();
+   for (const c of candidates) {
+      const prev = ignitionQueue.get(c.symbol);
+      if (prev && now - prev.ts < IGNITION_COOLDOWN_MIN * 60_000) {
+         // Still hot and already queued: keep the hotter fingerprint.
+         if (c.score > prev.score) {
+            prev.score = c.score;
+            prev.movePct = Math.abs(c.movePct60) || Math.abs(c.movePct180);
+            prev.liqUsd = c.liqUsd60s;
+            prev.direction = c.direction;
+         }
+         continue;
+      }
+      if (activeTrades.find((t: any) => t.symbol === c.symbol)) continue;
+      ignitionQueue.set(c.symbol, {
+         ts: now,
+         direction: c.direction,
+         movePct: Math.abs(c.movePct60) || Math.abs(c.movePct180),
+         liqUsd: c.liqUsd60s,
+         score: c.score
+      });
+      apexPredatorStats.ignitionFlags++;
+      const how = c.liqUsd60s >= IGNITION_LIQ_USD_60S && Math.abs(c.movePct60) < IGNITION_MOVE_PCT_60
+         ? `liq-burst $${Math.round(c.liqUsd60s / 1000)}k/60s`
+         : `${c.movePct60.toFixed(2)}%/60s`;
+      addLog(`🔥 [IGNITION] ${c.symbol} ${c.direction} ${how} — أولوية فحص فورية`, "info");
+   }
+}
+
+function drainIgnitionBatch(): string[] {
+   const now = Date.now();
+   const picks: string[] = [];
+   const entries = [...ignitionQueue.entries()].sort((a, b) => a[1].ts - b[1].ts); // oldest first
+   for (const [sym, meta] of entries) {
+      if (picks.length >= IGNITION_MAX_PER_TICK) break;
+      // Stale: the move-start window has passed — stop chasing it.
+      if (now - meta.ts > IGNITION_QUEUE_TTL_MIN * 60_000) { ignitionQueue.delete(sym); continue; }
+      if (activeTrades.find((t: any) => t.symbol === sym)) { ignitionQueue.delete(sym); continue; }
+      ignitionQueue.delete(sym);
+      picks.push(sym);
+      apexPredatorStats.ignitionScanned++;
+   }
+   return picks;
 }
 
 // --- CACHING & REST OPTIMIZATIONS ---
@@ -2103,6 +2198,22 @@ export async function runApexLoop() {
          liveFeed.start();
       }
 
+      // ═══ v3.3.1 IGNITION RADAR FEED ═══
+      // Every tick: ask the websocket radar for whole-market explosion/
+      // collapse fingerprints (weak coins included) and queue the hot ones
+      // for priority scanning. Radar failure must never kill the loop.
+      if (ignitionRadarEnabled && liveFeedEnabled && liveFeed.isConnected()) {
+         try {
+            const cands = liveFeed.getIgnitionCandidates({
+               minMovePct60: IGNITION_MOVE_PCT_60,
+               minMovePct180: IGNITION_MOVE_PCT_180,
+               minLiqUsd60s: IGNITION_LIQ_USD_60S,
+               maxResults: 12
+            });
+            if (cands.length > 0) feedIgnitionQueue(cands);
+         } catch { /* radar must never kill the loop */ }
+      }
+
       // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)
       // v3.1: errors are isolated per-trade so one bad fetch never skips the rest.
       for (const t of activeTrades) {
@@ -2165,12 +2276,20 @@ export async function runApexLoop() {
          return;
       }
 
-      // ═══ STORE PRUNING (v3.1) ═══ — bounded memory as the watchlist rotates
+      // ═══ STORE PRUNING (v3.1, fixed v3.3.1) ═══ — bounded memory as the
+      // watchlist rotates. Radar-admitted symbols outside WATCHLIST used to
+      // lose their flow/ICE state at rotation reset mid-trade; now every
+      // active trade + queued ignition keeps its stores.
       if (currentBatchIndex === 0) {
-         pruneFlowStores(new Set(WATCHLIST));
-         pruneRegistry(new Set(WATCHLIST));
-         pruneSymbolGuard(new Set(WATCHLIST));
-         pruneIceStore(new Set(WATCHLIST));   // v3.2 ICE pending-state cleanup
+         const keepSet = new Set<string>([
+            ...WATCHLIST,
+            ...activeTrades.map((t: any) => t.symbol),
+            ...ignitionQueue.keys()
+         ]);
+         pruneFlowStores(keepSet);
+         pruneRegistry(keepSet);
+         pruneSymbolGuard(keepSet);
+         pruneIceStore(keepSet);   // v3.2 ICE pending-state cleanup
       }
 
       // Capacity check: If freeTradeSlotEnabled, trades at Breakeven (zero risk) don't block new opportunities
@@ -2197,9 +2316,14 @@ export async function runApexLoop() {
 
       const batchSize = scanBatchSize;
       const endBatchIndex = Math.min(currentBatchIndex + batchSize, WATCHLIST.length);
-      const batchSymbols = WATCHLIST.slice(currentBatchIndex, endBatchIndex);
-      
-      addLog(`🦅 SCANNING TURBO BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة...`, "info");
+      // v3.3.1: ignited coins get PRIORITY — they lead the batch, the regular
+      // rotation follows. Same scoreEntry() path for both (no gate changes).
+      const radarPicks = ignitionRadarEnabled ? drainIgnitionBatch() : [];
+      const radarSet = new Set(radarPicks);
+      const watchBatch = WATCHLIST.slice(currentBatchIndex, endBatchIndex);
+      const batchSymbols = [...radarPicks, ...watchBatch.filter((s: string) => !radarSet.has(s))];
+
+      addLog(`🦅 SCANNING TURBO BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة${radarPicks.length > 0 ? ` + ${radarPicks.length} إشعال راداري 🔥` : ""}...`, "info");
       
       // Advance index for next run
       currentBatchIndex = endBatchIndex;
@@ -2237,6 +2361,7 @@ export async function runApexLoop() {
                if (!canOpenMore()) break;
                if (activeTrades.find(t => t.symbol === sym)) continue;
                if (dec.signal === "LONG" || dec.signal === "SHORT") {
+                  if (radarSet.has(sym)) apexPredatorStats.ignitionTraded++;
                   executeTrade(sym, dec);
                }
             }

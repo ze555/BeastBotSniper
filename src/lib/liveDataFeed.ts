@@ -1,10 +1,20 @@
 // ============================================================================
-// BEASTBOT LIVE DATA FEED (v3.1.0)
+// BEASTBOT LIVE DATA FEED (v3.3.1) — now with ALL-MARKET IGNITION RADAR
 // Real-time market microstructure via Binance Futures WebSocket:
 //   - aggTrade          => tick-level CVD (true taker buy/sell delta)
 //   - bookTicker        => live spread + order-book top imbalance
-//   - !markPrice@arr    => all-market mark price (1s) for live trade management
-//   - !forceOrder@arr   => REAL liquidation events (replaces fetchLiq() mock)
+//   - !markPrice@arr    => all-market mark price (1s): live trade management
+//                          + v3.3.1 IGNITION RADAR fuel (every futures symbol,
+//                          incl. weak/low-liquidity coins — sampled every 3s)
+//   - !forceOrder@arr   => REAL liquidation events + v3.3.1 burst detector
+//
+// v3.3.1 IGNITION RADAR: the scan rotation only visits top-250-by-volume
+// symbols every ~5 minutes. A weak coin that suddenly explodes/collapses
+// must be scanned AT THE START OF THE MOVE, not when the rotation reaches it
+// (or never, if ranked >250). The radar watches ALL mark prices + liquidations
+// and exposes getIgnitionCandidates() — apexPredator queues them for priority
+// scanning through the SAME entry gates (no quality dilution: the radar only
+// nominates, the gates decide).
 //
 // DESIGN PRINCIPLES:
 //   1. NEVER a hard dependency: if the socket is down, getLiveFlow() returns
@@ -22,6 +32,11 @@ const AGG_BUCKET_MS = 1000;
 const AGG_WINDOW_MS = 15 * 60 * 1000; // keep 15 minutes of tick flow
 const MAX_SYMBOL_STREAMS = 40;        // Binance allows ~200/connection; stay conservative
 const RESYNC_INTERVAL_MS = 60 * 1000;
+// v3.3.1 ignition radar tuning
+const RADAR_SAMPLE_MS = 3 * 1000;     // one mark-price sample per symbol per 3s
+const RADAR_MAX_SAMPLES = 40;         // 40 × 3s = 2 minutes of coverage
+const RADAR_MIN_SAMPLES = 8;          // need ≥24s of coverage before trusting a move
+const LIQ_RING_MS = 120 * 1000;       // liquidation burst memory (2 min)
 
 interface AggBucket { ts: number; buy: number; sell: number; notional: number }
 
@@ -32,9 +47,53 @@ interface SymbolLiveState {
    markPrice: number;
    lastTradeTs: number;
    lastBookTs: number;
+   radar: RadarSample[];              // v3.3.1: 3s-cadence mark-price ring (2 min)
+   lastRadarTs: number;
+}
+
+export interface RadarSample { ts: number; p: number }
+
+export interface IgnitionCandidate {
+   symbol: string;
+   direction: "UP" | "DOWN";
+   movePct60: number;                 // abs % move over trailing 60s (0 if n/a)
+   movePct180: number;                // abs % move over trailing 180s (0 if n/a)
+   liqUsd60s: number;                 // liquidation notional in trailing 60s
+   score: number;                     // composite priority (higher = hotter)
 }
 
 interface LiquidationRaw { s: string; S: string; q: string; p: string; T: number }
+
+// ---------------------------------------------------------------------------
+// v3.3.1 IGNITION RADAR — pure math (exported for unit testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Signed % move between the OLDEST sample inside the trailing window and the
+ * newest sample. Returns null when there is not enough coverage inside the
+ * window (radar just started / symbol stopped ticking).
+ */
+export function computeIgnitionMove(
+   samples: RadarSample[],
+   nowMs: number,
+   windowMs: number
+): number | null {
+   if (samples.length < 2) return null;
+   const cutoff = nowMs - windowMs;
+   let base: RadarSample | null = null;
+   for (const s of samples) {
+      if (s.ts >= cutoff) { base = s; break; }
+   }
+   if (!base) return null;
+   const last = samples[samples.length - 1];
+   if (last.p <= 0 || base.p <= 0 || last.ts <= base.ts) return null;
+   return ((last.p - base.p) / base.p) * 100;
+}
+
+/** Composite ignition priority: 60s move dominates, 180s half-weight, liq adds fuel. */
+export function ignitionScore(movePct60: number, movePct180: number, liqUsd60s: number): number {
+   return Math.abs(movePct60) + Math.abs(movePct180) * 0.5 + liqUsd60s / 50_000;
+}
 
 class LiveDataFeed {
    private ws: WebSocket | null = null;
@@ -47,13 +106,15 @@ class LiveDataFeed {
    private resyncTimer: NodeJS.Timeout | null = null;
    private lastMessageTs = 0;
    private started = false;
+   private liqRing = new Map<string, { ts: number; notional: number; side: "BUY" | "SELL" }[]>();  // v3.3.1 burst detector
 
    public stats = {
       messages: 0,
       liquidations: 0,
       reconnects: 0,
       startedAt: 0,
-      lastError: ""
+      lastError: "",
+      ignitionFlagged: 0          // v3.3.1: candidates that met a threshold at least once
    };
 
    // -----------------------------------------------------------------------
@@ -174,9 +235,23 @@ class LiveDataFeed {
          return;
       }
       if (streamName === "!markPrice@arr") {
-         if (data?.s && typeof data.p === "string") {
-            const st = this.getOrCreate(data.s);
-            st.markPrice = parseFloat(data.p);
+         // Binance @arr streams deliver an ARRAY of objects — the old singular
+         // check (data?.s) never matched, silently disabling mark price for
+         // every symbol. v3.3.1: handle both shapes + feed the radar ring.
+         const items: any[] = Array.isArray(data) ? data : (data?.s ? [data] : []);
+         const now = Date.now();
+         for (const it of items) {
+            if (!it?.s || typeof it.p !== "string") continue;
+            const st = this.getOrCreate(it.s);
+            const price = parseFloat(it.p);
+            if (!(price > 0)) continue;
+            st.markPrice = price;
+            // Radar: sample on a 3s cadence, not every 1s tick (bounded memory)
+            if (now - st.lastRadarTs >= RADAR_SAMPLE_MS) {
+               st.lastRadarTs = now;
+               st.radar.push({ ts: now, p: price });
+               if (st.radar.length > RADAR_MAX_SAMPLES) st.radar.shift();
+            }
          }
          return;
       }
@@ -229,11 +304,32 @@ class LiveDataFeed {
       //                    order side BUY  => a SHORT was liquidated (upward squeeze fuel)
       // flowMetrics convention: side "SELL" = long liquidation, "BUY" = short liquidation.
       const notional = (parseFloat(o.p) || 0) * (parseFloat(o.q) || 0);
-      ingestLiquidation(o.s.toUpperCase(), {
+      const sym = o.s.toUpperCase();
+      const ts = Number(o.T) || Date.now();
+      ingestLiquidation(sym, {
          side: o.S as "BUY" | "SELL",
          notionalUsd: notional,
-         ts: Number(o.T) || Date.now()
+         ts
       });
+      // v3.3.1: burst ring for the ignition radar (liquidations LEAD price —
+      // a cascade is the earliest fingerprint of an explosion/collapse start)
+      let ring = this.liqRing.get(sym);
+      if (!ring) { ring = []; this.liqRing.set(sym, ring); }
+      ring.push({ ts, notional, side: o.S as "BUY" | "SELL" });
+      const cutoff = ts - LIQ_RING_MS;
+      while (ring.length > 0 && ring[0].ts < cutoff) ring.shift();
+   }
+
+   private liqNotionalInWindow(symbol: string, windowMs: number): number {
+      const ring = this.liqRing.get(symbol.toUpperCase());
+      if (!ring || ring.length === 0) return 0;
+      const cutoff = Date.now() - windowMs;
+      let sum = 0;
+      for (let i = ring.length - 1; i >= 0; i--) {
+         if (ring[i].ts < cutoff) break;
+         sum += ring[i].notional;
+      }
+      return sum;
    }
 
    private getOrCreate(symbol: string): SymbolLiveState {
@@ -241,7 +337,8 @@ class LiveDataFeed {
       if (!st) {
          st = {
             buckets: [], bid: 0, bidQty: 0, ask: 0, askQty: 0,
-            markPrice: 0, lastTradeTs: 0, lastBookTs: 0
+            markPrice: 0, lastTradeTs: 0, lastBookTs: 0,
+            radar: [], lastRadarTs: 0
          };
          this.state.set(symbol, st);
       }
@@ -329,6 +426,47 @@ class LiveDataFeed {
       return this.connected && this.state.has(symbol.toUpperCase());
    }
 
+   /**
+    * v3.3.1 IGNITION RADAR — scan the WHOLE futures market (every symbol seen
+    * on !markPrice@arr, including weak/low-liquidity coins outside the scan
+    * rotation) for the earliest fingerprint of an explosion/collapse:
+    *   1. fast mark-price move (60s / 180s windows)
+    *   2. liquidation burst (liquidations LEAD price at cascade start)
+    * Returns at most maxResults candidates, hottest first. The radar only
+    * NOMINATES — apexPredator routes candidates through the normal entry
+    * gates, so trade quality is untouched.
+    */
+   getIgnitionCandidates(opts: {
+      minMovePct60: number;
+      minMovePct180: number;
+      minLiqUsd60s: number;
+      maxResults?: number;
+   }): IgnitionCandidate[] {
+      const now = Date.now();
+      const out: IgnitionCandidate[] = [];
+      for (const [sym, st] of this.state) {
+         if (st.radar.length < RADAR_MIN_SAMPLES) continue;
+         const m60 = computeIgnitionMove(st.radar, now, 60_000);
+         const m180 = computeIgnitionMove(st.radar, now, 180_000);
+         const hitMove = (m60 !== null && Math.abs(m60) >= opts.minMovePct60) ||
+                         (m180 !== null && Math.abs(m180) >= opts.minMovePct180);
+         const liqUsd60s = this.liqNotionalInWindow(sym, 60_000);
+         const hitLiq = liqUsd60s >= opts.minLiqUsd60s;
+         if (!hitMove && !hitLiq) continue;
+         const signed = m60 !== null ? m60 : (m180 ?? 0);
+         out.push({
+            symbol: sym,
+            direction: signed >= 0 ? "UP" : "DOWN",
+            movePct60: m60 ?? 0,
+            movePct180: m180 ?? 0,
+            liqUsd60s,
+            score: ignitionScore(m60 ?? 0, m180 ?? 0, liqUsd60s)
+         });
+      }
+      out.sort((a, b) => b.score - a.score);
+      return out.slice(0, opts.maxResults ?? 12);
+   }
+
    getHealth() {
       return {
          connected: this.connected,
@@ -338,6 +476,7 @@ class LiveDataFeed {
          liquidations: this.stats.liquidations,
          reconnects: this.stats.reconnects,
          lastError: this.stats.lastError,
+         ignitionFlagged: this.stats.ignitionFlagged,
          stalenessMs: this.lastMessageTs > 0 ? Date.now() - this.lastMessageTs : null,
          uptimeMs: this.stats.startedAt > 0 ? Date.now() - this.stats.startedAt : 0
       };

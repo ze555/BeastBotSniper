@@ -73,6 +73,9 @@ async function startServer() {
         iceExitScore: req.body.iceExitScore,
         iceContinueScore: req.body.iceContinueScore,
         flowEntryGateEnabled: req.body.flowEntryGateEnabled,
+        // v3.3.1 wide net + ignition radar
+        ignitionRadarEnabled: req.body.ignitionRadarEnabled,
+        watchlistSize: req.body.watchlistSize,
      });
      res.json({ success: true });
   });
