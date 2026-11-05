@@ -63,3 +63,15 @@ Run:
 The test suite includes Futures-only long/short ignition, squeeze/liquidation impulses, quiet-market suppression, stale flow rejection, executable-depth rejection, continuation, Futures-only exits, and rolling-tape candidate detection.
 
 No merge to main or production deployment is part of this branch.
+
+
+## Symmetric reverse-wave execution (added 2026-11-05)
+
+- LONG and SHORT use mirrored directional rules.
+- After a confirmed exit closes the original side, a fresh opposite-side candidate must pass the normal Futures-only institutional entry path.
+- Reverse execution additionally requires fresh 30s/1m executed aggressor flow, price response in both windows, an executable structural entry, and at least one independent confirmation: two available CVD horizons (5m/15m/4h), OI expansion aligned with price plus sampled order-book depth change, or fresh matching Binance force-order events.
+- Missing liquidation events do not block a reverse if CVD or OI+book confirms. OI alone never establishes direction.
+- No reverse is opened for same-side, stale, structurally unconfirmed, or unconfirmed candidates; existing trade-capacity rules still apply.
+- The scanner universe, candidate flow, Top-N behavior, cooldowns, session access, and TP/SL settings are unchanged.
+- Rolling Futures tape and REST fallback now report actual 1m/5m time coverage. A partial 5m sample is not misrepresented as a full 5m context; 1m/30s ignition remains eligible.
+- Tick-level replay with historical Futures tape/book/OI data is still required before claiming profitability improvement or deploying to production.
