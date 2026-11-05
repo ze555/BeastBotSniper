@@ -1174,6 +1174,8 @@ async function exitBrain(trade: any, ctx: any) {
             structureConfirmed: reverseCandidate.institutional?.canEnter === true,
             flow: reverseCandidate.w?.futuresFlow || null,
             now: Date.now(),
+            price: Number.isFinite(reverseCandidate.p?.price) ? reverseCandidate.p.price : NaN,
+            atr: Number.isFinite(reverseCandidate.p?.atr14) ? reverseCandidate.p.atr14 : NaN,
             cvd5mSlope: Number.isFinite(reverseCandidate.w?.slope5) ? reverseCandidate.w.slope5 : null,
             cvd15mSlope: Number.isFinite(reverseCandidate.w?.slope15) ? reverseCandidate.w.slope15 : null,
             cvd4hSlope: Number.isFinite(reverseCandidate.w?.slope4h) ? reverseCandidate.w.slope4h : null,
@@ -1182,6 +1184,9 @@ async function exitBrain(trade: any, ctx: any) {
             book: reverseCandidate.w?.orderBook || null,
             liquidation: getFuturesLiquidationFlow(t.symbol)
          });
+         // Persist the exact reverse-wave evidence on the opened trade for post-trade audit.
+         if (reverseCandidate.reasoning) reverseCandidate.reasoning.reverseWave = reverse;
+         addLog(`🧪 [REVERSE WAVE AUDIT] ${t.symbol} | ${JSON.stringify(reverse.confirmations)}`, reverse.confirmed ? "success" : "info");
          const riskedOpen = activeTrades.filter(open => !open.be_done).length;
          const capacityAvailable = freeTradeSlotEnabled
             ? riskedOpen < maxOpenTradesConfig && activeTrades.length < maxOpenTradesConfig + 2
