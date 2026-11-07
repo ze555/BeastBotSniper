@@ -1,0 +1,108 @@
+name: Build BeastBotSniper Android APK
+
+on:
+  push:
+    branches:
+      - android-standalone
+    paths:
+      - 'android-app/**'
+      - 'src/**'
+      - 'server.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Android branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+
+      - name: Install dependencies and build the existing dashboard/server
+        run: |
+          npm ci
+          npm run build
+          npm prune --omit=dev
+
+      - name: Verify SQLite is not imported by runtime source
+        run: |
+          if grep -R -n -E "from [\"']sqlite3|require\\([\"']sqlite3" src server.ts; then
+            echo "sqlite3 is imported by runtime source; Android native port needs a dedicated SQLite build."
+            exit 1
+          fi
+          rm -rf node_modules/sqlite3 node_modules/@mapbox/node-pre-gyp
+
+      - name: Download Node.js Mobile Android runtime
+        run: |
+          curl -fL --retry 3 https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v18.20.4/nodejs-mobile-v18.20.4-android.zip -o /tmp/nodejs-mobile-android.zip
+          mkdir -p /tmp/nodejs-mobile
+          unzip -q /tmp/nodejs-mobile-android.zip -d /tmp/nodejs-mobile
+          mkdir -p android-app/app/src/main/cpp/libnode/bin/arm64-v8a
+          mkdir -p android-app/app/src/main/cpp/libnode/bin/armeabi-v7a
+          find /tmp/nodejs-mobile -type f -path '*/arm64-v8a/libnode.so' -exec cp {} android-app/app/src/main/cpp/libnode/bin/arm64-v8a/libnode.so \; -quit
+          find /tmp/nodejs-mobile -type f -path '*/armeabi-v7a/libnode.so' -exec cp {} android-app/app/src/main/cpp/libnode/bin/armeabi-v7a/libnode.so \; -quit
+          test -s android-app/app/src/main/cpp/libnode/bin/arm64-v8a/libnode.so
+          test -s android-app/app/src/main/cpp/libnode/bin/armeabi-v7a/libnode.so
+          NODE_INCLUDE="$(find /tmp/nodejs-mobile -type f -path '*/include/node/node.h' -print -quit)"
+          test -n "$NODE_INCLUDE"
+          mkdir -p android-app/app/src/main/cpp/libnode/include/node
+          cp -R "$(dirname "$NODE_INCLUDE")/." android-app/app/src/main/cpp/libnode/include/node/
+
+      - name: Package the standalone Node project into Android assets
+        run: |
+          mkdir -p /tmp/beastbot-node-project
+          cp -R dist /tmp/beastbot-node-project/dist
+          cp -R node_modules /tmp/beastbot-node-project/node_modules
+          printf '%s' '0.1.0-debug' > /tmp/beastbot-node-project/.bundle-version
+          mkdir -p android-app/app/src/main/assets
+          (cd /tmp/beastbot-node-project && zip -qr "$GITHUB_WORKSPACE/android-app/app/src/main/assets/nodejs-project.zip" .)
+          ls -lh android-app/app/src/main/assets/nodejs-project.zip
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK, NDK and CMake
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        working-directory: android-app
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK and embedded ARM64 runtime
+        run: |
+          APK=android-app/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnode.so'
+          unzip -l "$APK" | grep 'assets/nodejs-project.zip'
+          sha256sum "$APK"
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeastBotSniper-Android-debug
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
