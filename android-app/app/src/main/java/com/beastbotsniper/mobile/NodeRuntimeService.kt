@@ -30,6 +30,7 @@ class NodeRuntimeService : Service() {
     private var baselineLoaded = false
     private val knownActive = mutableSetOf<String>()
     private val knownClosed = mutableSetOf<String>()
+    private val knownLogs = mutableSetOf<String>()
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -101,11 +102,13 @@ class NodeRuntimeService : Service() {
         try {
             val active = getArray("/api/trades/active")
             val closed = getArray("/api/trades/closed")
+            val logs = getArray("/api/system/logs")
             val activeNow = active.map { tradeKey(it, false) }.toSet()
             val closedNow = closed.map { tradeKey(it, true) }.toSet()
             if (!baselineLoaded) {
                 knownActive.addAll(activeNow)
                 knownClosed.addAll(closedNow)
+                knownLogs.addAll(logs.map { it.optString("time") + "|" + it.optString("msg") })
                 baselineLoaded = true
                 return
             }
@@ -123,6 +126,17 @@ class NodeRuntimeService : Service() {
                     val result = if (pnl == null) "تم إغلاق الصفقة" else
                         "النتيجة: " + (if (pnl >= 0) "+" else "") + "$" + String.format("%.2f", pnl)
                     showTradeNotification("إغلاق صفقة: " + symbol, result)
+                }
+            }
+            logs.forEach { log ->
+                val key = log.optString("time") + "|" + log.optString("msg")
+                if (knownLogs.add(key)) {
+                    val message = log.optString("msg", "حدث خطأ في المحرك")
+                    val type = log.optString("type")
+                    val errorPattern = Regex("error|failed|exception|timeout|خطأ|فشل|تعذر", RegexOption.IGNORE_CASE)
+                    if (type.equals("error", true) || errorPattern.containsMatchIn(message)) {
+                        showTradeNotification("تنبيه من المحرك", message.take(160))
+                    }
                 }
             }
         } catch (error: Exception) {
