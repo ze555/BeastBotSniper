@@ -23,6 +23,8 @@ Java_com_beastbotsniper_mobile_NodeBridge_startNodeWithArguments(
     setenv("BEASTBOT_HOST", "127.0.0.1", 1);
     setenv("BEASTBOT_RESEARCH_DIR", researchDirectory, 1);
     setenv("HOME", workingDirectory, 1);
+    const std::string temporaryDirectory = std::string(workingDirectory) + "/tmp";
+    setenv("TMPDIR", temporaryDirectory.c_str(), 1);
 
     std::vector<std::string> args;
     const jsize count = env->GetArrayLength(javaArgs);
