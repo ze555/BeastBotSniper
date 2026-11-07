@@ -33,6 +33,11 @@ async function startServer() {
     setActive(!isActive());
     res.json({ active: isActive() });
   });
+  // Android foreground-service action: an explicit stop endpoint avoids toggle ambiguity.
+  app.post("/api/bot/stop", (req, res) => {
+    setActive(false);
+    res.json({ active: isActive() });
+  });
 
   app.get("/api/predator/stats", (req, res) => res.json(getStats()));
   app.post("/api/predator/config", (req, res) => {
@@ -114,7 +119,8 @@ async function startServer() {
     app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
   }
 
-  app.listen(Number(PORT), "0.0.0.0", () => console.log(`Server running on http://localhost:${PORT}`));
+  const HOST = process.env.BEASTBOT_HOST || "0.0.0.0";
+  app.listen(Number(PORT), HOST, () => console.log(`Server running on http://${HOST}:${PORT}`));
 }
 
 startServer();
