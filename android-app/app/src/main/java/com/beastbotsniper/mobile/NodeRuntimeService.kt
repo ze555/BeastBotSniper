@@ -200,7 +200,10 @@ class NodeRuntimeService : Service() {
             .setContentText("المحرك داخل الهاتف • اضغط لفتح لوحة التحكم")
             .setContentIntent(pending)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "إيقاف التداول", stopPending).build())
+            .addAction(Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_media_pause),
+                "إيقاف التداول", stopPending
+            ).build())
             .build()
     }
 
