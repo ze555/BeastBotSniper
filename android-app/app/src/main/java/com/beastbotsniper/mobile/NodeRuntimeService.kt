@@ -119,7 +119,7 @@ class NodeRuntimeService : Service() {
             closed.forEach { trade ->
                 if (knownClosed.add(tradeKey(trade, true))) {
                     val symbol = trade.optString("symbol", "رمز غير معروف")
-                    val pnl = firstNumber(trade, arrayOf("pnl", "profit", "netPnl", "realizedPnl", "profitLoss"))
+                    val pnl = firstNumber(trade, arrayOf("finalPnl", "realizedPnl", "pnl", "profit", "netPnl", "profitLoss"))
                     val result = if (pnl == null) "تم إغلاق الصفقة" else
                         "النتيجة: " + (if (pnl >= 0) "+" else "") + "$" + String.format("%.2f", pnl)
                     showTradeNotification("إغلاق صفقة: " + symbol, result)
@@ -137,7 +137,7 @@ class NodeRuntimeService : Service() {
             if (item.has(field) && !item.isNull(field)) item.optString(field) else null
         } ?: ""
         return listOf(item.optString("symbol"), item.optString("direction", item.optString("side")),
-            time, item.optString("entryPrice"), item.optString("exitPrice"), item.optString("pnl"))
+            time, item.optString("entry"), item.optString("exitPrice"), item.optString("finalPnl"))
             .joinToString("|").ifBlank { item.toString() }
     }
 
