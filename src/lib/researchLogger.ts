@@ -1187,7 +1187,7 @@ function updateSummaries(lastTrade: any) {
       }
 
       if (lastTrade) {
-         const todayDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Tripoli' }).format(new Date());
+         const todayDate = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().slice(0, 10);
          const dailyEntry = {
             date: todayDate,
             timestamp: new Date().toISOString(),
