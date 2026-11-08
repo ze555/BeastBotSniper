@@ -71,7 +71,7 @@ jobs:
           mkdir -p /tmp/beastbot-node-project
           cp -R dist /tmp/beastbot-node-project/dist
           cp -R node_modules /tmp/beastbot-node-project/node_modules
-          printf '%s\\n' 'require("intl");' > /tmp/beastbot-node-project/android-intl-polyfill.cjs
+          printf '%s\n' 'require("intl");' > /tmp/beastbot-node-project/android-intl-polyfill.cjs
           printf '%s' '0.1.1-debug' > /tmp/beastbot-node-project/.bundle-version
           mkdir -p android-app/app/src/main/assets
           (cd /tmp/beastbot-node-project && zip -qr "$GITHUB_WORKSPACE/android-app/app/src/main/assets/nodejs-project.zip" .)
