@@ -72,7 +72,7 @@ class NodeRuntimeService : Service() {
             research.mkdirs()
             File(filesDir, "tmp").mkdirs()
             android.util.Log.i("BeastBotNode", "Starting embedded Node.js from " + root.absolutePath)
-            NodeBridge.startNodeWithArguments(arrayOf("node", "dist/server.cjs"), root.absolutePath, research.absolutePath)
+            NodeBridge.startNodeWithArguments(arrayOf("node", "--require", "./android-intl-polyfill.cjs", "dist/server.cjs"), root.absolutePath, research.absolutePath)
             android.util.Log.e("BeastBotNode", "Embedded Node.js exited")
         } catch (error: Throwable) {
             android.util.Log.e("BeastBotNode", "Node runtime failed", error)
