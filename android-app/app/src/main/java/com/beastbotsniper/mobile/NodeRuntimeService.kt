@@ -61,7 +61,7 @@ class NodeRuntimeService : Service() {
         try {
             val root = File(filesDir, "nodejs-project")
             val marker = File(root, ".bundle-version")
-            val expectedVersion = "0.1.0-debug"
+            val expectedVersion = "0.1.1-debug"
             if (!root.exists() || !marker.exists() || marker.readText() != expectedVersion) {
                 root.deleteRecursively()
                 root.mkdirs()
