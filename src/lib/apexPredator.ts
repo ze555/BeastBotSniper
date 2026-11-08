@@ -167,7 +167,7 @@ export function addLog(msg: string, type: 'info'|'warn'|'success'|'error' = 'inf
 }
 
 export function resetDailyStatsIfNeeded() {
-   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Tripoli' }).format(new Date());
+   const today = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().slice(0, 10);
    if (today !== statsDay) {
       todaysStats = {
          count: 0,
