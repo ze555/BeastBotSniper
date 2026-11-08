@@ -60,12 +60,19 @@ jobs:
           mkdir -p android-app/app/src/main/cpp/libnode/include/node
           cp -R "$(dirname "$NODE_INCLUDE")/." android-app/app/src/main/cpp/libnode/include/node/
 
+      - name: Install Intl polyfill for Node.js Mobile
+        run: |
+          mkdir -p /tmp/intl-polyfill
+          npm install --prefix /tmp/intl-polyfill --no-save --ignore-scripts intl@1.2.5
+          cp -R /tmp/intl-polyfill/node_modules/intl node_modules/intl
+
       - name: Package the standalone Node project into Android assets
         run: |
           mkdir -p /tmp/beastbot-node-project
           cp -R dist /tmp/beastbot-node-project/dist
           cp -R node_modules /tmp/beastbot-node-project/node_modules
-          printf '%s' '0.1.0-debug' > /tmp/beastbot-node-project/.bundle-version
+          printf '%s\\n' 'require("intl");' > /tmp/beastbot-node-project/android-intl-polyfill.cjs
+          printf '%s' '0.1.1-debug' > /tmp/beastbot-node-project/.bundle-version
           mkdir -p android-app/app/src/main/assets
           (cd /tmp/beastbot-node-project && zip -qr "$GITHUB_WORKSPACE/android-app/app/src/main/assets/nodejs-project.zip" .)
           ls -lh android-app/app/src/main/assets/nodejs-project.zip
