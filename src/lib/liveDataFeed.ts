@@ -96,13 +96,17 @@ export function ignitionScore(movePct60: number, movePct180: number, liqUsd60s: 
 }
 
 class LiveDataFeed {
-   private ws: WebSocket | null = null;
+   private ws: WebSocket | null = null;              // per-symbol firehose (aggTrade/bookTicker)
+   private marketWs: WebSocket | null = null;        // v3.3.2: LOW-BANDWIDTH market socket (markPrice@arr + forceOrder@arr)
    private subscribed = new Set<string>();
    private desired = new Set<string>();
    private state = new Map<string, SymbolLiveState>();
    private connected = false;
+   private marketConnected = false;
    private reconnectAttempt = 0;
+   private marketReconnectAttempt = 0;
    private reconnectTimer: NodeJS.Timeout | null = null;
+   private marketReconnectTimer: NodeJS.Timeout | null = null;
    private resyncTimer: NodeJS.Timeout | null = null;
    private lastMessageTs = 0;
    private started = false;
@@ -112,6 +116,9 @@ class LiveDataFeed {
       messages: 0,
       liquidations: 0,
       reconnects: 0,
+      marketReconnects: 0,        // v3.3.2: radar-socket reconnect count (health probe)
+      lastCloseCode: 0,           // v3.3.2: why did the firehose last die?
+      marketLastCloseCode: 0,     // v3.3.2: why did the radar socket last die?
       startedAt: 0,
       lastError: "",
       ignitionFlagged: 0          // v3.3.1: candidates that met a threshold at least once
@@ -125,6 +132,7 @@ class LiveDataFeed {
       this.started = true;
       this.stats.startedAt = Date.now();
       this.connect();
+      this.connectMarket();
       // Resync subscriptions periodically (watchlist rotates, trades open/close)
       this.resyncTimer = setInterval(() => this.resyncSubscriptions(), RESYNC_INTERVAL_MS);
    }
@@ -132,13 +140,19 @@ class LiveDataFeed {
    stop() {
       this.started = false;
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      if (this.marketReconnectTimer) clearTimeout(this.marketReconnectTimer);
       if (this.resyncTimer) clearInterval(this.resyncTimer);
       try { this.ws?.close(); } catch { /* ignore */ }
+      try { this.marketWs?.close(); } catch { /* ignore */ }
       this.ws = null;
+      this.marketWs = null;
       this.connected = false;
+      this.marketConnected = false;
    }
 
    isConnected() { return this.connected; }
+   /** v3.3.2: is the low-bandwidth radar socket alive? */
+   isMarketConnected() { return this.marketConnected; }
 
    /**
     * Provide the CURRENT priority symbols (active trades first, scan batch next).
@@ -154,9 +168,13 @@ class LiveDataFeed {
    private connect() {
       if (!this.started) return;
       try {
-         // Base connection carries the two market-wide streams; per-symbol
-         // streams are appended at resync time.
-         const url = `${FUTURES_WS}?streams=!forceOrder@arr/!markPrice@arr`;
+         // v3.3.2 SPLIT-SOCKET ARCHITECTURE: the per-symbol firehose (aggTrade
+         // ≈ 1000+ msg/s) lived on the SAME connection as the market-wide
+         // streams. Production evidence: 1228 reconnects in 31h + ZERO
+         // liquidation events delivered + radar starved (0 flags). The proxy/
+         // host kills busy sockets — so the radar now gets its own quiet
+         // socket (~20 frames/min) that survives the firehose dying.
+         const url = `${FUTURES_WS}?streams=btcusdt@aggTrade`;
          const ws = new WebSocket(url);
          this.ws = ws;
 
@@ -182,8 +200,9 @@ class LiveDataFeed {
             this.stats.lastError = err.message;
          });
 
-         ws.on("close", () => {
+         ws.on("close", (code: number, reason: Buffer) => {
             this.connected = false;
+            this.stats.lastCloseCode = code;
             if (!this.started) return;
             this.stats.reconnects++;
             const delay = Math.min(30000, 1000 * Math.pow(2, this.reconnectAttempt++));
@@ -193,6 +212,49 @@ class LiveDataFeed {
          this.stats.lastError = e?.message || String(e);
          const delay = Math.min(30000, 1000 * Math.pow(2, this.reconnectAttempt++));
          this.reconnectTimer = setTimeout(() => this.connect(), delay);
+      }
+   }
+
+   /**
+    * v3.3.2: dedicated LOW-BANDWIDTH socket for the ignition radar.
+    * Carries only !markPrice@arr (every 3s) + !forceOrder@arr (sparse) —
+    * ~20 frames/min, invisible to proxies that strangle busy sockets.
+    * Liquidations + mark-price rings now survive firehose reconnect storms.
+    */
+   private connectMarket() {
+      if (!this.started) return;
+      try {
+         const url = `${FUTURES_WS}?streams=!forceOrder@arr/!markPrice@arr`;
+         const ws = new WebSocket(url);
+         this.marketWs = ws;
+
+         ws.on("open", () => {
+            this.marketConnected = true;
+            this.marketReconnectAttempt = 0;
+         });
+
+         ws.on("message", (raw: WebSocket.RawData) => {
+            try {
+               const msg = JSON.parse(raw.toString());
+               if (msg.stream && msg.data) this.handleStream(msg.stream, msg.data);
+            } catch { /* malformed frame — ignore */ }
+         });
+
+         ws.on("ping", () => { try { ws.pong(); } catch { /* ignore */ } });
+
+         ws.on("error", () => { /* surfaced via marketConnected=false */ });
+
+         ws.on("close", (code: number) => {
+            this.marketConnected = false;
+            this.stats.marketLastCloseCode = code;
+            if (!this.started) return;
+            this.stats.marketReconnects++;
+            const delay = Math.min(30000, 1000 * Math.pow(2, this.marketReconnectAttempt++));
+            this.marketReconnectTimer = setTimeout(() => this.connectMarket(), delay);
+         });
+      } catch {
+         const delay = Math.min(30000, 1000 * Math.pow(2, this.marketReconnectAttempt++));
+         this.marketReconnectTimer = setTimeout(() => this.connectMarket(), delay);
       }
    }
 
@@ -470,11 +532,15 @@ class LiveDataFeed {
    getHealth() {
       return {
          connected: this.connected,
+         marketConnected: this.marketConnected,
          subscribedSymbols: this.subscribed.size,
          trackedSymbols: this.state.size,
          messages: this.stats.messages,
          liquidations: this.stats.liquidations,
          reconnects: this.stats.reconnects,
+         marketReconnects: this.stats.marketReconnects,
+         lastCloseCode: this.stats.lastCloseCode,
+         marketLastCloseCode: this.stats.marketLastCloseCode,
          lastError: this.stats.lastError,
          ignitionFlagged: this.stats.ignitionFlagged,
          stalenessMs: this.lastMessageTs > 0 ? Date.now() - this.lastMessageTs : null,

@@ -76,6 +76,8 @@ async function startServer() {
         // v3.3.1 wide net + ignition radar
         ignitionRadarEnabled: req.body.ignitionRadarEnabled,
         watchlistSize: req.body.watchlistSize,
+        // v3.3.2 REST sweep
+        ignitionSweepEnabled: req.body.ignitionSweepEnabled,
      });
      res.json({ success: true });
   });

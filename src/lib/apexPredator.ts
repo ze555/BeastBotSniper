@@ -81,6 +81,23 @@ const IGNITION_QUEUE_TTL_MIN = 3;     // older than 3min = no longer "start of m
 const IGNITION_MAX_PER_TICK = 6;      // REST budget guard (6 × ~4 calls ≈ +50% worst case)
 const ignitionQueue = new Map<string, { ts: number; direction: string; movePct: number; liqUsd: number; score: number }>();
 
+// v3.3.2 REST IGNITION SWEEP — WS-independent early detection.
+// Production evidence (31h live): hostless WS reconnected 1228×, delivered
+// ZERO liquidations, radar fired ZERO flags — while the tape printed waves
+// the user watched naked. The sweep diffs /fapi/v1/ticker/24hr lastPrice
+// against a snapshot taken 2 min earlier: ONE rest call per sweep catches
+// every symbol's move with zero dependency on the websocket. Calibration:
+// BTC's measured -3.5%/90min wave = 1.16%/2min pace; alts move 1.5-2× BTC →
+// threshold 0.8%/2min flags the wave IN ITS FIRST MINUTES (median
+// time-to-MFE is 21min — entering in the first 2-4 min is the money zone).
+// The queue still feeds the SAME gates: radar nominates, gates decide.
+let ignitionSweepEnabled = true;
+const SWEEP_INTERVAL_TICKS = 4;                 // 4 × 30s = 120s between sweeps
+const IGNITION_MOVE_PCT_2MIN = 0.8;             // ≥0.8% in 2min = wave starting
+const sweepSnapshot = new Map<string, { price: number; ts: number }>();
+let lastSweepAt = 0;
+let tickCounter = 0;
+
 
 const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 0.75;
@@ -175,6 +192,10 @@ let apexPredatorStats: any = {
   ignitionFlags: 0,
   ignitionScanned: 0,
   ignitionTraded: 0,
+  // v3.3.2 REST sweep counters
+  sweepFlags: 0,
+  sweepLastAt: 0,
+  sweepTracked: 0,
   rules: {
     market_context: { passed: 0, failed: 0 },
     whale_reader: { passed: 0, failed: 0 },
@@ -260,6 +281,8 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
          const v = Math.round(Number(opts.watchlistSize));
          if (v >= 50 && v <= 500) watchlistSize = v;
       }
+      // v3.3.2 REST sweep
+      if (opts.ignitionSweepEnabled !== undefined) ignitionSweepEnabled = !!opts.ignitionSweepEnabled;
   }
 }
 
@@ -357,6 +380,7 @@ export function getStats() {
     // v3.3.1 wide net + ignition radar
     ignitionRadarEnabled,
     watchlistSize,
+    ignitionSweepEnabled,
     ignitionQueueDepth: ignitionQueue.size,
     violence: getViolenceState(),
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
@@ -412,7 +436,9 @@ export function getConfig() {
     flowEntryGateEnabled,
     // v3.3.1 wide net + ignition radar
     ignitionRadarEnabled,
-    watchlistSize
+    watchlistSize,
+    // v3.3.2 REST sweep
+    ignitionSweepEnabled
   };
 }
 export function setConfig(config: any) {
@@ -478,6 +504,8 @@ export function setConfig(config: any) {
      const v = Math.round(Number(config.watchlistSize));
      if (v >= 50 && v <= 500) watchlistSize = v;
   }
+  // v3.3.2 REST sweep
+  if (config.ignitionSweepEnabled !== undefined) ignitionSweepEnabled = !!config.ignitionSweepEnabled;
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
@@ -564,12 +592,13 @@ async function updateDynamicWatchlist() {
 function feedIgnitionQueue(candidates: any[]) {
    const now = Date.now();
    for (const c of candidates) {
+      const rawMove = Math.abs(c.movePct60) || Math.abs(c.move2min) || Math.abs(c.movePct180) || 0;
       const prev = ignitionQueue.get(c.symbol);
       if (prev && now - prev.ts < IGNITION_COOLDOWN_MIN * 60_000) {
          // Still hot and already queued: keep the hotter fingerprint.
          if (c.score > prev.score) {
             prev.score = c.score;
-            prev.movePct = Math.abs(c.movePct60) || Math.abs(c.movePct180);
+            prev.movePct = rawMove;
             prev.liqUsd = c.liqUsd60s;
             prev.direction = c.direction;
          }
@@ -579,15 +608,16 @@ function feedIgnitionQueue(candidates: any[]) {
       ignitionQueue.set(c.symbol, {
          ts: now,
          direction: c.direction,
-         movePct: Math.abs(c.movePct60) || Math.abs(c.movePct180),
+         movePct: rawMove,
          liqUsd: c.liqUsd60s,
          score: c.score
       });
       apexPredatorStats.ignitionFlags++;
-      const how = c.liqUsd60s >= IGNITION_LIQ_USD_60S && Math.abs(c.movePct60) < IGNITION_MOVE_PCT_60
+      const src = c.move2min !== undefined ? "sweep" : "ws";
+      const how = c.liqUsd60s >= IGNITION_LIQ_USD_60S && rawMove < IGNITION_MOVE_PCT_60
          ? `liq-burst $${Math.round(c.liqUsd60s / 1000)}k/60s`
-         : `${c.movePct60.toFixed(2)}%/60s`;
-      addLog(`🔥 [IGNITION] ${c.symbol} ${c.direction} ${how} — أولوية فحص فورية`, "info");
+         : `${rawMove.toFixed(2)}%/${c.move2min !== undefined ? "2min" : "60s"}`;
+      addLog(`🔥 [IGNITION·${src}] ${c.symbol} ${c.direction} ${how} — أولوية فحص فورية`, "info");
    }
 }
 
@@ -605,6 +635,61 @@ function drainIgnitionBatch(): string[] {
       apexPredatorStats.ignitionScanned++;
    }
    return picks;
+}
+
+// --- v3.3.2 REST SWEEP (pure math exported for tests lives in ignitionSweep.test.ts) ---
+/** Signed % move between two price snapshots taken Δ≈2min apart. */
+export function computeSweepMove(prevPrice: number, lastPrice: number): number {
+   if (!(prevPrice > 0) || !(lastPrice > 0)) return 0;
+   return ((lastPrice - prevPrice) / prevPrice) * 100;
+}
+
+/**
+ * ONE rest call per sweep diffs the whole futures market's lastPrice against
+ * the snapshot from the previous sweep (~2 min earlier). Any symbol that
+ * moved ≥ IGNITION_MOVE_PCT_2MIN enters the SAME ignition queue as the WS
+ * radar. Catches multi-hour waves in their first minutes with zero WS
+ * dependency — the antidote to the hostless websocket storm.
+ */
+async function runIgnitionSweep() {
+   try {
+      const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/ticker/24hr`, { timeout: 10000 });
+      const rows: any[] = res.data || [];
+      const now = Date.now();
+      const candidates: any[] = [];
+      let tracked = 0;
+      for (const r of rows) {
+         const sym: string = r.symbol;
+         if (!sym || !sym.endsWith("USDT")) continue;
+         const price = parseFloat(r.lastPrice);
+         if (!(price > 0)) continue;
+         tracked++;
+         const prev = sweepSnapshot.get(sym);
+         sweepSnapshot.set(sym, { price, ts: now });
+         if (!prev || now - prev.ts < 60_000) continue; // need ≈2min baseline (first sweep just primes)
+         const move = computeSweepMove(prev.price, price);
+         if (Math.abs(move) < IGNITION_MOVE_PCT_2MIN) continue;
+         candidates.push({
+            symbol: sym,
+            direction: move >= 0 ? "UP" : "DOWN",
+            movePct60: 0,
+            movePct180: 0,
+            move2min: move,
+            liqUsd60s: 0,
+            score: Math.abs(move)
+         });
+      }
+      apexPredatorStats.sweepLastAt = now;
+      apexPredatorStats.sweepTracked = tracked;
+      if (candidates.length > 0) {
+         apexPredatorStats.sweepFlags += candidates.length;
+         feedIgnitionQueue(candidates);
+         const top = candidates.sort((a, b) => b.score - a.score)[0];
+         addLog(`🛰️ [SWEEP] ${candidates.length} إشعال REST — الأسخن: ${top.symbol} ${top.direction} ${top.move2min.toFixed(2)}%/2min`, "info");
+      }
+      // Bound the snapshot memory (stables excluded by the USDT filter anyway)
+      if (sweepSnapshot.size > 1500) sweepSnapshot.clear();
+   } catch { /* sweep must never kill the loop; next sweep retries */ }
 }
 
 // --- CACHING & REST OPTIMIZATIONS ---
@@ -648,7 +733,7 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
 
    const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/klines`, {
       params: { symbol, interval, limit },
-      timeout: 5000
+      timeout: 8000
    });
    const parsed = res.data.map((k: any) => ({
       openTime: k[0],
@@ -670,7 +755,7 @@ async function fetchFunding(symbol: string) {
    const cached = getCached<number>(fundingCache, symbol);
    if (cached !== null) return cached;
 
-   const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/premiumIndex`, { params: { symbol }, timeout: 5000 });
+   const res = await safeGet(`${BINANCE_FAPI}/fapi/v1/premiumIndex`, { params: { symbol }, timeout: 8000 });
    const rate = parseFloat(res.data.lastFundingRate);
    // Funding rates update every 8 hours, caching for 60 seconds is extremely safe
    setCached(fundingCache, symbol, rate, 60000);
@@ -684,7 +769,7 @@ async function fetchOI(symbol: string, period: string, limit: number = 5) {
 
    try {
        const res = await safeGet(`${BINANCE_FAPI}/futures/data/openInterestHist`, {
-         params: { symbol, period, limit }, timeout: 5000
+         params: { symbol, period, limit }, timeout: 8000
        });
        // Open interest data updates periodically; caching for 30s significantly reduces load
        setCached(oiCache, cacheKey, res.data, 30000);
@@ -2198,10 +2283,13 @@ export async function runApexLoop() {
          liveFeed.start();
       }
 
-      // ═══ v3.3.1 IGNITION RADAR FEED ═══
-      // Every tick: ask the websocket radar for whole-market explosion/
-      // collapse fingerprints (weak coins included) and queue the hot ones
-      // for priority scanning. Radar failure must never kill the loop.
+      // ═══ v3.3.1+3.3.2 IGNITION RADAR (WS) + REST SWEEP ═══
+      // WS radar: whole-market explosion/collapse fingerprints every tick.
+      // REST sweep (v3.3.2): every 4th tick diffs the whole market's
+      // lastPrice vs ~2min ago — ONE call, independent of the flaky WS
+      // (production: 1228 reconnects/31h, 0 liquidations delivered).
+      // Both feed the SAME queue; gates decide quality. Neither kills the loop.
+      tickCounter++;
       if (ignitionRadarEnabled && liveFeedEnabled && liveFeed.isConnected()) {
          try {
             const cands = liveFeed.getIgnitionCandidates({
@@ -2212,6 +2300,11 @@ export async function runApexLoop() {
             });
             if (cands.length > 0) feedIgnitionQueue(cands);
          } catch { /* radar must never kill the loop */ }
+      }
+      if (ignitionSweepEnabled && tickCounter % SWEEP_INTERVAL_TICKS === 0) {
+         // Fire-and-forget: candidates land in the queue for the NEXT tick
+         // (≤60s after detection — still inside the 3min move-start window).
+         runIgnitionSweep().catch(() => { /* never kill the loop */ });
       }
 
       // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)

@@ -11,8 +11,8 @@
 import fs from "fs";
 import path from "path";
 
-const SCHEMA_VERSION = "2.4.0";
-const BOT_VERSION = "BeastBot-Apex-v2.4";
+const SCHEMA_VERSION = "3.3.2";
+const BOT_VERSION = "BeastBot-Apex-v3.3.2";
 const RESEARCH_DIR = path.resolve(process.cwd(), "data", "research");
 
 try {
@@ -548,7 +548,10 @@ export function logRejectedSignal(payload: {
       };
 
       memoryRejected.unshift(event);
-      if (memoryRejected.length > 200) memoryRejected.pop();
+      // v3.3.2: 200 → 1000. At ~200 rejections/hour the old cap kept only
+      // ~1 hour of forensics — the whole reason the 5-day drought looked
+      // invisible in the exports. 1000 ≈ 5 hours (memory cost ≈ 1MB).
+      if (memoryRejected.length > 1000) memoryRejected.pop();
 
       pendingRejectedMap.set(signalId, {
          signalId,
