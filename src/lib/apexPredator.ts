@@ -53,8 +53,8 @@ let lastHotWatchlistUpdate = 0;
 
 
 const MIN_RR_REQUIRED = 2.5;
-const TP1_R = 0.75;
-const TP2_R = 1.80;
+const TP1_R = 1.00;
+const TP2_R = 2.00;
 const TP3_R = 3.50;
 const MAX_OPEN_TRADES = 6;
 const MAX_DAILY_LOSS = 0.040;
