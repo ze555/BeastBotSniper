@@ -1106,7 +1106,7 @@ function executeTrade(symbol: string, decision: any) {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: 0.25, part_b: 0.20, part_c: 0.55,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, micro_banked: false, grade: grade.label, pnl: 0,
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
