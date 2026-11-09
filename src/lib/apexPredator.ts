@@ -1035,7 +1035,7 @@ function executeTrade(symbol: string, decision: any) {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.40, part_b: 0.35, part_c: 0.25,
+         part_a: 0.25, part_b: 0.20, part_c: 0.55,
          a_closed: false, b_closed: false, c_closed: false,
          be_done: false, micro_banked: false, grade: grade.label, pnl: 0,
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
@@ -1151,6 +1151,8 @@ async function exitBrain(trade: any, ctx: any) {
    const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
    t.profitR = profitR;
    if (profitR > t.peak_r) t.peak_r = profitR;
+   if (!Number.isFinite(t.peakPrice)) t.peakPrice = price;
+   t.peakPrice = t.direction === "LONG" ? Math.max(t.peakPrice, price) : Math.min(t.peakPrice, price);
 
    // Floating PnL Mark-to-Market calculation (Exact match with closePart and closeTradeFull formulas)
    const effectiveExitPrice = t.direction === "LONG"
@@ -1265,13 +1267,22 @@ async function exitBrain(trade: any, ctx: any) {
 
    let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7);
 
-   // 0. PILLAR 1: SOFT RISK REDUCTION AT +0.45R (BREATHING ROOM)
-   // بدلاً من خنق الصفقة وسحب الوقف لنقطة الدخول فوراً عند +0.35R (مما يخرج الصفقة بربح سنتات عند أي تذبذب طبيعي)،
-   // نقوم بتقليص المخاطرة بنسبة 75% عند +0.45R برفع الوقف إلى -0.25R فقط وترك مسافة كافية للوصول للأهداف الكبرى TP1 و TP2!
+   // Early risk reduction: reduce the original risk without choking normal pullbacks.
    if (!t.micro_banked && profitR >= 0.45) {
-      t.sl = t.direction === "LONG" ? t.entry - (slDist * 0.25) : t.entry + (slDist * 0.25);
+      const reducedRiskStop = t.direction === "LONG"
+         ? t.entry - (slDist * 0.10)
+         : t.entry + (slDist * 0.10);
+      t.sl = t.direction === "LONG" ? Math.max(t.sl, reducedRiskStop) : Math.min(t.sl, reducedRiskStop);
       t.micro_banked = true;
-      addLog(`🛡️ [تأمين تدريجي مرن] ${t.symbol} حقق +${profitR.toFixed(2)}R | تم رفع الوقف لتقليص المخاطرة إلى -0.25R مع إبقاء مساحة للتنفس حتى TP1!`, 'info');
+      addLog(`🛡️ [RISK REDUCED] ${t.symbol} reached +${profitR.toFixed(2)}R; initial risk reduced to -0.10R.`, "info");
+   }
+
+   // Once the trade reaches +0.85R, protect a small net-positive floor while allowing room to reach +1R.
+   if (profitR >= 0.85 && !t.a_closed) {
+      const earlyProfitStop = t.direction === "LONG"
+         ? t.entry + slDist * 0.05
+         : t.entry - slDist * 0.05;
+      t.sl = t.direction === "LONG" ? Math.max(t.sl, earlyProfitStop) : Math.min(t.sl, earlyProfitStop);
    }
 
    // PILLAR 2: TIME-DECAY STAGNATION EXIT (قاعدة الساعة الرملية لركود الزخم بعد 45 دقيقة)
@@ -1287,40 +1298,70 @@ async function exitBrain(trade: any, ctx: any) {
       }
    }
 
-   // 1. QUICK WIN & BREAKEVEN LOCK (TP1: +0.75R)
-   if (!t.a_closed) {
-      if (profitR >= TP1_R) {
-         closePart(t, "A", t.part_a);
-         // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
-         t.a_closed = true; 
-         t.be_done = true;
-         addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
-      }
+   // 1. Bank only a quarter at +1R; keep three quarters working.
+   if (!t.a_closed && profitR >= 1.0) {
+      closePart(t, "A", t.part_a);
+      t.a_closed = true;
+      t.be_done = true;
+      const floorR = 0.20;
+      const floorStop = t.direction === "LONG"
+         ? t.entry + slDist * floorR
+         : t.entry - slDist * floorR;
+      t.sl = t.direction === "LONG" ? Math.max(t.sl, floorStop) : Math.min(t.sl, floorStop);
+      addLog(`🎯 [PROFIT BANKED] ${t.symbol}: closed 25% at +${profitR.toFixed(2)}R; remaining 75% protected above +0.20R.`, "success");
    }
 
-   // 2. PROFIT EXPANSION (TP2: +1.80R)
-   if (t.a_closed && !t.b_closed) {
-      if (profitR >= TP2_R) {
-         closePart(t, "B", t.part_b);
-         t.b_closed = true;
-         // Lock in TP1 level as floor profit
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
-         addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
-      }
+   // 2. Bank another 20% at +2R; the remaining 55% becomes an open-ended runner.
+   if (t.a_closed && !t.b_closed && profitR >= 2.0) {
+      closePart(t, "B", t.part_b);
+      t.b_closed = true;
+      const floorR = 0.80;
+      const floorStop = t.direction === "LONG"
+         ? t.entry + slDist * floorR
+         : t.entry - slDist * floorR;
+      t.sl = t.direction === "LONG" ? Math.max(t.sl, floorStop) : Math.min(t.sl, floorStop);
+      addLog(`🎯 [EXPANSION BANKED] ${t.symbol}: additional 20% closed at +${profitR.toFixed(2)}R; 55% remains as runner.`, "success");
    }
 
-   // 3. RUNNER EXIT (TP3: +3.50R+ or Trailing)
-   if (t.b_closed && !t.c_closed) {
-      if (t.direction === "LONG") { t.sl = Math.max(t.sl, price - trailDist); }
-      else { t.sl = Math.min(t.sl, price + trailDist); }
+   // 3. Adaptive peak-based trailing begins after the first bank, not after TP2/TP3.
+   // Supportive flow gets room; weakening flow tightens the leash. The stop can only tighten.
+   if (t.a_closed) {
+      const atrValue = Number.isFinite(p.atr14) && p.atr14 > 0
+         ? p.atr14
+         : (Number.isFinite(t.atr) && t.atr > 0 ? t.atr : slDist);
+      const trailMultiplier = exitEvidence.action === "PROTECT"
+         ? 0.90
+         : (supportiveFlow && exitEvidence.action === "HOLD" ? 1.80 : 1.35);
+      trailDist = Math.max(atrValue * trailMultiplier, slDist * 0.20);
 
-      if (profitR >= TP3_R) {
-         closePart(t, "C", t.part_c);
-         t.c_closed = true;
-         addLog(`🏁 هدف ثالث نهائي (25%) ${t.symbol} | +${TP3_R}R صيد الاتجاه بالكامل 🏆`, 'success');
-         closeTradeFull(t, "TP3 Full Target Hit");
-         return;
+      const peakPrice = Number.isFinite(t.peakPrice) ? t.peakPrice : price;
+      const peakTrailStop = t.direction === "LONG"
+         ? peakPrice - trailDist
+         : peakPrice + trailDist;
+
+      // Convert the best excursion into a progressively higher guaranteed R floor.
+      const peakR = Number.isFinite(t.peak_r) ? t.peak_r : profitR;
+      const protectedR = peakR >= 4.0 ? 2.00
+         : peakR >= 3.0 ? 1.25
+         : peakR >= 2.0 ? 0.80
+         : peakR >= 1.5 ? 0.40
+         : peakR >= 1.0 ? 0.20
+         : 0;
+
+      const peakFloorStop = t.direction === "LONG"
+         ? t.entry + slDist * protectedR
+         : t.entry - slDist * protectedR;
+
+      if (t.direction === "LONG") {
+         t.sl = Math.max(t.sl, peakTrailStop, peakFloorStop);
+      } else {
+         t.sl = Math.min(t.sl, peakTrailStop, peakFloorStop);
+      }
+
+      if (!t.runnerTrailLogged || peakR >= (t.lastRunnerTrailLogR || 0) + 1.0) {
+         addLog(`🏃 [ADAPTIVE RUNNER] ${t.symbol} | peak +${peakR.toFixed(2)}R | protected floor +${protectedR.toFixed(2)}R | ATR trail x${trailMultiplier.toFixed(2)}`, "info");
+         t.runnerTrailLogged = true;
+         t.lastRunnerTrailLogR = peakR;
       }
    }
 
