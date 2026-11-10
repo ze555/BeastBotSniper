@@ -1409,6 +1409,8 @@ function closeTradeFull(t: any, reason: string = "") {
    t.exitReason = reason;
    t.finalPnl = t.realizedPnl || 0;
    closedTrades.unshift(t);
+   // Keep the in-memory dashboard history bounded; full diagnostics remain persisted by researchLogger.
+   if (closedTrades.length > 150) closedTrades.length = 150;
    t.pos = 0;
    todaysStats.count++;
 
