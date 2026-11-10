@@ -38,6 +38,8 @@ export interface FuturesTapeFlow {
 }
 type SocketState = { socket: WebSocket; reconnect?: ReturnType<typeof setTimeout> };
 const tapeBySymbol = new Map<string, FuturesTapeTrade[]>();
+const MAX_TAPE_SYMBOLS = 500;
+const MAX_TAPE_TRADES_PER_SYMBOL = 1_200;
 type DepthSample = { bidNotional: number; askNotional: number; spreadBps: number; observedAt: number };
 const depthBySymbol = new Map<string, DepthSample[]>();
 const sockets: SocketState[] = [];
@@ -46,12 +48,29 @@ let liquidationSocket: WebSocket | null = null;
 let configuredSymbols = "";
 let started = false;
 
+function evictOldestSymbol<T>(map: Map<string, T[]>) {
+  if (map.size < MAX_TAPE_SYMBOLS) return;
+  let oldestKey: string | null = null;
+  let oldestAt = Infinity;
+  for (const [key, rows] of map) {
+    const last = rows.length ? Number((rows[rows.length - 1] as any).timestamp ?? (rows[rows.length - 1] as any).observedAt) : 0;
+    if (last < oldestAt) { oldestAt = last; oldestKey = key; }
+  }
+  if (oldestKey) map.delete(oldestKey);
+}
+
 function pruneTape(symbol: string, now: number) {
   const tape = tapeBySymbol.get(symbol);
-  if (!tape) return;
-  const keep = tape.filter(t => t.timestamp >= now - 5 * 60_000);
-  if (keep.length) tapeBySymbol.set(symbol, keep);
-  else tapeBySymbol.delete(symbol);
+  if (tape?.length) {
+    let first = 0;
+    while (first < tape.length && tape[first].timestamp < now - 5 * 60_000) first++;
+    if (first > 0) tape.splice(0, first);
+    if (!tape.length) tapeBySymbol.delete(symbol);
+  }
+  const depth = depthBySymbol.get(symbol);
+  if (depth?.length && now - depth[depth.length - 1].observedAt > 120_000) depthBySymbol.delete(symbol);
+  const liquidations = liquidationTape.get(symbol);
+  if (liquidations?.length && now - liquidations[liquidations.length - 1].timestamp > 5 * 60_000) liquidationTape.delete(symbol);
 }
 export function recordFuturesDepth(symbol: string, bids: any[], asks: any[], observedAt = Date.now()) {
   if (!symbol || !Array.isArray(bids) || !Array.isArray(asks) || !bids.length || !asks.length) return;
@@ -60,7 +79,8 @@ export function recordFuturesDepth(symbol: string, bids: any[], asks: any[], obs
   const bestBid = Number(bids[0][0]), bestAsk = Number(asks[0][0]);
   if (![bidNotional, askNotional, bestBid, bestAsk].every(Number.isFinite) || bidNotional <= 0 || askNotional <= 0 || bestBid <= 0 || bestAsk < bestBid) return;
   const mid = (bestBid + bestAsk) / 2;
-  const rows = depthBySymbol.get(symbol) || [];
+  let rows = depthBySymbol.get(symbol);
+  if (!rows) { evictOldestSymbol(depthBySymbol); rows = []; }
   rows.push({ bidNotional, askNotional, spreadBps: (bestAsk - bestBid) / mid * 10000, observedAt });
   while (rows.length > 80 || (rows.length && observedAt - rows[0].observedAt > 90_000)) rows.shift();
   depthBySymbol.set(symbol, rows);
@@ -79,12 +99,14 @@ export function getFuturesBookFlow(symbol: string, now = Date.now()) {
 export function recordFuturesTrade(symbol: string, trade: FuturesTapeTrade) {
   if (!symbol || ![trade.price, trade.quantity, trade.quote, trade.timestamp].every(Number.isFinite) ||
       trade.price <= 0 || trade.quantity <= 0 || trade.quote <= 0) return;
-  const tape = tapeBySymbol.get(symbol) || [];
+  let tape = tapeBySymbol.get(symbol);
+  if (!tape) { evictOldestSymbol(tapeBySymbol); tape = []; }
   tape.push(trade);
   const cutoff = Date.now() - 5 * 60_000;
   let first = 0;
   while (first < tape.length && tape[first].timestamp < cutoff) first++;
   if (first > 0) tape.splice(0, first);
+  if (tape.length > MAX_TAPE_TRADES_PER_SYMBOL) tape.splice(0, tape.length - MAX_TAPE_TRADES_PER_SYMBOL);
   tapeBySymbol.set(symbol, tape);
 }
 export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTapeFlow | null {
@@ -131,7 +153,8 @@ export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTap
 /** Candidates are selected from executed Futures trades, not 24h gainers alone. */
 export function recordFuturesLiquidation(symbol: string, side: "LONG_LIQUIDATION" | "SHORT_LIQUIDATION", quote: number, timestamp: number) {
   if (!symbol || !Number.isFinite(quote) || quote <= 0 || !Number.isFinite(timestamp) || timestamp <= 0) return;
-  const events = liquidationTape.get(symbol) || [];
+  let events = liquidationTape.get(symbol);
+  if (!events) { evictOldestSymbol(liquidationTape); events = []; }
   events.push({ side, quote, timestamp });
   const cutoff = Date.now() - 5 * 60_000;
   while (events.length && events[0].timestamp < cutoff) events.shift();
@@ -181,6 +204,8 @@ export function getFuturesWaveCandidates(now = Date.now(), _legacyLimit?: number
     ranked.push({ symbol, impulse: Math.max(notional30, notional1m / 2) * (Math.abs(priceMove30) + Math.abs(priceMove1m) + (volumeBurst ? 0.005 : 0)) });
   }
   // Return every qualifying symbol. Sort for evaluation order only; never truncate to Top-N.
+  for (const symbol of depthBySymbol.keys()) pruneTape(symbol, now);
+  for (const symbol of liquidationTape.keys()) pruneTape(symbol, now);
   return ranked.sort((a, b) => b.impulse - a.impulse).map(x => x.symbol);
 }
 
@@ -285,7 +310,13 @@ export function getFuturesWaveFeedStatus() {
   const now = Date.now();
   const symbolsWithFreshTape = Array.from(tapeBySymbol.values()).filter(rows => rows.length && now - rows[rows.length - 1].timestamp <= 30_000).length;
   const symbolsWithDepth = Array.from(depthBySymbol.values()).filter(rows => rows.length >= 3 && now - rows[rows.length - 1].observedAt <= 5_000).length;
+  const tapeTradePoints = Array.from(tapeBySymbol.values()).reduce((sum, rows) => sum + rows.length, 0);
+  const depthSamples = Array.from(depthBySymbol.values()).reduce((sum, rows) => sum + rows.length, 0);
+  const liquidationEvents = Array.from(liquidationTape.values()).reduce((sum, rows) => sum + rows.length, 0);
   return { configured: started, symbols: configuredSymbols ? configuredSymbols.split(",").length : 0,
     connections: sockets.length, openConnections, symbolsWithFreshTape, symbolsWithDepth,
+    tapeSymbolsInMemory: tapeBySymbol.size, tapeTradePoints, depthSymbolsInMemory: depthBySymbol.size,
+    depthSamples, liquidationSymbolsInMemory: liquidationTape.size, liquidationEvents,
+    maxTapeSymbols: MAX_TAPE_SYMBOLS, maxTapeTradesPerSymbol: MAX_TAPE_TRADES_PER_SYMBOL,
     liquidationFeedConnected: Boolean(liquidationSocket && liquidationSocket.readyState === WebSocket.OPEN) };
 }
