@@ -57,6 +57,19 @@ const memoryJourneys: any[] = [];
 const pendingRejectedMap = new Map<string, any>();
 const activeTradesDirectionMap = new Map<string, any>();
 const rejectedSignalDedup = new Map<string, number>();
+const MAX_PENDING_REJECTIONS = 10_000;
+const PENDING_REJECTION_TTL_MS = 125 * 60_000;
+
+function prunePendingRejected(now = Date.now()) {
+   for (const [id, item] of pendingRejectedMap) {
+      if (!Number.isFinite(item.signalTimeMs) || now - item.signalTimeMs > PENDING_REJECTION_TTL_MS) pendingRejectedMap.delete(id);
+   }
+   while (pendingRejectedMap.size > MAX_PENDING_REJECTIONS) {
+      const oldest = pendingRejectedMap.keys().next().value;
+      if (!oldest) break;
+      pendingRejectedMap.delete(oldest);
+   }
+}
 
 function loadJsonlTail(filePath: string, limit: number): any[] {
    try {
@@ -538,10 +551,17 @@ export function logRejectedSignal(payload: {
       const dedupKey = `${symbol}:${direction}:${String(rejection_reason).slice(0, 120)}`;
       const lastLogged = rejectedSignalDedup.get(dedupKey) || 0;
       if (Date.now() - lastLogged < 30_000) return;
-      rejectedSignalDedup.set(dedupKey, Date.now());
-      if (rejectedSignalDedup.size > 5000) {
-         for (const [key, at] of rejectedSignalDedup) if (Date.now() - at > 10 * 60_000) rejectedSignalDedup.delete(key);
+      const now = Date.now();
+      rejectedSignalDedup.set(dedupKey, now);
+      if (rejectedSignalDedup.size > 1000) {
+         for (const [key, at] of rejectedSignalDedup) if (now - at > 10 * 60_000) rejectedSignalDedup.delete(key);
+         while (rejectedSignalDedup.size > 2500) {
+            const oldest = rejectedSignalDedup.keys().next().value;
+            if (!oldest) break;
+            rejectedSignalDedup.delete(oldest);
+         }
       }
+      prunePendingRejected(now);
       const signalTime = new Date();
       const signalPrice = p?.price || (p?.klines?.length ? p.klines[p.klines.length - 1].close : 0);
       const signalId = `REJ_${symbol}_${signalTime.getTime()}`;
@@ -657,6 +677,7 @@ export function logRejectedSignal(payload: {
       memoryRejected.unshift(event);
       if (memoryRejected.length > 200) memoryRejected.pop();
 
+      prunePendingRejected(signalTime.getTime());
       pendingRejectedMap.set(signalId, {
          signalId,
          symbol,
@@ -683,6 +704,7 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    if (pendingRejectedMap.size === 0 || !symbol || !currentPrice) return;
 
    const now = Date.now();
+   prunePendingRejected(now);
    let needsRewrite = false;
 
    for (const [id, item] of pendingRejectedMap.entries()) {
