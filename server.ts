@@ -26,7 +26,13 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => res.json({ status: "ok", mode: "Apex Predator Only", bot_version: "BeastBot-Apex-v2.5", build_revision: process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null, timestamp: new Date().toISOString() }));
   app.get("/api/market/feeds", (req, res) => res.json({ timestamp: new Date().toISOString(), futures: getFuturesWaveFeedStatus() }));
-  app.get("/api/research/diagnostics", (req, res) => res.json({ timestamp: new Date().toISOString(), research: getResearchDiagnostics(), scanner: getStats(), feeds: getFuturesWaveFeedStatus() }));
+  app.get("/api/research/diagnostics", (req, res) => {
+    const memory = process.memoryUsage();
+    res.json({ timestamp: new Date().toISOString(), memory: {
+      rss_mb: Math.round(memory.rss / 1024 / 1024), heap_used_mb: Math.round(memory.heapUsed / 1024 / 1024),
+      heap_total_mb: Math.round(memory.heapTotal / 1024 / 1024), external_mb: Math.round(memory.external / 1024 / 1024)
+    }, research: getResearchDiagnostics(), scanner: getStats(), feeds: getFuturesWaveFeedStatus() });
+  });
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
