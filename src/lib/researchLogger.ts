@@ -11,8 +11,8 @@
 import fs from "fs";
 import path from "path";
 
-const SCHEMA_VERSION = "3.3.2";
-const BOT_VERSION = "BeastBot-Apex-v3.3.2";
+const SCHEMA_VERSION = "3.3.3";
+const BOT_VERSION = "BeastBot-Apex-v3.3.3";
 const RESEARCH_DIR = path.resolve(process.cwd(), "data", "research");
 
 try {

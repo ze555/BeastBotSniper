@@ -187,6 +187,35 @@ export function detectMarketRegime(ctx: any, p: any): MarketRegimeType {
 // Evaluates multi-period persistence across 5m, 15m, 4h CVD, OI, Taker and Price.
 // Strictly prevents MIXED / CONFLICTED flows from passing.
 // ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// PACE-VOLUME ENGINE (v3.3.3) — the young-candle honesty fix.
+// Live forensics (Nov 10, 7.4h): Dead Chop rejected 178 RANGE signals whose
+// flow was SELLING_PRESSURE/SHORT_BUILDUP with RVOL p50 = 0.46. The current
+// 15m candle is INCOMPLETE: a 3-min-old candle running at 3x normal pace
+// shows raw RVOL ≈ 0.6 (3 × 3/15). Every rvol-threshold gate was demanding
+// a MATURE (10-15 min old) candle — the "we only see waves after they rip"
+// root cause, inside the metrics themselves. Pace projects the incomplete
+// candle's volume to full-candle equivalents: pace = rvol / ageFrac.
+// ----------------------------------------------------------------------------
+export function computeRvolPace(
+   rvol: number,
+   openTimeMs: number,
+   nowMs: number,
+   candleMs: number = 15 * 60 * 1000
+): number {
+   if (!(rvol > 0) || !(candleMs > 0)) return rvol;
+   const ageFrac = Math.min(1, Math.max(0.15, (nowMs - openTimeMs) / candleMs));
+   return rvol / ageFrac;
+}
+
+// Entry gates read volume through pace when available; raw rvol stays
+// authoritative for the exhaustion vetoes (RVOL > 5 crazy / blow-off).
+export function effectiveRvol(p: any): number {
+   const pace = p?.rvolPace;
+   if (typeof pace === "number" && pace > 0) return pace;
+   return typeof p?.rvol === "number" ? p.rvol : 1.0;
+}
+
 export function interpretFlow(p: any, w: any): FlowAnalysis {
    const pChg = w.p_chg || 0;
    const oiChg = w.oi_chg || 0;
@@ -537,9 +566,9 @@ export function evaluateTimingGate(
       // 4. Healthy Breakout
       // Clean close above level within acceptable range (0.1% to 0.9 * ATR14) with strong participation
       if (price >= level && lastCandle && lastCandle.close >= level) {
-         if (p.rvol >= 1.2 && p.taker >= 0.51 && flow.persistenceState !== "CONFLICTED") {
+         if (effectiveRvol(p) >= 1.2 && p.taker >= 0.51 && flow.persistenceState !== "CONFLICTED") {
             evidence.push("Healthy breakout confirmed within acceptable entry corridor (< 1.0x ATR)");
-            evidence.push(`RVOL (${p.rvol.toFixed(2)}x) and Taker (${(p.taker * 100).toFixed(1)}%) confirming follow-through`);
+            evidence.push(`RVOL-pace (${effectiveRvol(p).toFixed(2)}x) and Taker (${(p.taker * 100).toFixed(1)}%) confirming follow-through`);
             return {
                state: "CONFIRMED",
                passed: true,
@@ -635,9 +664,9 @@ export function evaluateTimingGate(
    }
 
    if (price <= level && lastCandle && lastCandle.close <= level) {
-      if (p.rvol >= 1.2 && p.taker <= 0.49 && flow.persistenceState !== "CONFLICTED") {
+      if (effectiveRvol(p) >= 1.2 && p.taker <= 0.49 && flow.persistenceState !== "CONFLICTED") {
          evidence.push("Healthy breakdown confirmed within acceptable entry corridor (< 1.0x ATR)");
-         evidence.push(`RVOL (${p.rvol.toFixed(2)}x) and Taker (${(p.taker * 100).toFixed(1)}%) confirming seller dominance`);
+         evidence.push(`RVOL-pace (${effectiveRvol(p).toFixed(2)}x) and Taker (${(p.taker * 100).toFixed(1)}%) confirming seller dominance`);
          return {
             state: "CONFIRMED",
             passed: true,
@@ -1183,28 +1212,30 @@ export function checkConfirmation(
       }
    }
 
-   // 4. مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE):
+   // 4. مانع التذبذب الميت وعديم الزخم (Dead Chop Filter في الـ RANGE) — v3.3.3 recalibrated:
    // الشرط: لمنع الصفقات العرضية الراكدة، يُشترط للدخول في أي صفقة بنظام النطاق العرضي توفر شرطين معاً:
-   // 1. حجم تداول نسبي انفجاري: p?.rvol >= 2.0
-   // 2. قوة اتجاهية صاعدة (للـ LONG) أو هابطة (للـ SHORT): ADX >= 22 مع توافق DI+ > DI- للشراء أو DI- > DI+ للبيع.
+   // 1. وتيرة حجم انفجارية (pace-projected): rvolPace >= 1.5 — الحجم الحقيقي للشمعة مقيس بوتيرتها
+   //    وليس بمحتواها الجزئي (الشمعة الفتية مقموعة رياضياً بالعمر — راجع computeRvolPace).
+   // 2. قوة اتجاهية: ADX >= 18 — نفس عتبة محرك التأكيد نفسه (كانت 22 — مضاعفة بوابية غير متسقة).
+   //    القياس الحي: p50 للـ ADX المرفوض = 17.8 — العتبة القديمة كانت تعادل إفلاس الجودة المزدوج.
    if (regime === "RANGE") {
-      const rvol = p?.rvol ?? 1.0;
+      const rvolEff = effectiveRvol(p);
       const adx = p?.adx ?? 0;
       const diPlus = p?.di_plus ?? 0;
       const diMinus = p?.di_minus ?? 0;
 
-      const hasExplosiveRvol = rvol >= 2.0;
+      const hasExplosiveRvol = rvolEff >= 1.5;
       const hasDirectionalMomentum = bias === "LONG"
-         ? (adx >= 22 && diPlus > diMinus)
+         ? (adx >= 18 && diPlus > diMinus)
          : bias === "SHORT"
-            ? (adx >= 22 && diMinus > diPlus)
+            ? (adx >= 18 && diMinus > diPlus)
             : false;
 
       if (!hasExplosiveRvol || !hasDirectionalMomentum) {
          const missingChopConditions: string[] = [];
-         if (!hasExplosiveRvol) missingChopConditions.push(`Explosive RVOL >= 2.0 (current: ${rvol.toFixed(2)})`);
+         if (!hasExplosiveRvol) missingChopConditions.push(`Explosive RVOL-pace >= 1.5 (current: ${rvolEff.toFixed(2)})`);
          if (!hasDirectionalMomentum) {
-            missingChopConditions.push(`Directional strength ADX >= 22 with ${bias === "LONG" ? "DI+ > DI-" : "DI- > DI+"} (current: ADX ${adx.toFixed(1)}, DI+ ${diPlus.toFixed(1)}, DI- ${diMinus.toFixed(1)})`);
+            missingChopConditions.push(`Directional strength ADX >= 18 with ${bias === "LONG" ? "DI+ > DI-" : "DI- > DI+"} (current: ADX ${adx.toFixed(1)}, DI+ ${diPlus.toFixed(1)}, DI- ${diMinus.toFixed(1)})`);
          }
          return {
             isConfirmed: false,
@@ -1253,8 +1284,13 @@ export function checkConfirmation(
    }
 
    // --- LONG CONFIRMATION EVALUATION ---
+   // v3.3.3 RANGE relief: BUYING_PRESSURE also confirms in RANGE (was TREND_UP only).
+   // The RANGE-specific quality proof is the recalibrated Dead Chop gate above
+   // (pace-volume ≥ 1.5 AND ADX ≥ 18 AND DI alignment) — demanding BUILDUP-only
+   // on top of it starved range waves (55% of the live tape was RANGE, 0 trades).
+   // RANGE LONG while BTC is bull remains hard-blocked by the Range Long Trap.
    if (scenario.primary.bias === "LONG") {
-      if (flow.state === "LONG_BUILDUP" || (flow.state === "BUYING_PRESSURE" && regime === "TREND_UP")) {
+      if (flow.state === "LONG_BUILDUP" || (flow.state === "BUYING_PRESSURE" && (regime === "TREND_UP" || regime === "RANGE"))) {
          evidence.push(`Flow confirmed: ${flow.state} (Persistence: ${flow.persistenceState})`);
       } else {
          missingItems.push("Bullish orderflow buildup");
@@ -1293,8 +1329,12 @@ export function checkConfirmation(
    }
 
    // --- SHORT CONFIRMATION EVALUATION ---
+   // v3.3.3 RANGE relief: SELLING_PRESSURE also confirms in RANGE (was TREND_DOWN
+   // only). Live forensics: 102 of the 178 Dead-Chop-killed signals were already
+   // SELLING_PRESSURE with aligned flow — the market spent 55% of the day in
+   // RANGE and the confirmation engine structurally could not confirm a short.
    if (scenario.primary.bias === "SHORT") {
-      if (flow.state === "SHORT_BUILDUP" || (flow.state === "SELLING_PRESSURE" && regime === "TREND_DOWN")) {
+      if (flow.state === "SHORT_BUILDUP" || (flow.state === "SELLING_PRESSURE" && (regime === "TREND_DOWN" || regime === "RANGE"))) {
          evidence.push(`Flow confirmed: ${flow.state} (Persistence: ${flow.persistenceState})`);
       } else {
          missingItems.push("Bearish orderflow buildup");

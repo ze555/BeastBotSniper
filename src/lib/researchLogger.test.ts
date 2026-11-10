@@ -160,7 +160,7 @@ console.log("\n🧪 RUNNING RESEARCH LOGGER v2.4.0 VERIFICATION SUITE\n");
    const rejectedData = getRejectedSignalsData();
    assert("logRejectedSignal added event to memory", rejectedData.length > 0);
    const rej = rejectedData[0];
-   assert("Rejected event has schema_version 2.4.0", rej.schema_version === "3.3.2");
+   assert("Rejected event has schema_version 2.4.0", rej.schema_version === "3.3.3");
    assert("Rejected event has timing_gate_state", rej.timing_gate_state === "LATE_EXPANSION");
    assert("Rejected event has flow_persistence_state", rej.flow_persistence_state === "STRONG");
    assert("Rejected event has entry_timing", rej.entry_timing !== undefined);
@@ -213,7 +213,7 @@ console.log("\n🧪 RUNNING RESEARCH LOGGER v2.4.0 VERIFICATION SUITE\n");
    const decisions = getTradingDecisionsData();
    assert("logTradeDecision records completed trade", decisions.length > 0);
    const lastDecision = decisions[0];
-   assert("Trade decision has schema_version 2.4.0", lastDecision.schema_version === "3.3.2");
+   assert("Trade decision has schema_version 2.4.0", lastDecision.schema_version === "3.3.3");
    assert("Trade decision has timing_gate_state", lastDecision.timing_gate_state === "CONFIRMED");
    assert("Trade decision has flow_persistence_state", lastDecision.flow_persistence_state === "STRONG");
    assert("Trade decision contains directional_prediction", lastDecision.directional_prediction !== undefined);
@@ -223,7 +223,7 @@ console.log("\n🧪 RUNNING RESEARCH LOGGER v2.4.0 VERIFICATION SUITE\n");
 // 7. Test Performance Summary with Directional Accuracy Report
 {
    const summary = getPerformanceSummaryData();
-   assert("Performance summary schema is 3.3.2", summary.schema_version === "3.3.2");
+   assert("Performance summary schema is 3.3.2", summary.schema_version === "3.3.3");
    assert("Summary has by_session breakdown", summary.executed_trades_summary?.by_session !== undefined);
    assert("Summary has by_loss_classification breakdown", summary.executed_trades_summary?.by_loss_classification !== undefined);
    assert("Summary has directional_accuracy_report", summary.directional_accuracy_report !== undefined);
@@ -233,7 +233,7 @@ console.log("\n🧪 RUNNING RESEARCH LOGGER v2.4.0 VERIFICATION SUITE\n");
 // 8. Test Full Export Bundle
 {
    const bundle = getFullExportBundle();
-   assert("Full export bundle has schema_version 2.4.0", bundle.schema_version === "3.3.2");
+   assert("Full export bundle has schema_version 2.4.0", bundle.schema_version === "3.3.3");
    assert("Full export bundle contains trading_decisions", Array.isArray(bundle.trading_decisions));
    assert("Full export bundle contains rejected_signals", Array.isArray(bundle.rejected_signals));
 }

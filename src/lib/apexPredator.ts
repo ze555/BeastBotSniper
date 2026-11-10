@@ -1,6 +1,6 @@
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
-import { evaluateSymbolReasoning, ReasoningResult } from "./reasoningEngine.js";
+import { evaluateSymbolReasoning, ReasoningResult, computeRvolPace } from "./reasoningEngine.js";
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateFlowEntryGate, configureFlowEntryGate, getFlowEntryGateConfig } from "./flowEntryGate.js";
 import {
@@ -1000,6 +1000,15 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
    const avg_vol = vo.slice(-21,-1).reduce((a: number, b: number) => a+b, 0)/20;
    const rvol = vo[vo.length-1] / (avg_vol || 1);
 
+   // ═══ PACE-VOLUME (v3.3.3) ═══
+   // The last 15m candle is the LIVE, INCOMPLETE one: its raw volume is
+   // age-suppressed (a 3-min-old candle at 3x pace reads rvol ≈ 0.6). Entry
+   // gates downstream read volume through rvolPace (honest full-candle
+   // projection); exhaustion vetoes keep reading raw rvol.
+   // Guard: no valid openTime → no projection (pace = raw, never inflated).
+   const c0OpenMs = typeof c0.openTime === "number" && c0.openTime > 0 ? c0.openTime : null;
+   const rvolPace = c0OpenMs !== null ? computeRvolPace(rvol, c0OpenMs, Date.now()) : rvol;
+
    const stop_hunt_bull = lo[lo.length-1] < sup10 && cl[cl.length-1] > sup10 && l_wick > body*2 && rvol > 1.8;
    const stop_hunt_bear = hi[hi.length-1] > res10 && cl[cl.length-1] < res10 && u_wick > body*2 && rvol > 1.8;
 
@@ -1056,7 +1065,7 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
    return {
       price, ema21, ema50, ema200, atr14, atr20,
       bull_align, bear_align,
-      HH_HL, LH_LL, compressed, rvol, avg_vol,
+      HH_HL, LH_LL, compressed, rvol, rvolPace, avg_vol,
       strong_bull_c, strong_bear_c, cpos, bpct,
       stop_hunt_bull, stop_hunt_bear,
       adx, di_plus, di_minus, hist_bull, hist_bear, hist,
