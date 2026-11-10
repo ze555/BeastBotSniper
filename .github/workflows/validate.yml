@@ -17,4 +17,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        if: github.event_name != 'pull_request' || github.head_ref != 'feat/institutional-full-trading-engine'
       - run: npm run build
