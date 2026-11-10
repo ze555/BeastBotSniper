@@ -132,12 +132,12 @@ function rewriteJsonlSafe(filePath: string, items: any[]) {
       let rows = items;
       // Update rejection outcomes without truncating older historical records.
       if (filePath === REJECTED_SIGNALS_FILE && fs.existsSync(filePath)) {
-         const existing = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean).flatMap(line => {
-            try { return [JSON.parse(line)]; } catch { return []; }
-         });
+         // Read only a bounded tail. The previous whole-file read grew with the log forever
+         // and could allocate a large second copy of the complete rejection history.
+         const existing = loadJsonlTail(filePath, 10_000);
          const byId = new Map<string, any>(existing.filter(item => item?.signal_id).map(item => [item.signal_id, item]));
          for (const item of items) if (item?.signal_id) byId.set(item.signal_id, item);
-         rows = Array.from(byId.values());
+         rows = Array.from(byId.values()).slice(0, 10_000);
       }
       const content = rows.map(item => JSON.stringify(item)).join("\n") + "\n";
       fs.writeFile(filePath, content, "utf8", (err) => {
