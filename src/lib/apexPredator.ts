@@ -1210,6 +1210,11 @@ async function exitBrain(trade: any, ctx: any) {
       consecutiveAdverseObservations: (() => {
          const flow = w.futuresFlow;
          if (!flow) { t.institutionalAdverseCount = 0; return 0; }
+         const observationAt = Number(flow.observedAt);
+         if (!Number.isFinite(observationAt) || observationAt <= (Number(t.lastAdverseFlowObservedAt) || 0)) {
+            return Number(t.institutionalAdverseCount) || 0;
+         }
+         t.lastAdverseFlowObservedAt = observationAt;
          const sign = t.direction === "LONG" ? 1 : -1;
          const b30 = Number.isFinite(flow.buyQuote30s) ? flow.buyQuote30s : flow.buyQuote;
          const s30 = Number.isFinite(flow.sellQuote30s) ? flow.sellQuote30s : flow.sellQuote;
