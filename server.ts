@@ -131,12 +131,12 @@ async function startServer() {
 }
 
 process.on("SIGTERM", () => {
-  persistRuntimeState();
+  persistRuntimeState(true);
   stopFuturesWaveFeed();
   process.exit(0);
 });
 process.on("SIGINT", () => {
-  persistRuntimeState();
+  persistRuntimeState(true);
   stopFuturesWaveFeed();
   process.exit(0);
 });
