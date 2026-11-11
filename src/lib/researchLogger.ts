@@ -86,17 +86,18 @@ function prunePendingRejected(now = Date.now()) {
    // Called from the high-frequency Futures trade stream: perform the full sweep at most once/minute.
    if (now - lastPendingPruneAt < 60_000 && pendingRejectedMap.size <= MAX_PENDING_REJECTIONS) return;
    lastPendingPruneAt = now;
-   for (const [id, item] of pendingRejectedMap) {
-      if (!Number.isFinite(item.signalTimeMs) || now - item.signalTimeMs > PENDING_REJECTION_TTL_MS) removePendingRejected(id, item);
+   // Pending map is maintained oldest-first, so expiry and capacity eviction are O(number removed).
+   while (pendingRejectedMap.size) {
+      const oldestId = pendingRejectedMap.keys().next().value;
+      if (!oldestId) break;
+      const oldestItem = pendingRejectedMap.get(oldestId);
+      if (oldestItem && Number.isFinite(oldestItem.signalTimeMs) && now - oldestItem.signalTimeMs <= PENDING_REJECTION_TTL_MS) break;
+      removePendingRejected(oldestId, oldestItem);
    }
    while (pendingRejectedMap.size > MAX_PENDING_REJECTIONS) {
-      let oldestId: string | null = null, oldestTime = Infinity, oldestItem: any = null;
-      for (const [id, item] of pendingRejectedMap) {
-         const at = Number(item.signalTimeMs) || 0;
-         if (at < oldestTime) { oldestTime = at; oldestId = id; oldestItem = item; }
-      }
+      const oldestId = pendingRejectedMap.keys().next().value;
       if (!oldestId) break;
-      removePendingRejected(oldestId, oldestItem);
+      removePendingRejected(oldestId);
    }
 }
 
@@ -125,11 +126,15 @@ function loadJsonlTail(filePath: string, limit: number): any[] {
 memoryDecisions.push(...loadJsonlTail(TRADING_DECISIONS_FILE, 100));
 memoryRejected.push(...loadJsonlTail(REJECTED_SIGNALS_FILE, 100));
 memoryJourneys.push(...loadJsonlTail(TRADE_JOURNEYS_FILE, 150));
-const restoredRejectedIds = new Set<string>();
+const restoredRejectedById = new Map<string, any>();
 for (const event of loadJsonlTail(REJECTED_SIGNALS_FILE, MAX_PENDING_REJECTIONS)) {
    // Tail loader is newest-first; retain the latest appended version for each signal ID.
-   if (!event.signal_id || restoredRejectedIds.has(event.signal_id)) continue;
-   restoredRejectedIds.add(event.signal_id);
+   if (!event.signal_id || restoredRejectedById.has(event.signal_id)) continue;
+   restoredRejectedById.set(event.signal_id, event);
+}
+const restoredPendingEvents = Array.from(restoredRejectedById.values())
+   .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+for (const event of restoredPendingEvents) {
    const signalTimeMs = new Date(event.timestamp).getTime();
    const price = Number(event.signal_price);
    const outcomes = event.future_outcomes || {};
