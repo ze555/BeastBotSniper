@@ -9,7 +9,8 @@ import {
   getTradeJourneysData,
   getPerformanceSummaryData,
   getFullExportBundle,
-  getResearchDiagnostics
+  getResearchDiagnostics,
+  getResearchStorageStatus
 } from "./src/lib/researchLogger.js";
 import { getFuturesWaveFeedStatus } from "./src/lib/futuresWaveFeed.js";
 import { getHeapStatistics } from "node:v8";
@@ -37,7 +38,7 @@ async function startServer() {
       heap_total_mb: Math.round(memory.heapTotal / 1024 / 1024), heap_limit_mb: Math.round(heapLimit / 1024 / 1024),
       heap_used_percent: Number(((memory.heapUsed / heapLimit) * 100).toFixed(1)),
       external_mb: Math.round(memory.external / 1024 / 1024)
-    }, research: getResearchDiagnostics(), scanner: getStats(), feeds: getFuturesWaveFeedStatus() });
+    }, research: getResearchDiagnostics(), storage: getResearchStorageStatus(), scanner: getStats(), feeds: getFuturesWaveFeedStatus() });
   });
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
