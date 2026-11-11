@@ -28,4 +28,5 @@ jobs:
       - run: npx tsx src/lib/marketAlignmentEngine.test.ts
       - run: npx tsx src/lib/reverseWaveEngine.test.ts
       - run: npx tsx src/lib/futuresWaveFeed.test.ts
+      - run: npx tsc --noEmit
       - run: npm run build
