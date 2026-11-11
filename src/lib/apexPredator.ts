@@ -10,7 +10,10 @@ import {
    extractEntryTiming,
    extractMarketRegimeContext,
    registerTradeForDirectionTracking,
-   updateDirectionTracking
+   updateDirectionTracking,
+   loadBotState,
+   saveBotState,
+   getResearchStorageStatus
 } from "./researchLogger.js";
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
@@ -108,6 +111,71 @@ let apexPredatorStats: any = {
   }
 };
 
+// Restore the paper account after process restarts when the configured storage path is persistent.
+const restoredBotState = loadBotState();
+if (restoredBotState?.schema_version === 1) {
+   if (Number.isFinite(restoredBotState.virtualBalance) && restoredBotState.virtualBalance > 0) virtualBalance = restoredBotState.virtualBalance;
+   if (Number.isFinite(restoredBotState.initialVirtualBalance) && restoredBotState.initialVirtualBalance > 0) initialVirtualBalance = restoredBotState.initialVirtualBalance;
+   if (Array.isArray(restoredBotState.activeTrades)) {
+      activeTrades = restoredBotState.activeTrades.filter((trade: any) =>
+         trade && typeof trade.symbol === "string" &&
+         (trade.direction === "LONG" || trade.direction === "SHORT") &&
+         Number.isFinite(Number(trade.entry)) && Number(trade.entry) > 0 &&
+         Number.isFinite(Number(trade.pos)) && Number(trade.pos) > 0 &&
+         Number.isFinite(Number(trade.sl)) && Number(trade.sl) > 0
+      );
+   }
+   if (Array.isArray(restoredBotState.closedTrades)) closedTrades = restoredBotState.closedTrades.slice(0, 150);
+   if (restoredBotState.todaysStats && typeof restoredBotState.todaysStats === "object") {
+      todaysStats = {
+         count: Number(restoredBotState.todaysStats.count) || 0,
+         wins: Number(restoredBotState.todaysStats.wins) || 0,
+         losses: Number(restoredBotState.todaysStats.losses) || 0,
+         pnl: Number(restoredBotState.todaysStats.pnl) || 0,
+         sumR: Number(restoredBotState.todaysStats.sumR) || 0
+      };
+   }
+   if (typeof restoredBotState.statsDay === "string") statsDay = restoredBotState.statsDay;
+   if (restoredBotState.config && typeof restoredBotState.config === "object") {
+      const c = restoredBotState.config;
+      if (Number.isFinite(c.maxOpenTradesConfig) && c.maxOpenTradesConfig >= 1) maxOpenTradesConfig = c.maxOpenTradesConfig;
+      if (typeof c.haltProfitEnabled === "boolean") haltProfitEnabled = c.haltProfitEnabled;
+      if (Number.isFinite(c.haltProfitTarget)) haltProfitTarget = c.haltProfitTarget;
+      if (typeof c.haltLossEnabled === "boolean") haltLossEnabled = c.haltLossEnabled;
+      if (Number.isFinite(c.haltLossTarget)) haltLossTarget = c.haltLossTarget;
+      if (typeof c.smartBtcHoldEnabled === "boolean") smartBtcHoldEnabled = c.smartBtcHoldEnabled;
+      if (typeof c.btcVolThresholdStr === "string") btcVolThresholdStr = c.btcVolThresholdStr;
+      if (Number.isFinite(c.slAtrMultiplier)) slAtrMultiplier = c.slAtrMultiplier;
+      if (typeof c.geniusMode === "boolean") geniusMode = c.geniusMode;
+      if (typeof c.pullbackSniperEnabled === "boolean") pullbackSniperEnabled = c.pullbackSniperEnabled;
+      if (typeof c.freeTradeSlotEnabled === "boolean") freeTradeSlotEnabled = c.freeTradeSlotEnabled;
+      if (Number.isFinite(c.scanBatchSize) && c.scanBatchSize >= 1) scanBatchSize = c.scanBatchSize;
+      if (Number.isFinite(c.feeRate) && c.feeRate >= 0) feeRate = c.feeRate;
+      if (Number.isFinite(c.slippageRate) && c.slippageRate >= 0) slippageRate = c.slippageRate;
+      if (typeof c.scheduleEnabled === "boolean") scheduleEnabled = c.scheduleEnabled;
+      if (Number.isFinite(c.libyaOpen1)) libyaOpen1 = c.libyaOpen1;
+      if (Number.isFinite(c.libyaClose1)) libyaClose1 = c.libyaClose1;
+      if (Number.isFinite(c.libyaOpen2)) libyaOpen2 = c.libyaOpen2;
+      if (Number.isFinite(c.libyaClose2)) libyaClose2 = c.libyaClose2;
+   }
+   if (restoredBotState.apexPredatorStats && typeof restoredBotState.apexPredatorStats === "object") {
+      apexPredatorStats = { ...apexPredatorStats, ...restoredBotState.apexPredatorStats };
+   }
+}
+
+function persistRuntimeState() {
+   saveBotState({
+      virtualBalance, initialVirtualBalance, activeTrades,
+      closedTrades: closedTrades.slice(0, 150), todaysStats, statsDay, apexPredatorStats,
+      config: {
+         maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget,
+         smartBtcHoldEnabled, btcVolThresholdStr, slAtrMultiplier, geniusMode, pullbackSniperEnabled,
+         freeTradeSlotEnabled, scanBatchSize, feeRate, slippageRate, scheduleEnabled,
+         libyaOpen1, libyaClose1, libyaOpen2, libyaClose2
+      }
+   });
+}
+
 const institutionalStateBySymbol = new Map<string, { state: string; direction: string }>();
 
 export function resetAccountState() {
@@ -118,6 +186,7 @@ export function resetAccountState() {
   closedTrades = closedTrades.filter(t => t.symbol !== 'AMZNUSDT' && !((t.pos || t.initialPos) > 100));
   activeTrades = activeTrades.filter(t => t.symbol !== 'AMZNUSDT');
   addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
+  persistRuntimeState();
 }
 
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
@@ -147,6 +216,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.libyaOpen2 !== undefined) libyaOpen2 = opts.libyaOpen2;
       if (opts.libyaClose2 !== undefined) libyaClose2 = opts.libyaClose2;
   }
+  persistRuntimeState();
 }
 
 export function isLibyaTradingAllowed(): boolean {
@@ -1598,11 +1668,19 @@ export async function runApexLoop() {
    } catch (e: any) {
       addLog(`Loop Error: ${e.message}`, "error");
    } finally {
+      persistRuntimeState();
       isLoopRunning = false;
    }
 }
 
 export function startEngine() {
+   const storage = getResearchStorageStatus();
+   if (storage.uses_temporary_storage) {
+      addLog("⚠️ State/research storage is under temporary storage (" + storage.directory + "). Set BEASTBOT_RESEARCH_DIR to a persistent Hostless volume or database-backed mount to survive restarts.", "warn");
+   } else {
+      addLog("💾 Bot state persistence enabled at " + storage.directory + ".", "success");
+   }
+   persistRuntimeState();
    if (watcherInterval) clearInterval(watcherInterval);
    watcherInterval = setInterval(runApexLoop, 15 * 1000); // Check every 15 seconds for ultra-responsive breakout inception
    runApexLoop();
