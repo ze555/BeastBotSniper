@@ -86,6 +86,7 @@ export function getResearchStorageStatus() {
       state_file: BOT_STATE_FILE,
       custom_directory_configured: Boolean(process.env.BEASTBOT_RESEARCH_DIR),
       uses_temporary_storage: usesTemporaryStorage,
+      durability: usesTemporaryStorage ? "TEMPORARY" : "UNVERIFIED_MOUNT_PERSISTENCE",
       state_file_exists: fs.existsSync(BOT_STATE_FILE)
    };
 }
