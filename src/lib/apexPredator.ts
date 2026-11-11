@@ -20,6 +20,7 @@ import { evaluateReverseWave } from "./reverseWaveEngine.js";
 import { evaluateMarketAlignment } from "./marketAlignmentEngine.js";
 import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus, getFuturesBookFlow } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
+import { calculateWaveStop, estimateNetRiskAtStop, capPositionToRiskBudget } from "./waveRiskEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -58,6 +59,7 @@ const TP2_R = 2.00;
 const TP3_R = 3.50;
 const MAX_OPEN_TRADES = 6;
 const MAX_DAILY_LOSS = 0.040;
+const MAX_PORTFOLIO_OPEN_RISK = 0.030;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
 const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
@@ -651,16 +653,17 @@ async function readWhale(symbol: string, btc_chg: number) {
    // Mixed ONLY when 15m and 5m directly oppose each other without clear directional pressure:
    const cvd_mixed = !directional_bull && !directional_bear;
 
-   const oiData = await fetchOI(symbol, "15m", 4);
+   const oiData = await fetchOI(symbol, "5m", 6);
    let oi_chg = 0;
-   if (oiData && oiData.length >= 4) {
+   if (oiData && oiData.length >= 3) {
       const oi0 = parseFloat(oiData[oiData.length-1].sumOpenInterest);
-      const oi3 = parseFloat(oiData[0].sumOpenInterest);
-      oi_chg = (oi0 - oi3) / oi3;
+      const oi3 = parseFloat(oiData[oiData.length-3].sumOpenInterest);
+      if (Number.isFinite(oi0) && Number.isFinite(oi3) && oi3 > 0) oi_chg = (oi0 - oi3) / oi3;
    }
 
-   const p0 = c15[c15.length-1].close;
-   const p3 = c15[c15.length-4].close;
+   // Align price change with the same ~10m window used by the 5m OI samples.
+   const p0 = c5[c5.length-1].close;
+   const p3 = c5[c5.length-3].close;
    const p_chg = (p0 - p3)/p3;
 
    let scenario = "UNCLEAR";
@@ -674,9 +677,9 @@ async function readWhale(symbol: string, btc_chg: number) {
    const fund = await fetchFunding(symbol);
    const oiLatest = oiData?.[oiData.length - 1];
    const oiTimestamp = Number(oiLatest?.timestamp);
-   const oi_available = Boolean(oiData && oiData.length >= 4 &&
+   const oi_available = Boolean(oiData && oiData.length >= 3 &&
       Number.isFinite(oi_chg) && Number.isFinite(oi0Safe(oiData)) &&
-      (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 20 * 60 * 1000));
+      (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 10 * 60 * 1000));
    // Futures-only evidence collection. Spot is intentionally not queried.
    const [futuresFlowResult, orderBookResult] = await Promise.allSettled([
       fetchFuturesAggressorFlow(symbol),
@@ -885,7 +888,11 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    const direction = institutional.direction;
    if (direction === "LONG") apexPredatorStats.totalLongScanned++;
    else apexPredatorStats.totalShortScanned++;
-   const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop() || p.atr14;
+   const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop();
+   if (!Number.isFinite(waveAtr) || waveAtr <= 0) {
+      recordEntryRejection(symbol, direction, "INVALID_1M_WAVE_ATR", p, w, ctx, { institutional });
+      return { signal: "WAIT", reason: "INVALID_1M_WAVE_ATR", p, w, ctx, institutional };
+   }
    p.waveAtr = waveAtr;
    const flow = w.futuresFlow;
    const flowImbalance = (buy: number, sell: number) => (buy - sell) / Math.max(buy + sell, 1e-9);
@@ -925,7 +932,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality, marketAlignment };
    }
    const invalidation = institutional.metrics.invalidationLevel;
-   if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(p.atr14 > 0)) {
+   if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(waveAtr > 0)) {
       addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
       recordEntryRejection(symbol, direction, "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, { institutional, marketAlignment, entryQuality });
       return { signal: "WAIT", reason: "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, institutional, marketAlignment, entryQuality };
@@ -979,13 +986,30 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
 function executeTrade(symbol: string, decision: any) {
    const { p, w, grade, setupType, ctx, reasoning, institutional } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
-   // Dynamic Risk Sizing based on Market Regime:
-   // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
+   // Preserve configured trade capacity while distributing a hard portfolio-risk budget across remaining risk-bearing slots.
    const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
    const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   const currentOpenRisk = activeTrades.reduce((sum, trade) => sum + estimateNetRiskAtStop({
+      direction: trade.direction, entry: Number(trade.entry), stop: Number(trade.sl),
+      position: Number(trade.pos), realizedPnl: Number(trade.realizedPnl) || 0,
+      feeRate, slippageRate
+   }), 0);
+   const dailyRiskHeadroom = Math.max(0, initialVirtualBalance * MAX_DAILY_LOSS + Math.min(0, todaysStats.pnl));
+   const portfolioRiskLimit = Math.min(initialVirtualBalance * MAX_PORTFOLIO_OPEN_RISK, dailyRiskHeadroom);
+   const portfolioRiskHeadroom = Math.max(0, portfolioRiskLimit - currentOpenRisk);
+   const remainingRiskSlots = Math.max(1, maxOpenTradesConfig - activeTrades.filter(trade => !trade.be_done).length);
+   const targetRiskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   const riskAmt = Math.min(targetRiskAmt, portfolioRiskHeadroom / remainingRiskSlots);
+   if (riskAmt <= 0) {
+      addLog("[PORTFOLIO RISK CAP] " + symbol + " skipped: no remaining portfolio risk budget.", "warn");
+      return;
+   }
+   if (riskAmt < targetRiskAmt) {
+      addLog("[PORTFOLIO RISK CAP] " + symbol + ": per-trade risk reduced to $" + riskAmt.toFixed(2) +
+         "; open stop risk $" + currentOpenRisk.toFixed(2) + " / $" + portfolioRiskLimit.toFixed(2) + ".", "info");
+   }
    if (regimeRiskMult < 1.0) {
-      addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
+      addLog("[DYNAMIC RISK] " + symbol + " risk halved for choppy regime.", "info");
    }
 
    const entryTiming = extractEntryTiming();
@@ -993,20 +1017,19 @@ function executeTrade(symbol: string, decision: any) {
 
    if (decision.signal === "LONG") {
       const entry = p.price;
-      const c = p.klines;
-      const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
       const isBounce = setupType === "BOUNCE_SNIPER";
-      // Pillar 5: Tight Structural Stop Loss with compressed buffer
-      const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const evidenceInvalidation = Number.isFinite(p.institutionalInvalidation) ? p.institutionalInvalidation : realLow;
-      const rawSl = Math.min(realLow, evidenceInvalidation) - structuralSlPad;
-
-      // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
-      const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
-      const sl = Math.min(rawSl, entry - minSlDistance);
-      const realSlDist = entry - sl;
-      if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
-      const initialSlDist = Math.abs(entry - sl);
+      const stopPlan = calculateWaveStop({
+         side: "LONG", entry, atr1m: p.waveAtr,
+         candles: p.institutionalEntryCandles || [],
+         invalidationLevel: p.institutionalInvalidation
+      });
+      if (!stopPlan) {
+         addLog("LONG " + symbol + " rejected: invalid or excessively distant 1m structural stop.", "warn");
+         return;
+      }
+      const sl = stopPlan.stop;
+      const realSlDist = stopPlan.distance;
+      const initialSlDist = realSlDist;
 
       const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
       const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
@@ -1025,11 +1048,9 @@ function executeTrade(symbol: string, decision: any) {
       const maxMarginCap = virtualBalance * 0.15;
       const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
 
-      let pos = riskAmt / realSlDist;
-      if (pos > maxPosCap) {
-         addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
-         pos = maxPosCap;
-      }
+      let pos = Math.min(riskAmt / realSlDist, maxPosCap);
+      pos = capPositionToRiskBudget({ proposedPosition: pos, entry, stop: sl, availableRisk: riskAmt, feeRate, slippageRate });
+      if (pos <= 0) return;
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
@@ -1041,7 +1062,7 @@ function executeTrade(symbol: string, decision: any) {
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
-         atr: p.atr14, peak_r: 0,
+         atr: p.waveAtr, entryAtr1m: p.waveAtr, stopBasisTimeframe: "1m", peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
@@ -1064,20 +1085,19 @@ function executeTrade(symbol: string, decision: any) {
       addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    } else {
       const entry = p.price;
-      const c = p.klines;
-      const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
       const isBounce = setupType === "BOUNCE_SNIPER";
-      // Pillar 5: Tight Structural Stop Loss with compressed buffer
-      const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const evidenceInvalidation = Number.isFinite(p.institutionalInvalidation) ? p.institutionalInvalidation : realHigh;
-      const rawSl = Math.max(realHigh, evidenceInvalidation) + structuralSlPad;
-
-      // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
-      const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
-      const sl = Math.max(rawSl, entry + minSlDistance);
-      const realSlDist = sl - entry;
-      if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
-      const initialSlDist = Math.abs(entry - sl);
+      const stopPlan = calculateWaveStop({
+         side: "SHORT", entry, atr1m: p.waveAtr,
+         candles: p.institutionalEntryCandles || [],
+         invalidationLevel: p.institutionalInvalidation
+      });
+      if (!stopPlan) {
+         addLog("SHORT " + symbol + " rejected: invalid or excessively distant 1m structural stop.", "warn");
+         return;
+      }
+      const sl = stopPlan.stop;
+      const realSlDist = stopPlan.distance;
+      const initialSlDist = realSlDist;
 
       const tp1 = entry - (initialSlDist * TP1_R);
       const tp2 = entry - (initialSlDist * TP2_R);
@@ -1096,11 +1116,9 @@ function executeTrade(symbol: string, decision: any) {
       const maxMarginCap = virtualBalance * 0.15;
       const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
 
-      let pos = riskAmt / realSlDist;
-      if (pos > maxPosCap) {
-         addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
-         pos = maxPosCap;
-      }
+      let pos = Math.min(riskAmt / realSlDist, maxPosCap);
+      pos = capPositionToRiskBudget({ proposedPosition: pos, entry, stop: sl, availableRisk: riskAmt, feeRate, slippageRate });
+      if (pos <= 0) return;
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
@@ -1112,11 +1130,11 @@ function executeTrade(symbol: string, decision: any) {
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
-         atr: p.atr14, peak_r: 0,
+         atr: p.waveAtr, entryAtr1m: p.waveAtr, stopBasisTimeframe: "1m", peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
-         candlesBeforeEntry: formatCandles(p.klines || [], 40),
+         candlesBeforeEntry: formatCandles(p.institutionalEntryCandles || p.klines || [], 40),
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
@@ -1265,7 +1283,12 @@ async function exitBrain(trade: any, ctx: any) {
    const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
    const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
 
-   let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7);
+   const trailAtr = Array.isArray(w.c5) && w.c5.length >= 15
+      ? calcATR(w.c5.map((c: any) => c.high), w.c5.map((c: any) => c.low), w.c5.map((c: any) => c.close), 14).pop()
+      : null;
+   const usableTrailAtr = Number.isFinite(trailAtr) && trailAtr! > 0
+      ? trailAtr! : (Number.isFinite(t.atr) && t.atr > 0 ? t.atr : slDist);
+   let trailDist = usableTrailAtr * (p.rvol > 1.5 ? 1.0 : 0.7);
 
    // Early risk reduction: reduce the original risk without choking normal pullbacks.
    if (!t.micro_banked && profitR >= 0.45) {
@@ -1326,9 +1349,7 @@ async function exitBrain(trade: any, ctx: any) {
    // 3. Adaptive peak-based trailing begins after the first bank, not after TP2/TP3.
    // Supportive flow gets room; weakening flow tightens the leash. The stop can only tighten.
    if (t.a_closed) {
-      const atrValue = Number.isFinite(p.atr14) && p.atr14 > 0
-         ? p.atr14
-         : (Number.isFinite(t.atr) && t.atr > 0 ? t.atr : slDist);
+      const atrValue = usableTrailAtr;
       const trailMultiplier = exitEvidence.action === "PROTECT"
          ? 0.90
          : (supportiveFlow && exitEvidence.action === "HOLD" ? 1.80 : 1.35);
