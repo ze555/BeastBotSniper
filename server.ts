@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import axios from "axios";
-import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState } from "./src/lib/apexPredator.js";
+import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState, persistRuntimeState } from "./src/lib/apexPredator.js";
 import {
   getTradingDecisionsData,
   getRejectedSignalsData,
@@ -12,7 +12,7 @@ import {
   getResearchDiagnostics,
   getResearchStorageStatus
 } from "./src/lib/researchLogger.js";
-import { getFuturesWaveFeedStatus } from "./src/lib/futuresWaveFeed.js";
+import { getFuturesWaveFeedStatus, stopFuturesWaveFeed } from "./src/lib/futuresWaveFeed.js";
 import { getHeapStatistics } from "node:v8";
 
 async function startServer() {
@@ -129,5 +129,16 @@ async function startServer() {
 
   app.listen(Number(PORT), "0.0.0.0", () => console.log(`Server running on http://localhost:${PORT}`));
 }
+
+process.on("SIGTERM", () => {
+  persistRuntimeState();
+  stopFuturesWaveFeed();
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  persistRuntimeState();
+  stopFuturesWaveFeed();
+  process.exit(0);
+});
 
 startServer();
