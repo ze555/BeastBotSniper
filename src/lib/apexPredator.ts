@@ -1076,7 +1076,8 @@ function executeTrade(symbol: string, decision: any) {
       feeRate, slippageRate
    }), 0);
    const dailyRiskHeadroom = Math.max(0, initialVirtualBalance * MAX_DAILY_LOSS + Math.min(0, todaysStats.pnl));
-   const portfolioRiskLimit = Math.min(initialVirtualBalance * MAX_PORTFOLIO_OPEN_RISK, dailyRiskHeadroom);
+   const riskBaseBalance = Math.max(0, Math.min(initialVirtualBalance, virtualBalance));
+   const portfolioRiskLimit = Math.min(riskBaseBalance * MAX_PORTFOLIO_OPEN_RISK, dailyRiskHeadroom);
    const portfolioRiskHeadroom = Math.max(0, portfolioRiskLimit - currentOpenRisk);
    const remainingRiskSlots = Math.max(1, maxOpenTradesConfig - activeTrades.filter(trade => !trade.be_done).length);
    const targetRiskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
