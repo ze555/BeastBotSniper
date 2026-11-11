@@ -77,8 +77,8 @@ const IGNITION_MOVE_PCT_60 = 0.9;     // ≥0.9% in 60s = explosion/collapse fin
 const IGNITION_MOVE_PCT_180 = 1.6;    // ≥1.6% in 3min (slower ignitions)
 const IGNITION_LIQ_USD_60S = 40_000;  // ≥$40k liquidated in 60s = cascade starting
 const IGNITION_COOLDOWN_MIN = 15;     // don't re-flag the same coin more often
-const IGNITION_QUEUE_TTL_MIN = 3;     // older than 3min = no longer "start of move"
-const IGNITION_MAX_PER_TICK = 6;      // REST budget guard (6 × ~4 calls ≈ +50% worst case)
+const IGNITION_QUEUE_TTL_MIN = 5;     // v3.4: was 3 — sweep re-flags fresh moves anyway; 5min widens the conversion window
+const IGNITION_MAX_PER_TICK = 10;     // v3.4: was 6 — more radar conversions per 30s tick
 const ignitionQueue = new Map<string, { ts: number; direction: string; movePct: number; liqUsd: number; score: number }>();
 
 // v3.3.2 REST IGNITION SWEEP — WS-independent early detection.
@@ -110,7 +110,7 @@ const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
-let maxOpenTradesConfig = 3;
+let maxOpenTradesConfig = 10;      // v3.4: was 3 — a 3-slot ceiling capped throughput at ~50 trades/day even with perfect signals
 
 // New Config
 let haltProfitEnabled = false;
@@ -123,7 +123,7 @@ let slAtrMultiplier = 1.3;
 let geniusMode = true;
 let pullbackSniperEnabled = true;
 let freeTradeSlotEnabled = true;
-let scanBatchSize = 25;
+let scanBatchSize = 50;            // v3.4: was 25 — full 250-symbol rotation every 2.5min instead of 5min
 let feeRate = 0.0004; // 0.04% default Binance VIP0 taker fee
 let slippageRate = 0.0002; // 0.02% estimated market slippage
 
@@ -131,12 +131,13 @@ let slippageRate = 0.0002; // 0.02% estimated market slippage
 let graduatedRegime = true;        // BULL_WEAK/BEAR_WEAK counter-trend trades allowed at 0.5x risk with elite flow
 let rangeReversionEnabled = true;  // RANGE-edge mean reversion with exhaustion evidence
 let liveFeedEnabled = true;        // WebSocket live microstructure (tick CVD, spread, real liquidations)
-let toxicHoursEnabled = true;      // Hard block new entries at live-measured loss hours 00/01/03/04/07/09/10/11/19/23 UTC (forensic Rule C)
+let toxicHoursEnabled = true;      // Forensic Rule C hours (00/01/03/04/07/09/10/11/19/23 UTC)
+let toxicHoursSoftMode = true;     // v3.4: toxic hours trade at 0.5x risk instead of hard block (was 42% of the day dead)
 let sessionRiskEnabled = true;     // Session-based risk weighting (LONDON 1.0 ... OVERLAP 0.7)
-let timeStopMinutes = 90;          // Exit stagnant trades (no TP1 after N minutes)
+let timeStopMinutes = 60;          // v3.4: was 90 — faster slot recycling (ICE still manages winners earlier)
 let spreadMaxPct = 0.10;           // Max live spread (%) allowed for new entries
 let maxGrossExposurePct = 600;     // Max aggregate notional exposure (% of balance)
-let maxSameDirectionTrades = 2;    // Max concurrent risked trades in the same direction (correlation guard)
+let maxSameDirectionTrades = 4;    // v3.4: was 2 — 2+2 slots filled the book before it could scale (correlation guard kept via maxOpen)
 
 // ═══ v3.1.1 LIVE-FORENSICS RULE STACK ═══
 // The 4 validated rules that flip the live book from -61.27 → +30.74 (PF 4.12):
@@ -221,7 +222,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.geniusMode !== undefined) geniusMode = opts.geniusMode;
       if (opts.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = opts.pullbackSniperEnabled;
       if (opts.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = opts.freeTradeSlotEnabled;
-      if (opts.scanBatchSize !== undefined) scanBatchSize = Number(opts.scanBatchSize) || 25;
+      if (opts.scanBatchSize !== undefined) scanBatchSize = Number(opts.scanBatchSize) || 50;
       if (opts.feeRate !== undefined) feeRate = Number(opts.feeRate);
       if (opts.slippageRate !== undefined) slippageRate = Number(opts.slippageRate);
       if (opts.scheduleEnabled !== undefined) scheduleEnabled = opts.scheduleEnabled;
@@ -234,11 +235,12 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.rangeReversionEnabled !== undefined) rangeReversionEnabled = !!opts.rangeReversionEnabled;
       if (opts.liveFeedEnabled !== undefined) liveFeedEnabled = !!opts.liveFeedEnabled;
       if (opts.toxicHoursEnabled !== undefined) toxicHoursEnabled = !!opts.toxicHoursEnabled;
+      if (opts.toxicHoursSoftMode !== undefined) toxicHoursSoftMode = !!opts.toxicHoursSoftMode;
       if (opts.sessionRiskEnabled !== undefined) sessionRiskEnabled = !!opts.sessionRiskEnabled;
-      if (opts.timeStopMinutes !== undefined) timeStopMinutes = Math.max(15, Number(opts.timeStopMinutes) || 90);
+      if (opts.timeStopMinutes !== undefined) timeStopMinutes = Math.max(15, Number(opts.timeStopMinutes) || 60);
       if (opts.spreadMaxPct !== undefined) spreadMaxPct = Math.max(0.01, Number(opts.spreadMaxPct) || 0.10);
       if (opts.maxGrossExposurePct !== undefined) maxGrossExposurePct = Math.max(100, Number(opts.maxGrossExposurePct) || 600);
-      if (opts.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(opts.maxSameDirectionTrades) || 2);
+      if (opts.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(opts.maxSameDirectionTrades) || 4);
       // v3.1.1 live-forensics rule stack
       if (opts.flowAlignedEntry !== undefined) flowAlignedEntry = !!opts.flowAlignedEntry;
       if (opts.momentumFloorPct !== undefined) momentumFloorPct = Math.max(0.05, Number(opts.momentumFloorPct) || 0.15);
@@ -359,6 +361,7 @@ export function getStats() {
     graduatedRegime,
     rangeReversionEnabled,
     toxicHoursEnabled,
+    toxicHoursSoftMode,
     sessionRiskEnabled,
     timeStopMinutes,
     spreadMaxPct,
@@ -415,6 +418,7 @@ export function getConfig() {
     rangeReversionEnabled,
     liveFeedEnabled,
     toxicHoursEnabled,
+    toxicHoursSoftMode,
     sessionRiskEnabled,
     timeStopMinutes,
     spreadMaxPct,
@@ -455,7 +459,7 @@ export function setConfig(config: any) {
   if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
   if (config.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = config.pullbackSniperEnabled;
   if (config.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = config.freeTradeSlotEnabled;
-  if (config.scanBatchSize !== undefined) scanBatchSize = Number(config.scanBatchSize) || 25;
+  if (config.scanBatchSize !== undefined) scanBatchSize = Number(config.scanBatchSize) || 50;
   if (config.feeRate !== undefined) feeRate = Number(config.feeRate);
   if (config.slippageRate !== undefined) slippageRate = Number(config.slippageRate);
   if (config.scheduleEnabled !== undefined) scheduleEnabled = config.scheduleEnabled;
@@ -468,11 +472,12 @@ export function setConfig(config: any) {
   if (config.rangeReversionEnabled !== undefined) rangeReversionEnabled = !!config.rangeReversionEnabled;
   if (config.liveFeedEnabled !== undefined) liveFeedEnabled = !!config.liveFeedEnabled;
   if (config.toxicHoursEnabled !== undefined) toxicHoursEnabled = !!config.toxicHoursEnabled;
+  if (config.toxicHoursSoftMode !== undefined) toxicHoursSoftMode = !!config.toxicHoursSoftMode;
   if (config.sessionRiskEnabled !== undefined) sessionRiskEnabled = !!config.sessionRiskEnabled;
-  if (config.timeStopMinutes !== undefined) timeStopMinutes = Math.max(15, Number(config.timeStopMinutes) || 90);
+  if (config.timeStopMinutes !== undefined) timeStopMinutes = Math.max(15, Number(config.timeStopMinutes) || 60);
   if (config.spreadMaxPct !== undefined) spreadMaxPct = Math.max(0.01, Number(config.spreadMaxPct) || 0.10);
   if (config.maxGrossExposurePct !== undefined) maxGrossExposurePct = Math.max(100, Number(config.maxGrossExposurePct) || 600);
-  if (config.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(config.maxSameDirectionTrades) || 2);
+  if (config.maxSameDirectionTrades !== undefined) maxSameDirectionTrades = Math.max(1, Number(config.maxSameDirectionTrades) || 4);
   // v3.1.1 live-forensics rule stack
   if (config.flowAlignedEntry !== undefined) flowAlignedEntry = !!config.flowAlignedEntry;
   if (config.momentumFloorPct !== undefined) momentumFloorPct = Math.max(0.05, Number(config.momentumFloorPct) || 0.15);
@@ -1123,10 +1128,19 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
    }
 
-   // ═══ TOXIC HOURS (v3.1) — activates the measured chop windows ═══
+   // ═══ TOXIC HOURS (v3.1 → v3.4 SOFT MODE) ═══
+   // Legacy: hard WAIT for the 10 measured chop hours (00/01/03/04/07/09/10/11/19/23
+   // UTC) — that was 42% of the day DEAD. v3.4 soft mode (default ON): those hours
+   // trade at 0.5x risk (executeTrade multiplies toxicMult); hard mode preserved
+   // via toxicHoursSoftMode=false. All other gates still decide.
    const nowUtcHour = new Date().getUTCHours();
-   if (toxicHoursEnabled && TOXIC_HOURS_UTC.includes(nowUtcHour)) {
-      return { signal: "WAIT", reason: `toxic hour ${nowUtcHour}:00 UTC (measured chop window)`, sl: 0, ss: 0 };
+   const isToxicHour = toxicHoursEnabled && TOXIC_HOURS_UTC.includes(nowUtcHour);
+   let toxicHourEntry = false;
+   if (isToxicHour) {
+      if (!toxicHoursSoftMode) {
+         return { signal: "WAIT", reason: `toxic hour ${nowUtcHour}:00 UTC (measured chop window)`, sl: 0, ss: 0 };
+      }
+      toxicHourEntry = true;
    }
 
    let earlyReason = null;
@@ -1348,7 +1362,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          // All regime/asset gates now live in reasoningEngine.checkConfirmation
          // (graduated positioning) — this layer enforces the execution matrix
          // and live microstructure vetoes as the final defense.
-         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "UP")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
+         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "UP")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
          if (exFilterLong.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] LONG ${symbol} blocked: ${exFilterLong.reason}`, "warn");
             logRejectedSignal({
@@ -1424,6 +1438,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          return {
             signal: "LONG",
             score: sl,
+            toxicHour: toxicHourEntry,
             grade: getGrade(sl),
             setupType: reasoning.scenario.primary.type === "PULLBACK_LONG" ? "PULLBACK_SNIPER" : setupType,
             p,
@@ -1435,7 +1450,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
          // ═══ EXECUTION LAYER (v3.1) ═══
-         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "DOWN")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
+         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "DOWN")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
          if (exFilterShort.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] SHORT ${symbol} blocked: ${exFilterShort.reason}`, "warn");
             logRejectedSignal({
@@ -1510,6 +1525,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          return {
             signal: "SHORT",
             score: ss,
+            toxicHour: toxicHourEntry,
             grade: getGrade(ss),
             setupType: reasoning.scenario.primary.type === "PULLBACK_SHORT" ? "PULLBACK_SNIPER" : setupType,
             p,
@@ -1562,7 +1578,7 @@ async function scoreEntry(symbol: string, ctx: any) {
             addLog(`🚫 [KNIFE GUARD] ${rev.signal} ${symbol} reversion blocked: live ${getViolenceState().direction} cascade — fading it is knife catching.`, "warn");
             return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
          }
-         const exFilterRev = evaluateExecutionFilter(rev.signal, ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled ? hourUtc : undefined, setupType: "RANGE_REVERSION" });
+         const exFilterRev = evaluateExecutionFilter(rev.signal, ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode ? hourUtc : undefined, setupType: "RANGE_REVERSION" });
          // NOTE: no chg10Pct here — fading a range edge is counter-tape BY DESIGN;
          // the reversion engine has its own exhaustion/asymmetry gates.
          const revVetoed = rev.signal === "LONG" ? vetoLong : vetoShort;
@@ -1607,6 +1623,7 @@ async function scoreEntry(symbol: string, ctx: any) {
             );
             return {
                signal: rev.signal,
+               toxicHour: toxicHourEntry,
                score: rev.score,
                grade: { label: "🔁 RANGE REVERSION", risk: 0.004, mult: 1.0 },
                setupType: "RANGE_REVERSION",
@@ -1672,9 +1689,11 @@ function executeTrade(symbol: string, decision: any) {
       ((decision.signal === "SHORT" && vsExec.direction === "DOWN") ||
        (decision.signal === "LONG" && vsExec.direction === "UP"));
    const cascadeMult = withTapeCascade ? crashRiskMult : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult * sessionMult * confirmedMult * cascadeMult;
-   if (regimeRiskMult < 1.0 || sessionMult < 1.0 || confirmedMult < 1.0 || cascadeMult < 1.0) {
-      addLog(`🛡️ [DYNAMIC RISK] ${symbol}: risk ×${(regimeRiskMult * sessionMult * confirmedMult * cascadeMult).toFixed(2)} (regime: ${reasoning?.regime || ctx?.regime}, session: ${timing.session}, graduated: ${confirmedMult.toFixed(2)}${withTapeCascade ? `, CRASH ${vsExec.direction} ×${crashRiskMult}` : ""}).`, 'info');
+   // ═══ v3.4 TOXIC-HOUR SOFT MODE ═══ measured chop hours trade at half risk
+   const toxicMult = decision.toxicHour ? 0.5 : 1.0;
+   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult * sessionMult * confirmedMult * cascadeMult * toxicMult;
+   if (regimeRiskMult < 1.0 || sessionMult < 1.0 || confirmedMult < 1.0 || cascadeMult < 1.0 || toxicMult < 1.0) {
+      addLog(`🛡️ [DYNAMIC RISK] ${symbol}: risk ×${(regimeRiskMult * sessionMult * confirmedMult * cascadeMult * toxicMult).toFixed(2)} (regime: ${reasoning?.regime || ctx?.regime}, session: ${timing.session}, graduated: ${confirmedMult.toFixed(2)}${withTapeCascade ? `, CRASH ${vsExec.direction} ×${crashRiskMult}` : ""}${toxicMult < 1.0 ? ", TOXIC-HOUR ×0.5" : ""}).`, 'info');
    }
 
    const entryTiming = extractEntryTiming();

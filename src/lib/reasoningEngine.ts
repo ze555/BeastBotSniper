@@ -566,7 +566,11 @@ export function evaluateTimingGate(
       // 4. Healthy Breakout
       // Clean close above level within acceptable range (0.1% to 0.9 * ATR14) with strong participation
       if (price >= level && lastCandle && lastCandle.close >= level) {
-         if (effectiveRvol(p) >= 1.2 && p.taker >= 0.51 && flow.persistenceState !== "CONFLICTED") {
+         if (effectiveRvol(p) >= 1.2 && p.taker >= 0.51) {
+            // v3.4: flow-conflict exclusion REMOVED here — that decision belongs
+            // to checkConfirmation gate 2 (which has the graduated elite rule).
+            // The timing gate judges geometry + volume only — one authority per
+            // concern, no silent double-vetoes with different thresholds.
             evidence.push("Healthy breakout confirmed within acceptable entry corridor (< 1.0x ATR)");
             evidence.push(`RVOL-pace (${effectiveRvol(p).toFixed(2)}x) and Taker (${(p.taker * 100).toFixed(1)}%) confirming follow-through`);
             return {
@@ -664,7 +668,8 @@ export function evaluateTimingGate(
    }
 
    if (price <= level && lastCandle && lastCandle.close <= level) {
-      if (effectiveRvol(p) >= 1.2 && p.taker <= 0.49 && flow.persistenceState !== "CONFLICTED") {
+      if (effectiveRvol(p) >= 1.2 && p.taker <= 0.49) {
+         // v3.4: flow-conflict exclusion removed — see LONG counterpart above.
          evidence.push("Healthy breakdown confirmed within acceptable entry corridor (< 1.0x ATR)");
          evidence.push(`RVOL-pace (${effectiveRvol(p).toFixed(2)}x) and Taker (${(p.taker * 100).toFixed(1)}%) confirming seller dominance`);
          return {
@@ -1070,15 +1075,31 @@ export function checkConfirmation(
       };
    }
 
-   // 2. Strict Gate 2: Strict Rule - MIXED or CONFLICTED Flow = NO ENTRY
+   // 2. Strict Gate 2: MIXED / CONFLICTED flow — v3.4 GRADUATED RELIEF
+   // Legacy: absolute NO ENTRY. Live data (Nov 11): 51% of all rejections died
+   // here. Relief is ELITE-ONLY: UNKNOWN stays hard-blocked (no data = no
+   // trade); a conflicted tape converts ONLY when the multi-layer score is
+   // elite (≥10.0) AND persistence is non-trivial (≥30) — and executeTrade
+   // halves the risk via suggestedRiskMult. Everything else stays out.
+   // conflictedEliteOverride also waives the flow-STATE requirement in the
+   // final LONG/SHORT evaluation (gate 2 already conceded at half risk).
+   let conflictedEliteOverride = false;
    if (flow.state === "MIXED" || flow.state === "UNKNOWN" || flow.persistenceState === "CONFLICTED") {
-      return {
-         isConfirmed: false,
-         confirmedSignal: "WAIT",
-         reason: `Flow state is ${flow.state} (Persistence: ${flow.persistenceState}). Conflicting orderflow strictly prohibited from entry.`,
-         evidence,
-         missingItems: ["Clear non-conflicting flow accumulation across timeframes"]
-      };
+      const eliteConflicted = flow.state !== "UNKNOWN" &&
+         flow.persistenceScore >= 30 &&
+         Math.max(supportingScore.sl, supportingScore.ss) >= 10.0;
+      if (!eliteConflicted) {
+         return {
+            isConfirmed: false,
+            confirmedSignal: "WAIT",
+            reason: `Flow state is ${flow.state} (Persistence: ${flow.persistenceState}). Conflicting orderflow strictly prohibited from entry.`,
+            evidence,
+            missingItems: ["Clear non-conflicting flow accumulation across timeframes"]
+         };
+      }
+      conflictedEliteOverride = true;
+      suggestedRiskMult = Math.min(suggestedRiskMult, 0.5);
+      evidence.push(`Conflicted-flow elite override: score ${Math.max(supportingScore.sl, supportingScore.ss).toFixed(1)} ≥ 10.0 with persistence ${flow.persistenceScore} — trading at 0.5x risk`);
    }
 
    // 3. Strict Gate 3: Short covering is NOT new long buildup
@@ -1224,7 +1245,7 @@ export function checkConfirmation(
       const diPlus = p?.di_plus ?? 0;
       const diMinus = p?.di_minus ?? 0;
 
-      const hasExplosiveRvol = rvolEff >= 1.5;
+      const hasExplosiveRvol = rvolEff >= 1.3;
       const hasDirectionalMomentum = bias === "LONG"
          ? (adx >= 18 && diPlus > diMinus)
          : bias === "SHORT"
@@ -1233,7 +1254,7 @@ export function checkConfirmation(
 
       if (!hasExplosiveRvol || !hasDirectionalMomentum) {
          const missingChopConditions: string[] = [];
-         if (!hasExplosiveRvol) missingChopConditions.push(`Explosive RVOL-pace >= 1.5 (current: ${rvolEff.toFixed(2)})`);
+         if (!hasExplosiveRvol) missingChopConditions.push(`Explosive RVOL-pace >= 1.3 (current: ${rvolEff.toFixed(2)})`);
          if (!hasDirectionalMomentum) {
             missingChopConditions.push(`Directional strength ADX >= 18 with ${bias === "LONG" ? "DI+ > DI-" : "DI- > DI+"} (current: ADX ${adx.toFixed(1)}, DI+ ${diPlus.toFixed(1)}, DI- ${diMinus.toFixed(1)})`);
          }
@@ -1286,12 +1307,19 @@ export function checkConfirmation(
    // --- LONG CONFIRMATION EVALUATION ---
    // v3.3.3 RANGE relief: BUYING_PRESSURE also confirms in RANGE (was TREND_UP only).
    // The RANGE-specific quality proof is the recalibrated Dead Chop gate above
-   // (pace-volume ≥ 1.5 AND ADX ≥ 18 AND DI alignment) — demanding BUILDUP-only
+   // (pace-volume ≥ 1.3 AND ADX ≥ 18 AND DI alignment) — demanding BUILDUP-only
    // on top of it starved range waves (55% of the live tape was RANGE, 0 trades).
    // RANGE LONG while BTC is bull remains hard-blocked by the Range Long Trap.
    if (scenario.primary.bias === "LONG") {
-      if (flow.state === "LONG_BUILDUP" || (flow.state === "BUYING_PRESSURE" && (regime === "TREND_UP" || regime === "RANGE"))) {
+      const pressureOk = flow.state === "BUYING_PRESSURE" && (regime === "TREND_UP" || regime === "RANGE" || regime === "TRANSITION");
+      if (flow.state === "LONG_BUILDUP" || pressureOk) {
          evidence.push(`Flow confirmed: ${flow.state} (Persistence: ${flow.persistenceState})`);
+         if (pressureOk && regime === "TRANSITION") {
+            suggestedRiskMult = Math.min(suggestedRiskMult, 0.75);
+            evidence.push("TRANSITION pressure-confirm at 0.75x risk (regime in flux)");
+         }
+      } else if (conflictedEliteOverride) {
+         evidence.push("Elite conflicted-flow override active (0.5x risk) — flow-state requirement waived");
       } else {
          missingItems.push("Bullish orderflow buildup");
       }
@@ -1334,8 +1362,15 @@ export function checkConfirmation(
    // SELLING_PRESSURE with aligned flow — the market spent 55% of the day in
    // RANGE and the confirmation engine structurally could not confirm a short.
    if (scenario.primary.bias === "SHORT") {
-      if (flow.state === "SHORT_BUILDUP" || (flow.state === "SELLING_PRESSURE" && (regime === "TREND_DOWN" || regime === "RANGE"))) {
+      const pressureOk = flow.state === "SELLING_PRESSURE" && (regime === "TREND_DOWN" || regime === "RANGE" || regime === "TRANSITION");
+      if (flow.state === "SHORT_BUILDUP" || pressureOk) {
          evidence.push(`Flow confirmed: ${flow.state} (Persistence: ${flow.persistenceState})`);
+         if (pressureOk && regime === "TRANSITION") {
+            suggestedRiskMult = Math.min(suggestedRiskMult, 0.75);
+            evidence.push("TRANSITION pressure-confirm at 0.75x risk (regime in flux)");
+         }
+      } else if (conflictedEliteOverride) {
+         evidence.push("Elite conflicted-flow override active (0.5x risk) — flow-state requirement waived");
       } else {
          missingItems.push("Bearish orderflow buildup");
       }

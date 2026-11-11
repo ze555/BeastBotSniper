@@ -56,6 +56,7 @@ async function startServer() {
         rangeReversionEnabled: req.body.rangeReversionEnabled,
         liveFeedEnabled: req.body.liveFeedEnabled,
         toxicHoursEnabled: req.body.toxicHoursEnabled,
+        toxicHoursSoftMode: req.body.toxicHoursSoftMode,
         sessionRiskEnabled: req.body.sessionRiskEnabled,
         timeStopMinutes: req.body.timeStopMinutes,
         spreadMaxPct: req.body.spreadMaxPct,
