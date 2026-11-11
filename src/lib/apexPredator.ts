@@ -61,7 +61,7 @@ const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 1.00;
 const TP2_R = 2.00;
 const TP3_R = 3.50;
-const MAX_OPEN_TRADES = 6;
+const MAX_OPEN_TRADES = 10;
 const MAX_DAILY_LOSS = 0.040;
 const MAX_PORTFOLIO_OPEN_RISK = 0.030;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -69,7 +69,7 @@ const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
-let maxOpenTradesConfig = 6;
+let maxOpenTradesConfig = MAX_OPEN_TRADES;
 
 // New Config
 let haltProfitEnabled = false;
