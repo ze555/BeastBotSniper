@@ -6,6 +6,7 @@ on:
       - feat/institutional-full-trading-engine
       - feat/futures-only-violent-wave-engine
       - feat/early-wave-entry-quality-v2
+      - research/profitability-redesign
   pull_request:
     branches:
       - main
@@ -20,4 +21,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npx tsx src/lib/waveRiskEngine.test.ts
+      - run: npx tsx src/lib/entryQualityEngine.test.ts
+      - run: npx tsx src/lib/institutionalMarketEngine.test.ts
+      - run: npx tsx src/lib/marketAlignmentEngine.test.ts
+      - run: npx tsx src/lib/reverseWaveEngine.test.ts
+      - run: npx tsx src/lib/futuresWaveFeed.test.ts
       - run: npm run build
