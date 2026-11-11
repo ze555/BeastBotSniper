@@ -22,10 +22,10 @@ This avoids waiting for a 1-minute candle close. The current forming Futures can
 
 ## Other evidence
 
-- Binance USD-M order book: `GET /fapi/v1/depth`. A new entry requires a fresh book, top-20 combined notional depth of at least 10,000 USDT, and spread no wider than 20 bps. Displayed depth is contextual and is not treated as executed demand/supply.
-- Open-interest history: `GET /futures/data/openInterestHist` at 15-minute intervals. OI is contextual and does not block an otherwise valid early Futures impulse when unavailable. It helps distinguish expanding positions from short-covering / long-liquidation impulses, but it is not tick-level OI.
+- Binance USD-M order book: the live `depth5` stream is preferred; REST `/fapi/v1/depth` is the fallback. The current executable gate uses top-5 combined notional depth of at least 3,000 USDT and spread no wider than 25 bps. Displayed depth is contextual and is not treated as executed demand/supply.
+- Open-interest history: `GET /futures/data/openInterestHist` at 5-minute intervals, comparing the latest sample with the sample about 10 minutes earlier. OI is contextual and does not block an otherwise valid early Futures impulse when unavailable; it is not tick-level OI.
 - Funding: `GET /fapi/v1/premiumIndex`. Funding is a crowding/exhaustion warning, not a directional entry trigger.
-- Liquidation feed is not yet integrated. No synthetic liquidation values are generated; the engine reports this source as unavailable.
+- Binance USD-M `!forceOrder@arr` is integrated for observed liquidation events. No synthetic liquidation values are generated; absence of events is reported separately from an unavailable feed.
 - Spot is not queried, passed to, or consulted by the institutional entry/exit engine.
 
 ## Entry logic
@@ -43,7 +43,7 @@ These thresholds are initial operational gates, not statistically calibrated uni
 
 ## Exit management
 
-The institutional exit path uses Futures aggressor flow only. A full exit requires structural invalidation, adverse price location and adverse executed Futures flow. Deterioration without the full reversal chain triggers PROTECT. Hard stops and staged take-profit controls remain active.
+The institutional exit path uses Futures aggressor flow only. A full exit requires structural invalidation, adverse price location and adverse executed Futures flow. Deterioration without the full reversal chain triggers PROTECT. Initial stops are now anchored to the same 1m wave structure/ATR used for entry; runner trailing uses 5m ATR. Portfolio open-stop risk is capped at 3% of the initial virtual balance, also bounded by remaining daily-loss headroom. Hard stops and staged take-profit controls remain active.
 
 ## Runtime limitations
 
@@ -56,11 +56,7 @@ The institutional exit path uses Futures aggressor flow only. A full exit requir
 
 ## Validation
 
-Run:
-
-`npm test`
-
-The test suite includes Futures-only long/short ignition, squeeze/liquidation impulses, quiet-market suppression, stale flow rejection, executable-depth rejection, continuation, Futures-only exits, and rolling-tape candidate detection.
+Run the targeted unit tests and build in CI. The full `npm test` script also invokes `exitEvidenceReplay.ts`; that historical replay is deliberately not run as part of this change. Unit coverage includes Futures-only ignition, flow quality, structure alignment, reverse-wave confirmation, rolling-tape discovery, and the new wave-stop/portfolio-risk calculations.
 
 No merge to main or production deployment is part of this branch.
 
