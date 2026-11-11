@@ -230,7 +230,7 @@ function closeSockets() {
 }
 function connectShard(symbols: string[]) {
   const streams = symbols.flatMap(s => [`${s.toLowerCase()}@aggTrade`, `${s.toLowerCase()}@depth5`]).join("/");
-  const state: SocketState = { socket: new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`) };
+  const state: SocketState = { socket: new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`, { perMessageDeflate: false, maxPayload: 1024 * 1024 }) };
   sockets.push(state);
   state.socket.on("message", raw => {
     try {
@@ -265,7 +265,7 @@ function connectShard(symbols: string[]) {
   });
 }
 function connectLiquidationStream() {
-  const socket = new WebSocket("wss://fstream.binance.com/ws/!forceOrder@arr");
+  const socket = new WebSocket("wss://fstream.binance.com/ws/!forceOrder@arr", { perMessageDeflate: false, maxPayload: 1024 * 1024 });
   liquidationSocket = socket;
   const state: SocketState = { socket };
   sockets.push(state);
@@ -305,8 +305,7 @@ export function startFuturesWaveFeed(symbols: string[]) {
   started = true;
   configuredSymbols = fingerprint;
   closeSockets();
-  // Binance combined-stream shards are deliberately kept small for URL/connection resilience.
-  // Fewer combined-stream sockets reduce per-connection overhead; each shard stays below Binance's 1,024-stream limit.
+  // 200 symbols = 400 streams per shard, safely below Binance's 1,024-stream limit.
   for (let i = 0; i < normalized.length; i += 200) connectShard(normalized.slice(i, i + 200));
   connectLiquidationStream();
 }
