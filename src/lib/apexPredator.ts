@@ -371,7 +371,7 @@ async function updateDynamicWatchlist() {
          axios.get(`${BINANCE_FAPI}/fapi/v1/exchangeInfo`, { timeout: 8000 })
       ]);
       if (!Array.isArray(res.data) || res.data.length === 0 || !Array.isArray(exchangeInfo.data?.symbols)) return;
-      const activeUsdtPerpetuals = new Set(
+      const activeUsdtPerpetuals = new Set<string>(
          exchangeInfo.data.symbols
             .filter((item: any) => item.contractType === "PERPETUAL" && item.quoteAsset === "USDT" && item.status === "TRADING")
             .map((item: any) => item.symbol)
@@ -1012,7 +1012,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality, marketAlignment };
    }
    const invalidation = institutional.metrics.invalidationLevel;
-   if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(waveAtr > 0)) {
+   if (typeof invalidation !== "number" || !Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(waveAtr > 0)) {
       addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
       recordEntryRejection(symbol, direction, "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, { institutional, marketAlignment, entryQuality });
       return { signal: "WAIT", reason: "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, institutional, marketAlignment, entryQuality };
