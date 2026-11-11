@@ -6,7 +6,7 @@ The scanner is designed to find unusually violent upward and downward moves in B
 
 ## Runtime path
 
-New entries from both the priority queue and the rotating universe now pass through `evaluateInstitutionalEntry` and `institutionalMarketEngine.ts`. The legacy score-based entry path is not used by the scanner for new entries. There is no weighted score or numeric confluence sum in the Futures-only decision engine.
+New entries from both the priority queue and rotating universe pass through `evaluateInstitutionalEntry` → `evaluateInstitutionalMarket` → `evaluateMarketAlignment` → `evaluateEntryQuality` → `executeTrade`. `triRegimeEngine.ts` and the legacy `executionFilter.ts` are imported/re-exported but are not invoked by this live entry path; their presence must not be mistaken for active filters. The legacy score-based entry path is not used. There is no weighted score or numeric confluence sum in the active Futures-only decision engine.
 
 ## Live Futures tape
 
@@ -25,6 +25,7 @@ This avoids waiting for a 1-minute candle close. The current forming Futures can
 - Binance USD-M order book: the live `depth5` stream is preferred; REST `/fapi/v1/depth` is the fallback. The current executable gate uses top-5 combined notional depth of at least 3,000 USDT and spread no wider than 25 bps. Displayed depth is contextual and is not treated as executed demand/supply.
 - Open-interest history: `GET /futures/data/openInterestHist` at 5-minute intervals, comparing the latest sample with the sample about 10 minutes earlier. OI is contextual and does not block an otherwise valid early Futures impulse when unavailable; it is not tick-level OI.
 - Funding: `GET /fapi/v1/premiumIndex`. Funding is a crowding/exhaustion warning, not a directional entry trigger.
+- Short-window executed delta comes from aggregate Futures trades. The 5m/15m/4h CVD context is derived from candle taker-buy/taker-sell fields; it is a candle proxy, not a full tick-by-tick CVD stream.
 - Binance USD-M `!forceOrder@arr` is integrated for observed liquidation events. No synthetic liquidation values are generated; absence of events is reported separately from an unavailable feed.
 - Spot is not queried, passed to, or consulted by the institutional entry/exit engine.
 
@@ -36,7 +37,7 @@ This avoids waiting for a 1-minute candle close. The current forming Futures can
 - OI expansion is not assigned a long/short direction by itself. OI contraction is not called a confirmed liquidation/squeeze unless matching Binance force-order events and price/flow direction are observed.
 - New entries require a fresh, executable order book. Thin or wide-spread contracts remain watch-only.
 - Quiet symbols with no directional executed flow and no abnormal participation remain DORMANT.
-- BTC is context only. A BTC whipsaw or opposite BTC direction does not veto a separately confirmed altcoin Futures wave.
+- BTC is context, not an outright veto. When BTC direction opposes an altcoin signal, `marketAlignmentEngine` requires stronger 5m structure and 1m break/retest evidence.
 - Existing positions are managed as continuations; the engine does not repeatedly open fresh entries just because a wave is already running.
 
 These thresholds are initial operational gates, not statistically calibrated universal constants. They require replay calibration against archived Futures trade, book and OI data before any live deployment.
@@ -48,11 +49,13 @@ The institutional exit path uses Futures aggressor flow only. A full exit requir
 ## Runtime limitations
 
 - The market tape is continuous through WebSocket streams, but candidate evaluation and order placement still run through the bot's 15-second loop and sequential REST-heavy evaluation. A very large candidate queue or API latency can delay evaluation.
-- OI is 15-minute history, not a live tick stream.
-- Liquidation events and full depth-delta/cancel dynamics are not yet integrated.
+- OI is 5-minute history, not a live tick stream; it is compared over an approximately 10-minute window.
+- Binance force-order liquidation events are integrated. Full depth-delta/cancel dynamics are not: sampled book depletion cannot reliably distinguish cancellations from executed fills.
 - The rolling Futures tape is in memory and rebuilds after a process restart. The paper-account snapshot (balance, active/closed trades, daily stats, configuration and bot-active flag) is atomically written to `bot_state.json` and restored on startup. This survives restarts only when `BEASTBOT_RESEARCH_DIR` points to a genuinely persistent Hostless volume; `/tmp` fallback is ephemeral and is explicitly reported by `/api/research/diagnostics`.
 - The engine has not yet completed a historical tick-level replay for AKEUSDT or ARIAUSDT. Existing candle-only records cannot reconstruct historical 5m/1m/30s executed aggressor windows, depth replenishment, or prove early Futures detection and profitability.
 - The rolling 5m tape resets on process restart; REST fallback requests up to 1,000 recent aggregate trades and only reports windows actually covered by those returned prints.
+- Default concurrency is 10 positions. Their combined stop risk is dynamically budgeted to at most 3% of the initial virtual balance, bounded further by remaining daily-loss headroom; this is a portfolio cap, not 3% per trade.
+- The former `MIN_RR_REQUIRED` calculation is not a true obstacle-space test: TP3 is defined as 3.5 times the stop distance, so the computed ratio is fixed by construction. It does not prove there is enough market liquidity/structure room to reach TP3.
 
 ## Validation
 
