@@ -136,6 +136,7 @@ if (restoredBotState?.schema_version === 1) {
       };
    }
    if (typeof restoredBotState.statsDay === "string") statsDay = restoredBotState.statsDay;
+   if (typeof restoredBotState.botActive === "boolean") botActive = restoredBotState.botActive;
    if (restoredBotState.config && typeof restoredBotState.config === "object") {
       const c = restoredBotState.config;
       if (Number.isFinite(c.maxOpenTradesConfig) && c.maxOpenTradesConfig >= 1) maxOpenTradesConfig = c.maxOpenTradesConfig;
@@ -165,7 +166,7 @@ if (restoredBotState?.schema_version === 1) {
 
 function persistRuntimeState() {
    saveBotState({
-      virtualBalance, initialVirtualBalance, activeTrades,
+      virtualBalance, initialVirtualBalance, activeTrades, botActive,
       closedTrades: closedTrades.slice(0, 150), todaysStats, statsDay, apexPredatorStats,
       config: {
          maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget,
@@ -347,7 +348,7 @@ export function setConfig(config: any) {
   if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
   if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
-export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); addLog(`BOT ACTIVE: ${val}`); }
+export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); persistRuntimeState(); addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
 
 // --- DATA FETCHING ---
