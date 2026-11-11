@@ -158,32 +158,6 @@ function appendJsonlSafe(filePath: string, obj: any) {
    }
 }
 
-function rewriteJsonlSafe(filePath: string, items: any[]) {
-   try {
-      let rows = items;
-      // Update rejection outcomes without truncating older historical records.
-      if (filePath === REJECTED_SIGNALS_FILE && fs.existsSync(filePath)) {
-         // Read only a bounded tail. The previous whole-file read grew with the log forever
-         // and could allocate a large second copy of the complete rejection history.
-         const existing = loadJsonlTail(filePath, 2_500);
-         const byId = new Map<string, any>(existing.filter(item => item?.signal_id).map(item => [item.signal_id, item]));
-         for (const item of items) if (item?.signal_id) byId.set(item.signal_id, item);
-         rows = Array.from(byId.values()).slice(0, 2_500);
-      }
-      const content = rows.map(item => JSON.stringify(item)).join("\n") + "\n";
-      fs.writeFile(filePath, content, "utf8", (err) => {
-         if (err && !hasLoggedWriteError) {
-            hasLoggedWriteError = true;
-            console.warn(`Research Log notice: File rewrite skipped (${err.message})`);
-         }
-      });
-   } catch (err: any) {
-      if (!hasLoggedWriteError) {
-         hasLoggedWriteError = true;
-         console.warn(`Research Log notice: (${err?.message})`);
-      }
-   }
-}
 
 // ----------------------------------------------------------------------------
 // 1. ENTRY TIMING EXTRACTION (Strict UTC)
@@ -739,6 +713,7 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    const now = Date.now();
    prunePendingRejected(now);
    let needsRewrite = false;
+   const changedEvents = new Set<any>();
 
    const symbolPending = pendingRejectedBySymbol.get(symbol);
    if (!symbolPending?.size) return;
@@ -778,25 +753,25 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
 
       if (elapsedMinutes >= 5 && !target.future_outcomes.snapshot_5m) {
          target.future_outcomes.snapshot_5m = makeSnapshot();
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 15 && !target.future_outcomes.snapshot_15m) {
          target.future_outcomes.snapshot_15m = makeSnapshot();
          target.excursions.mfe_15m = currentExcursion.mfePercent;
          target.excursions.mae_15m = currentExcursion.maePercent;
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 30 && !target.future_outcomes.snapshot_30m) {
          target.future_outcomes.snapshot_30m = makeSnapshot();
          target.excursions.mfe_30m = currentExcursion.mfePercent;
          target.excursions.mae_30m = currentExcursion.maePercent;
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 60 && !target.future_outcomes.snapshot_60m) {
          target.future_outcomes.snapshot_60m = makeSnapshot();
          target.excursions.mfe_60m = currentExcursion.mfePercent;
          target.excursions.mae_60m = currentExcursion.maePercent;
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 120 && !target.future_outcomes.snapshot_120m) {
          target.future_outcomes.snapshot_120m = makeSnapshot();
@@ -826,12 +801,13 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
 
          item.completed = true;
          removePendingRejected(id, item);
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
    }
 
    if (needsRewrite) {
-      rewriteJsonlSafe(REJECTED_SIGNALS_FILE, memoryRejected);
+      // Append only changed research records. Never rewrite/read the entire history file in memory.
+      for (const event of changedEvents) appendJsonlSafe(REJECTED_SIGNALS_FILE, event);
       updateSummaries(null);
    }
 }
