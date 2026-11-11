@@ -57,7 +57,6 @@ let lastWatchlistUpdate = 0;
 let lastHotWatchlistUpdate = 0;
 
 
-const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 1.00;
 const TP2_R = 2.00;
 const TP3_R = 3.50;
@@ -1117,12 +1116,6 @@ function executeTrade(symbol: string, decision: any) {
       const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
       const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
 
-      const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
-         return;
-      }
-
       // IRON NOTIONAL & MARGIN CEILING:
       // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
       // Maximum margin allocated cannot exceed 15% of virtualBalance ($150 max).
@@ -1185,12 +1178,6 @@ function executeTrade(symbol: string, decision: any) {
       const tp1 = entry - (initialSlDist * TP1_R);
       const tp2 = entry - (initialSlDist * TP2_R);
       const tp3 = entry - (initialSlDist * TP3_R);
-
-      const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
-         return;
-      }
 
       // IRON NOTIONAL & MARGIN CEILING:
       // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
