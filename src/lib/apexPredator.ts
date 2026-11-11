@@ -891,11 +891,12 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    const direction = institutional.direction;
    if (direction === "LONG") apexPredatorStats.totalLongScanned++;
    else apexPredatorStats.totalShortScanned++;
-   const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop();
-   if (!Number.isFinite(waveAtr) || waveAtr <= 0) {
+   const waveAtrCandidate = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop();
+   if (typeof waveAtrCandidate !== "number" || !Number.isFinite(waveAtrCandidate) || waveAtrCandidate <= 0) {
       recordEntryRejection(symbol, direction, "INVALID_1M_WAVE_ATR", p, w, ctx, { institutional });
       return { signal: "WAIT", reason: "INVALID_1M_WAVE_ATR", p, w, ctx, institutional };
    }
+   const waveAtr = waveAtrCandidate;
    p.waveAtr = waveAtr;
    const flow = w.futuresFlow;
    const flowImbalance = (buy: number, sell: number) => (buy - sell) / Math.max(buy + sell, 1e-9);
