@@ -12,6 +12,7 @@ import {
   getResearchDiagnostics
 } from "./src/lib/researchLogger.js";
 import { getFuturesWaveFeedStatus } from "./src/lib/futuresWaveFeed.js";
+import { getHeapStatistics } from "node:v8";
 
 async function startServer() {
   const app = express();
@@ -28,9 +29,14 @@ async function startServer() {
   app.get("/api/market/feeds", (req, res) => res.json({ timestamp: new Date().toISOString(), futures: getFuturesWaveFeedStatus() }));
   app.get("/api/research/diagnostics", (req, res) => {
     const memory = process.memoryUsage();
-    res.json({ timestamp: new Date().toISOString(), memory: {
+    const heapLimit = getHeapStatistics().heap_size_limit;
+    res.json({ timestamp: new Date().toISOString(), runtime: {
+      uptime_seconds: Math.floor(process.uptime()), pid: process.pid
+    }, memory: {
       rss_mb: Math.round(memory.rss / 1024 / 1024), heap_used_mb: Math.round(memory.heapUsed / 1024 / 1024),
-      heap_total_mb: Math.round(memory.heapTotal / 1024 / 1024), external_mb: Math.round(memory.external / 1024 / 1024)
+      heap_total_mb: Math.round(memory.heapTotal / 1024 / 1024), heap_limit_mb: Math.round(heapLimit / 1024 / 1024),
+      heap_used_percent: Number(((memory.heapUsed / heapLimit) * 100).toFixed(1)),
+      external_mb: Math.round(memory.external / 1024 / 1024)
     }, research: getResearchDiagnostics(), scanner: getStats(), feeds: getFuturesWaveFeedStatus() });
   });
   
