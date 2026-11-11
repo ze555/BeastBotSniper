@@ -685,7 +685,7 @@ export function logRejectedSignal(payload: {
       };
 
       memoryRejected.unshift(event);
-      if (memoryRejected.length > 200) memoryRejected.pop();
+      if (memoryRejected.length > 100) memoryRejected.pop();
 
       prunePendingRejected(signalTime.getTime());
       addPendingRejected(signalId, {
@@ -967,7 +967,7 @@ export function logTradeDecision(trade: any, exitContext: {
       };
 
       memoryDecisions.unshift(event);
-      if (memoryDecisions.length > 200) memoryDecisions.pop();
+      if (memoryDecisions.length > 100) memoryDecisions.pop();
 
       activeTradesDirectionMap.delete(tradeId);
 
@@ -1021,7 +1021,7 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
       };
 
       memoryJourneys.unshift(journeyItem);
-      if (memoryJourneys.length > 300) memoryJourneys.pop();
+      if (memoryJourneys.length > 150) memoryJourneys.pop();
 
       appendJsonlSafe(TRADE_JOURNEYS_FILE, journeyItem);
    } catch (err: any) {
