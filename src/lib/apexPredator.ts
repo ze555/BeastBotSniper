@@ -164,7 +164,7 @@ if (restoredBotState?.schema_version === 1) {
    }
 }
 
-function persistRuntimeState() {
+export function persistRuntimeState() {
    saveBotState({
       virtualBalance, initialVirtualBalance, activeTrades, botActive,
       closedTrades: closedTrades.slice(0, 150), todaysStats, statsDay, apexPredatorStats,
