@@ -53,21 +53,50 @@ const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];
 const memoryJourneys: any[] = [];
 
-// Passive tracking maps (Zero Extra API Requests)
+// Passive research trackers are indexed by symbol so every market tick touches only
+// that symbol's pending signals instead of scanning the entire global map.
 const pendingRejectedMap = new Map<string, any>();
+const pendingRejectedBySymbol = new Map<string, Set<string>>();
 const activeTradesDirectionMap = new Map<string, any>();
 const rejectedSignalDedup = new Map<string, number>();
-const MAX_PENDING_REJECTIONS = 10_000;
+const MAX_PENDING_REJECTIONS = 2_500;
 const PENDING_REJECTION_TTL_MS = 125 * 60_000;
+let lastPendingPruneAt = 0;
+let lastRejectedDedupPruneAt = 0;
+
+function removePendingRejected(id: string, knownItem?: any) {
+   const item = knownItem || pendingRejectedMap.get(id);
+   if (!item) return;
+   pendingRejectedMap.delete(id);
+   const ids = pendingRejectedBySymbol.get(item.symbol);
+   if (ids) {
+      ids.delete(id);
+      if (ids.size === 0) pendingRejectedBySymbol.delete(item.symbol);
+   }
+}
+
+function addPendingRejected(id: string, item: any) {
+   pendingRejectedMap.set(id, item);
+   let ids = pendingRejectedBySymbol.get(item.symbol);
+   if (!ids) { ids = new Set<string>(); pendingRejectedBySymbol.set(item.symbol, ids); }
+   ids.add(id);
+}
 
 function prunePendingRejected(now = Date.now()) {
+   // Called from the high-frequency Futures trade stream: perform the full sweep at most once/minute.
+   if (now - lastPendingPruneAt < 60_000 && pendingRejectedMap.size <= MAX_PENDING_REJECTIONS) return;
+   lastPendingPruneAt = now;
    for (const [id, item] of pendingRejectedMap) {
-      if (!Number.isFinite(item.signalTimeMs) || now - item.signalTimeMs > PENDING_REJECTION_TTL_MS) pendingRejectedMap.delete(id);
+      if (!Number.isFinite(item.signalTimeMs) || now - item.signalTimeMs > PENDING_REJECTION_TTL_MS) removePendingRejected(id, item);
    }
    while (pendingRejectedMap.size > MAX_PENDING_REJECTIONS) {
-      const oldest = pendingRejectedMap.keys().next().value;
-      if (!oldest) break;
-      pendingRejectedMap.delete(oldest);
+      let oldestId: string | null = null, oldestTime = Infinity, oldestItem: any = null;
+      for (const [id, item] of pendingRejectedMap) {
+         const at = Number(item.signalTimeMs) || 0;
+         if (at < oldestTime) { oldestTime = at; oldestId = id; oldestItem = item; }
+      }
+      if (!oldestId) break;
+      removePendingRejected(oldestId, oldestItem);
    }
 }
 
@@ -75,7 +104,7 @@ function loadJsonlTail(filePath: string, limit: number): any[] {
    try {
       if (!fs.existsSync(filePath)) return [];
       const stat = fs.statSync(filePath);
-      const maxBytes = 64 * 1024 * 1024;
+      const maxBytes = 8 * 1024 * 1024;
       const bytesToRead = Math.min(stat.size, maxBytes);
       const buffer = Buffer.allocUnsafe(bytesToRead);
       const fd = fs.openSync(filePath, "r");
@@ -93,22 +122,24 @@ function loadJsonlTail(filePath: string, limit: number): any[] {
 }
 
 // Restore recent research data and pending rejected-signal outcome trackers on restart.
-memoryDecisions.push(...loadJsonlTail(TRADING_DECISIONS_FILE, 200));
-memoryRejected.push(...loadJsonlTail(REJECTED_SIGNALS_FILE, 200));
-memoryJourneys.push(...loadJsonlTail(TRADE_JOURNEYS_FILE, 300));
-for (const event of loadJsonlTail(REJECTED_SIGNALS_FILE, 10_000)) {
+memoryDecisions.push(...loadJsonlTail(TRADING_DECISIONS_FILE, 100));
+memoryRejected.push(...loadJsonlTail(REJECTED_SIGNALS_FILE, 100));
+memoryJourneys.push(...loadJsonlTail(TRADE_JOURNEYS_FILE, 150));
+for (const event of loadJsonlTail(REJECTED_SIGNALS_FILE, MAX_PENDING_REJECTIONS)) {
    const signalTimeMs = new Date(event.timestamp).getTime();
    const price = Number(event.signal_price);
    const outcomes = event.future_outcomes || {};
    if (!event.signal_id || !event.symbol || !Number.isFinite(signalTimeMs) || !Number.isFinite(price) || price <= 0 ||
        Date.now() - signalTimeMs > 120 * 60_000 || (outcomes.snapshot_60m !== null && outcomes.snapshot_60m !== undefined)) continue;
-   pendingRejectedMap.set(event.signal_id, { signalId: event.signal_id, symbol: event.symbol,
+   addPendingRejected(event.signal_id, { signalId: event.signal_id, symbol: event.symbol,
       direction: event.direction, signalPrice: price, signalTimeMs, highestSinceSignal: price,
       lowestSinceSignal: price, targetEvent: event, completed: false });
 }
 
 let hasLoggedWriteError = false;
 let cachedSummary: any = null;
+let lastSummaryBuildAt = 0;
+let summaryBuildTimer: NodeJS.Timeout | null = null;
 
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
@@ -134,10 +165,10 @@ function rewriteJsonlSafe(filePath: string, items: any[]) {
       if (filePath === REJECTED_SIGNALS_FILE && fs.existsSync(filePath)) {
          // Read only a bounded tail. The previous whole-file read grew with the log forever
          // and could allocate a large second copy of the complete rejection history.
-         const existing = loadJsonlTail(filePath, 10_000);
+         const existing = loadJsonlTail(filePath, 2_500);
          const byId = new Map<string, any>(existing.filter(item => item?.signal_id).map(item => [item.signal_id, item]));
          for (const item of items) if (item?.signal_id) byId.set(item.signal_id, item);
-         rows = Array.from(byId.values()).slice(0, 10_000);
+         rows = Array.from(byId.values()).slice(0, 2_500);
       }
       const content = rows.map(item => JSON.stringify(item)).join("\n") + "\n";
       fs.writeFile(filePath, content, "utf8", (err) => {
@@ -553,9 +584,10 @@ export function logRejectedSignal(payload: {
       if (Date.now() - lastLogged < 30_000) return;
       const now = Date.now();
       rejectedSignalDedup.set(dedupKey, now);
-      if (rejectedSignalDedup.size > 1000) {
+      if (rejectedSignalDedup.size > 1000 && now - lastRejectedDedupPruneAt >= 60_000) {
+         lastRejectedDedupPruneAt = now;
          for (const [key, at] of rejectedSignalDedup) if (now - at > 10 * 60_000) rejectedSignalDedup.delete(key);
-         while (rejectedSignalDedup.size > 2500) {
+         while (rejectedSignalDedup.size > 1500) {
             const oldest = rejectedSignalDedup.keys().next().value;
             if (!oldest) break;
             rejectedSignalDedup.delete(oldest);
@@ -678,7 +710,7 @@ export function logRejectedSignal(payload: {
       if (memoryRejected.length > 200) memoryRejected.pop();
 
       prunePendingRejected(signalTime.getTime());
-      pendingRejectedMap.set(signalId, {
+      addPendingRejected(signalId, {
          signalId,
          symbol,
          direction,
@@ -689,6 +721,7 @@ export function logRejectedSignal(payload: {
          targetEvent: event,
          completed: false
       });
+      prunePendingRejected(signalTime.getTime());
 
       appendJsonlSafe(REJECTED_SIGNALS_FILE, event);
       updateSummaries(null);
@@ -707,8 +740,12 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    prunePendingRejected(now);
    let needsRewrite = false;
 
-   for (const [id, item] of pendingRejectedMap.entries()) {
-      if (item.symbol !== symbol) continue;
+   const symbolPending = pendingRejectedBySymbol.get(symbol);
+   if (!symbolPending?.size) return;
+
+   for (const id of symbolPending) {
+      const item = pendingRejectedMap.get(id);
+      if (!item) { symbolPending.delete(id); continue; }
 
       const elapsedMinutes = (now - item.signalTimeMs) / 60000;
       
@@ -788,7 +825,7 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
          }
 
          item.completed = true;
-         pendingRejectedMap.delete(id);
+         removePendingRejected(id, item);
          needsRewrite = true;
       }
    }
@@ -986,6 +1023,10 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
          trade.timeOfLowestPrice = now;
       }
 
+      // Keep updating price extremes on every exit pass, but persist research snapshots once/minute.
+      if (now - Number(trade.__lastJourneySnapshotAt || 0) < 60_000) return;
+      trade.__lastJourneySnapshotAt = now;
+
       const journeyItem = {
          timestamp: new Date().toISOString(),
          trade_id: `${trade.symbol}_${new Date(trade.entryTime).getTime()}`,
@@ -1012,6 +1053,18 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
 // 10. SUMMARY GENERATOR (Raw statistics without any trading recommendations)
 // ----------------------------------------------------------------------------
 function updateSummaries(lastTrade: any) {
+   const now = Date.now();
+   if (!lastTrade && now - lastSummaryBuildAt < 60_000) {
+      if (!summaryBuildTimer) {
+         summaryBuildTimer = setTimeout(() => {
+            summaryBuildTimer = null;
+            updateSummaries(null);
+         }, Math.max(1_000, 60_000 - (now - lastSummaryBuildAt)));
+         summaryBuildTimer.unref?.();
+      }
+      return;
+   }
+   lastSummaryBuildAt = now;
    try {
       const allTrades = memoryDecisions;
       const allRejected = memoryRejected;
