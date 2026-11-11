@@ -21,6 +21,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npx tsx src/lib/researchLogger.persistence.test.ts
       - run: npx tsx src/lib/waveRiskEngine.test.ts
       - run: npx tsx src/lib/entryQualityEngine.test.ts
       - run: npx tsx src/lib/institutionalMarketEngine.test.ts
