@@ -113,10 +113,6 @@ export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTap
   const tape = tapeBySymbol.get(symbol);
   if (!tape?.length) return null;
   pruneTape(symbol, now);
-  const recent = tape.filter(t => t.timestamp >= now - 30_000 && t.timestamp <= now + 2_000);
-  if (recent.length < 5) return null;
-  const last = recent[recent.length - 1];
-  if (now - last.timestamp > 30_000) return null;
   const windows = [
     { ms: 5_000, buy: 0, sell: 0, trades: 0, first: null as FuturesTapeTrade | null, last: null as FuturesTapeTrade | null },
     { ms: 30_000, buy: 0, sell: 0, trades: 0, first: null as FuturesTapeTrade | null, last: null as FuturesTapeTrade | null },
@@ -133,6 +129,9 @@ export function getFuturesTapeFlow(symbol: string, now = Date.now()): FuturesTap
       if (trade.buyerIsMaker) window.sell += trade.quote; else window.buy += trade.quote;
     }
   }
+  const recentWindow = windows[1];
+  if (recentWindow.trades < 5 || !recentWindow.last || now - recentWindow.last.timestamp > 30_000) return null;
+  const last = recentWindow.last;
   const [w5, w30, w1m, w5m] = windows;
   const pct = (window: typeof w5) => window.first && window.last && window.first.price > 0
     ? (window.last.price - window.first.price) / window.first.price : null;
@@ -174,26 +173,40 @@ export function getFuturesWaveCandidates(now = Date.now(), _legacyLimit?: number
   const ranked: Array<{ symbol: string; impulse: number }> = [];
   for (const [symbol, tape] of tapeBySymbol) {
     pruneTape(symbol, now);
-    const recent30 = tape.filter(t => t.timestamp >= now - 30_000 && t.timestamp <= now + 2_000);
-    const recent1m = tape.filter(t => t.timestamp >= now - 60_000 && t.timestamp <= now + 2_000);
-    const prior4m = tape.filter(t => t.timestamp >= now - 300_000 && t.timestamp < now - 60_000);
+    let count30 = 0, count1m = 0, priorCount = 0;
+    let notional30 = 0, notional1m = 0, priorNotional = 0, buy30 = 0, buy1m = 0;
+    let first30: FuturesTapeTrade | null = null, last30: FuturesTapeTrade | null = null;
+    let first1m: FuturesTapeTrade | null = null, last1m: FuturesTapeTrade | null = null;
+    // Aggregate in one pass without allocating three filtered arrays for every symbol.
+    for (const trade of tape) {
+      const at = trade.timestamp;
+      if (at > now + 2_000) continue;
+      if (at >= now - 30_000) {
+        if (!first30) first30 = trade;
+        last30 = trade; count30++; notional30 += trade.quote;
+        if (!trade.buyerIsMaker) buy30 += trade.quote;
+      }
+      if (at >= now - 60_000) {
+        if (!first1m) first1m = trade;
+        last1m = trade; count1m++; notional1m += trade.quote;
+        if (!trade.buyerIsMaker) buy1m += trade.quote;
+      }
+      if (at >= now - 300_000 && at < now - 60_000) { priorCount++; priorNotional += trade.quote; }
+    }
     // Three prints are enough to put a symbol on the discovery radar; the entry engine
     // still applies its stricter freshness/trade-count requirements before execution.
-    if (recent30.length < 3 || recent1m.length < 5) continue;
-    const quote = (rows: FuturesTapeTrade[]) => rows.reduce((n, t) => n + t.quote, 0);
-    const buyQuote = (rows: FuturesTapeTrade[]) => rows.reduce((n, t) => n + (t.buyerIsMaker ? 0 : t.quote), 0);
-    const notional30 = quote(recent30), notional1m = quote(recent1m);
-    const priorPer30s = prior4m.length ? quote(prior4m) / 8 : 0;
+    if (count30 < 3 || count1m < 5 || !first30 || !last30 || !first1m || !last1m) continue;
+    const priorPer30s = priorCount ? priorNotional / 8 : 0;
     // Discovery is intentionally permissive: small/new contracts can produce the strongest
     // relative expansions. Absolute liquidity is checked later at execution, not here.
     const adaptiveFloor = priorPer30s > 0
       ? Math.max(25, Math.min(1_000, priorPer30s * 0.25))
       : 25;
     if (notional30 < adaptiveFloor && notional1m < adaptiveFloor * 2) continue;
-    const share30 = buyQuote(recent30) / Math.max(notional30, 1e-9);
-    const share1m = buyQuote(recent1m) / Math.max(notional1m, 1e-9);
-    const priceMove30 = recent30[0].price > 0 ? (recent30[recent30.length - 1].price - recent30[0].price) / recent30[0].price : 0;
-    const priceMove1m = recent1m[0].price > 0 ? (recent1m[recent1m.length - 1].price - recent1m[0].price) / recent1m[0].price : 0;
+    const share30 = buy30 / Math.max(notional30, 1e-9);
+    const share1m = buy1m / Math.max(notional1m, 1e-9);
+    const priceMove30 = first30.price > 0 ? (last30.price - first30.price) / first30.price : 0;
+    const priceMove1m = first1m.price > 0 ? (last1m.price - first1m.price) / first1m.price : 0;
     const directionalFlow = share30 >= 0.54 || share30 <= 0.46 || share1m >= 0.56 || share1m <= 0.44;
     const priceImpulse = Math.abs(priceMove30) >= 0.0015 || Math.abs(priceMove1m) >= 0.0020;
     const volumeBurst = priorPer30s > 0
@@ -216,7 +229,7 @@ function closeSockets() {
   }
 }
 function connectShard(symbols: string[]) {
-  const streams = symbols.flatMap(s => [`${s.toLowerCase()}@aggTrade`, `${s.toLowerCase()}@depth5@100ms`]).join("/");
+  const streams = symbols.flatMap(s => [`${s.toLowerCase()}@aggTrade`, `${s.toLowerCase()}@depth5`]).join("/");
   const state: SocketState = { socket: new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`) };
   sockets.push(state);
   state.socket.on("message", raw => {
@@ -293,7 +306,8 @@ export function startFuturesWaveFeed(symbols: string[]) {
   configuredSymbols = fingerprint;
   closeSockets();
   // Binance combined-stream shards are deliberately kept small for URL/connection resilience.
-  for (let i = 0; i < normalized.length; i += 50) connectShard(normalized.slice(i, i + 50));
+  // Fewer combined-stream sockets reduce per-connection overhead; each shard stays below Binance's 1,024-stream limit.
+  for (let i = 0; i < normalized.length; i += 200) connectShard(normalized.slice(i, i + 200));
   connectLiquidationStream();
 }
 export function stopFuturesWaveFeed() {
