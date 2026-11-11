@@ -125,7 +125,11 @@ function loadJsonlTail(filePath: string, limit: number): any[] {
 memoryDecisions.push(...loadJsonlTail(TRADING_DECISIONS_FILE, 100));
 memoryRejected.push(...loadJsonlTail(REJECTED_SIGNALS_FILE, 100));
 memoryJourneys.push(...loadJsonlTail(TRADE_JOURNEYS_FILE, 150));
+const restoredRejectedIds = new Set<string>();
 for (const event of loadJsonlTail(REJECTED_SIGNALS_FILE, MAX_PENDING_REJECTIONS)) {
+   // Tail loader is newest-first; retain the latest appended version for each signal ID.
+   if (!event.signal_id || restoredRejectedIds.has(event.signal_id)) continue;
+   restoredRejectedIds.add(event.signal_id);
    const signalTimeMs = new Date(event.timestamp).getTime();
    const price = Number(event.signal_price);
    const outcomes = event.future_outcomes || {};
@@ -1030,6 +1034,7 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
 // ----------------------------------------------------------------------------
 function updateSummaries(lastTrade: any) {
    const now = Date.now();
+   if (lastTrade && summaryBuildTimer) { clearTimeout(summaryBuildTimer); summaryBuildTimer = null; }
    if (!lastTrade && now - lastSummaryBuildAt < 60_000) {
       if (!summaryBuildTimer) {
          summaryBuildTimer = setTimeout(() => {
@@ -1308,6 +1313,8 @@ export function getResearchDiagnostics() {
       bot_version: BOT_VERSION,
       rejected_signals_recorded: memoryRejected.length,
       rejected_outcomes_pending: pendingRejectedMap.size,
+      rejected_symbols_pending: pendingRejectedBySymbol.size,
+      max_rejected_outcomes_pending: MAX_PENDING_REJECTIONS,
       directional_predictions_pending: activeTradesDirectionMap.size,
       decisions_in_memory: memoryDecisions.length,
       journeys_in_memory: memoryJourneys.length,
