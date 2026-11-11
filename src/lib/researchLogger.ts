@@ -12,11 +12,13 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const SCHEMA_VERSION = "2.4.0";
-const BOT_VERSION = "BeastBot-Apex-v2.4";
+const SCHEMA_VERSION = "2.5.0";
+const BOT_VERSION = "BeastBot-Apex-v2.5";
 
 function getWritableResearchDir(): string {
-   const defaultPath = path.resolve(process.cwd(), "data", "research");
+   const defaultPath = process.env.BEASTBOT_RESEARCH_DIR
+      ? path.resolve(process.env.BEASTBOT_RESEARCH_DIR)
+      : path.resolve(process.cwd(), "data", "research");
    try {
       if (!fs.existsSync(defaultPath)) {
          fs.mkdirSync(defaultPath, { recursive: true });
@@ -51,12 +53,102 @@ const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];
 const memoryJourneys: any[] = [];
 
-// Passive tracking maps (Zero Extra API Requests)
+// Passive research trackers are indexed by symbol so every market tick touches only
+// that symbol's pending signals instead of scanning the entire global map.
 const pendingRejectedMap = new Map<string, any>();
+const pendingRejectedBySymbol = new Map<string, Set<string>>();
 const activeTradesDirectionMap = new Map<string, any>();
+const rejectedSignalDedup = new Map<string, number>();
+const MAX_PENDING_REJECTIONS = 2_500;
+const PENDING_REJECTION_TTL_MS = 125 * 60_000;
+let lastPendingPruneAt = 0;
+let lastRejectedDedupPruneAt = 0;
+
+function removePendingRejected(id: string, knownItem?: any) {
+   const item = knownItem || pendingRejectedMap.get(id);
+   if (!item) return;
+   pendingRejectedMap.delete(id);
+   const ids = pendingRejectedBySymbol.get(item.symbol);
+   if (ids) {
+      ids.delete(id);
+      if (ids.size === 0) pendingRejectedBySymbol.delete(item.symbol);
+   }
+}
+
+function addPendingRejected(id: string, item: any) {
+   pendingRejectedMap.set(id, item);
+   let ids = pendingRejectedBySymbol.get(item.symbol);
+   if (!ids) { ids = new Set<string>(); pendingRejectedBySymbol.set(item.symbol, ids); }
+   ids.add(id);
+}
+
+function prunePendingRejected(now = Date.now()) {
+   // Called from the high-frequency Futures trade stream: perform the full sweep at most once/minute.
+   if (now - lastPendingPruneAt < 60_000 && pendingRejectedMap.size <= MAX_PENDING_REJECTIONS) return;
+   lastPendingPruneAt = now;
+   // Pending map is maintained oldest-first, so expiry and capacity eviction are O(number removed).
+   while (pendingRejectedMap.size) {
+      const oldestId = pendingRejectedMap.keys().next().value;
+      if (!oldestId) break;
+      const oldestItem = pendingRejectedMap.get(oldestId);
+      if (oldestItem && Number.isFinite(oldestItem.signalTimeMs) && now - oldestItem.signalTimeMs <= PENDING_REJECTION_TTL_MS) break;
+      removePendingRejected(oldestId, oldestItem);
+   }
+   while (pendingRejectedMap.size > MAX_PENDING_REJECTIONS) {
+      const oldestId = pendingRejectedMap.keys().next().value;
+      if (!oldestId) break;
+      removePendingRejected(oldestId);
+   }
+}
+
+function loadJsonlTail(filePath: string, limit: number): any[] {
+   try {
+      if (!fs.existsSync(filePath)) return [];
+      const stat = fs.statSync(filePath);
+      const maxBytes = 8 * 1024 * 1024;
+      const bytesToRead = Math.min(stat.size, maxBytes);
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      const fd = fs.openSync(filePath, "r");
+      try { fs.readSync(fd, buffer, 0, bytesToRead, Math.max(0, stat.size - bytesToRead)); }
+      finally { fs.closeSync(fd); }
+      let content = buffer.toString("utf8");
+      if (stat.size > bytesToRead) {
+         const firstNewline = content.indexOf("\n");
+         content = firstNewline >= 0 ? content.slice(firstNewline + 1) : "";
+      }
+      return content.split("\n").filter(Boolean).slice(-limit).reverse().flatMap(line => {
+         try { return [JSON.parse(line)]; } catch { return []; }
+      });
+   } catch { return []; }
+}
+
+// Restore recent research data and pending rejected-signal outcome trackers on restart.
+memoryDecisions.push(...loadJsonlTail(TRADING_DECISIONS_FILE, 100));
+memoryRejected.push(...loadJsonlTail(REJECTED_SIGNALS_FILE, 100));
+memoryJourneys.push(...loadJsonlTail(TRADE_JOURNEYS_FILE, 150));
+const restoredRejectedById = new Map<string, any>();
+for (const event of loadJsonlTail(REJECTED_SIGNALS_FILE, MAX_PENDING_REJECTIONS)) {
+   // Tail loader is newest-first; retain the latest appended version for each signal ID.
+   if (!event.signal_id || restoredRejectedById.has(event.signal_id)) continue;
+   restoredRejectedById.set(event.signal_id, event);
+}
+const restoredPendingEvents = Array.from(restoredRejectedById.values())
+   .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+for (const event of restoredPendingEvents) {
+   const signalTimeMs = new Date(event.timestamp).getTime();
+   const price = Number(event.signal_price);
+   const outcomes = event.future_outcomes || {};
+   if (!event.signal_id || !event.symbol || !Number.isFinite(signalTimeMs) || !Number.isFinite(price) || price <= 0 ||
+       Date.now() - signalTimeMs > 120 * 60_000 || (outcomes.snapshot_60m !== null && outcomes.snapshot_60m !== undefined)) continue;
+   addPendingRejected(event.signal_id, { signalId: event.signal_id, symbol: event.symbol,
+      direction: event.direction, signalPrice: price, signalTimeMs, highestSinceSignal: price,
+      lowestSinceSignal: price, targetEvent: event, completed: false });
+}
 
 let hasLoggedWriteError = false;
 let cachedSummary: any = null;
+let lastSummaryBuildAt = 0;
+let summaryBuildTimer: NodeJS.Timeout | null = null;
 
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
@@ -75,22 +167,6 @@ function appendJsonlSafe(filePath: string, obj: any) {
    }
 }
 
-function rewriteJsonlSafe(filePath: string, items: any[]) {
-   try {
-      const content = items.map(item => JSON.stringify(item)).join("\n") + "\n";
-      fs.writeFile(filePath, content, "utf8", (err) => {
-         if (err && !hasLoggedWriteError) {
-            hasLoggedWriteError = true;
-            console.warn(`Research Log notice: File rewrite skipped (${err.message})`);
-         }
-      });
-   } catch (err: any) {
-      if (!hasLoggedWriteError) {
-         hasLoggedWriteError = true;
-         console.warn(`Research Log notice: (${err?.message})`);
-      }
-   }
-}
 
 // ----------------------------------------------------------------------------
 // 1. ENTRY TIMING EXTRACTION (Strict UTC)
@@ -362,7 +438,7 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    const flow = trade.reasoning?.flow;
    const loc = trade.reasoning?.location;
 
-   if (flow?.persistenceState === "CONFLICTED" || flow?.state === "MIXED") {
+   if (flow?.persistenceState === "CONFLICTED" || flow?.persistenceState === "CONFLICTED_FLOW" || flow?.persistenceState === "UNCONFIRMED" || flow?.persistenceState === "ABSORBED" || flow?.persistenceState === "FAILED_AUCTION" || flow?.state === "MIXED") {
       return "CONFLICTED_FLOW";
    }
    if (timingGate?.isLateEntry || timingGate?.state === "LATE_EXPANSION") {
@@ -374,10 +450,20 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (trade.direction === "SHORT" && loc && loc.distanceToSupportPct < 0.002) {
       return "BAD_LOCATION";
    }
-   if (trade.score < 7.0 || timingGate?.state === "WAITING_FOR_CONFIRMATION") {
+   if (trade.reasoning?.entryQuality?.cvdState === "OPPOSING") {
       return "WEAK_CONFIRMATION";
    }
-   return "GOOD_ENTRY";
+   if ((timingGate?.state === "IN_TIME" && ["ALIGNED", "ALIGNED_1M_30S"].includes(flow?.persistenceState)) ||
+       (timingGate?.state === "CONFIRMED" && flow?.persistenceState === "STRONG")) {
+      return "GOOD_ENTRY";
+   }
+   if (timingGate?.state === "EARLY_FLOW_REVERSAL" && ["EARLY_REVERSAL", "EARLY_REVERSAL_5M_TO_1M"].includes(flow?.persistenceState)) {
+      return "GOOD_ENTRY";
+   }
+   if (["WAITING_FOR_CONFIRMATION", "COUNTERTREND_WAIT_BREAK", "COUNTERTREND_WAIT_RETEST", "NO_MULTI_WINDOW_PRICE_CONFIRMATION"].includes(timingGate?.state) || flow?.persistenceState === "MODERATE") {
+      return "WEAK_CONFIRMATION";
+   }
+   return "UNKNOWN";
 }
 
 // ----------------------------------------------------------------------------
@@ -476,7 +562,21 @@ export function logRejectedSignal(payload: {
 }) {
    try {
       const { symbol, timeframe, direction, signal_score, rejection_reason, p, w, ctx, reasoning } = payload;
-      
+      const dedupKey = `${symbol}:${direction}:${String(rejection_reason).slice(0, 120)}`;
+      const lastLogged = rejectedSignalDedup.get(dedupKey) || 0;
+      if (Date.now() - lastLogged < 30_000) return;
+      const now = Date.now();
+      rejectedSignalDedup.set(dedupKey, now);
+      if (rejectedSignalDedup.size > 1000 && now - lastRejectedDedupPruneAt >= 60_000) {
+         lastRejectedDedupPruneAt = now;
+         for (const [key, at] of rejectedSignalDedup) if (now - at > 10 * 60_000) rejectedSignalDedup.delete(key);
+         while (rejectedSignalDedup.size > 1500) {
+            const oldest = rejectedSignalDedup.keys().next().value;
+            if (!oldest) break;
+            rejectedSignalDedup.delete(oldest);
+         }
+      }
+      prunePendingRejected(now);
       const signalTime = new Date();
       const signalPrice = p?.price || (p?.klines?.length ? p.klines[p.klines.length - 1].close : 0);
       const signalId = `REJ_${symbol}_${signalTime.getTime()}`;
@@ -526,6 +626,17 @@ export function logRejectedSignal(payload: {
             btc_chg: ctx?.btc_chg ?? null
          },
 
+         entry_evidence: {
+            institutional: reasoning?.institutional ?? null,
+            market_alignment: reasoning?.marketAlignment ?? null,
+            entry_quality: reasoning?.entryQuality ?? null,
+            futures_flow: w?.futuresFlow ?? null,
+            order_book: w?.orderBook ?? null,
+            oi_change: w?.oi_chg ?? null,
+            oi_available: w?.oi_available ?? false,
+            funding_rate: w?.fund ?? null,
+            cvd_slopes: { slope5m: w?.slope5 ?? null, slope15m: w?.slope15 ?? null, slope4h: w?.slope4h ?? null }
+         },
          indicators: {
             rsi: p?.rsi ?? null,
             macd_hist: p?.hist?.length ? p.hist[p.hist.length - 1] : null,
@@ -579,9 +690,10 @@ export function logRejectedSignal(payload: {
       };
 
       memoryRejected.unshift(event);
-      if (memoryRejected.length > 200) memoryRejected.pop();
+      if (memoryRejected.length > 100) memoryRejected.pop();
 
-      pendingRejectedMap.set(signalId, {
+      prunePendingRejected(signalTime.getTime());
+      addPendingRejected(signalId, {
          signalId,
          symbol,
          direction,
@@ -592,6 +704,7 @@ export function logRejectedSignal(payload: {
          targetEvent: event,
          completed: false
       });
+      prunePendingRejected(signalTime.getTime());
 
       appendJsonlSafe(REJECTED_SIGNALS_FILE, event);
       updateSummaries(null);
@@ -607,10 +720,16 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    if (pendingRejectedMap.size === 0 || !symbol || !currentPrice) return;
 
    const now = Date.now();
+   prunePendingRejected(now);
    let needsRewrite = false;
+   const changedEvents = new Set<any>();
 
-   for (const [id, item] of pendingRejectedMap.entries()) {
-      if (item.symbol !== symbol) continue;
+   const symbolPending = pendingRejectedBySymbol.get(symbol);
+   if (!symbolPending?.size) return;
+
+   for (const id of symbolPending) {
+      const item = pendingRejectedMap.get(id);
+      if (!item) { symbolPending.delete(id); continue; }
 
       const elapsedMinutes = (now - item.signalTimeMs) / 60000;
       
@@ -643,25 +762,25 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
 
       if (elapsedMinutes >= 5 && !target.future_outcomes.snapshot_5m) {
          target.future_outcomes.snapshot_5m = makeSnapshot();
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 15 && !target.future_outcomes.snapshot_15m) {
          target.future_outcomes.snapshot_15m = makeSnapshot();
          target.excursions.mfe_15m = currentExcursion.mfePercent;
          target.excursions.mae_15m = currentExcursion.maePercent;
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 30 && !target.future_outcomes.snapshot_30m) {
          target.future_outcomes.snapshot_30m = makeSnapshot();
          target.excursions.mfe_30m = currentExcursion.mfePercent;
          target.excursions.mae_30m = currentExcursion.maePercent;
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 60 && !target.future_outcomes.snapshot_60m) {
          target.future_outcomes.snapshot_60m = makeSnapshot();
          target.excursions.mfe_60m = currentExcursion.mfePercent;
          target.excursions.mae_60m = currentExcursion.maePercent;
-         needsRewrite = true;
+         needsRewrite = true; changedEvents.add(target);
       }
       if (elapsedMinutes >= 120 && !target.future_outcomes.snapshot_120m) {
          target.future_outcomes.snapshot_120m = makeSnapshot();
@@ -690,13 +809,14 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
          }
 
          item.completed = true;
-         pendingRejectedMap.delete(id);
-         needsRewrite = true;
+         removePendingRejected(id, item);
+         needsRewrite = true; changedEvents.add(target);
       }
    }
 
    if (needsRewrite) {
-      rewriteJsonlSafe(REJECTED_SIGNALS_FILE, memoryRejected);
+      // Append only changed research records. Never rewrite/read the entire history file in memory.
+      for (const event of changedEvents) appendJsonlSafe(REJECTED_SIGNALS_FILE, event);
       updateSummaries(null);
    }
 }
@@ -771,6 +891,9 @@ export function logTradeDecision(trade: any, exitContext: {
          symbol: trade.symbol,
          exchange: "Binance Futures (Paper)",
          timeframe: "15m",
+         entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_before_entry_timeframe: trade.reasoning?.entryTimeframe || "NOT_RECORDED",
+         candles_during_trade_timeframe: "15m",
          side: trade.direction,
          signal_type: trade.setupType || "BREAKOUT_MOMENTUM",
          market_regime: marketRegimeContext.strategy_regime,
@@ -778,9 +901,9 @@ export function logTradeDecision(trade: any, exitContext: {
          // ═══ ENTRY TIMING & REGIME ANALYTICS ═══
          entry_timing: entryTiming,
          market_context: marketRegimeContext,
-         timing_gate_state: trade.reasoning?.timingGate?.state || "CONFIRMED",
-         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "MODERATE",
-         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? 75,
+         timing_gate_state: trade.reasoning?.timingGate?.state || "NOT_RECORDED",
+         flow_persistence_state: trade.reasoning?.flow?.persistenceState || "NOT_RECORDED",
+         flow_persistence_score: Number.isFinite(trade.reasoning?.flow?.persistenceScore) ? trade.reasoning.flow.persistenceScore : null,
          entry_quality: entryQuality,
 
          entry_price: entryPrice,
@@ -834,6 +957,13 @@ export function logTradeDecision(trade: any, exitContext: {
             alternative_scenario: trade.reasoning?.scenario?.alternative?.type || null,
             indicators_at_entry: trade.priceData || null,
             orderflow_at_entry: trade.whaleData || null,
+            futures_flow_at_entry: trade.reasoning?.futuresFlowAtEntry || null,
+            open_interest_change_at_entry: Number.isFinite(trade.reasoning?.openInterestChangeAtEntry) ? trade.reasoning.openInterestChangeAtEntry : null,
+            order_book_at_entry: trade.reasoning?.orderBookAtEntry || null,
+            liquidation_flow_at_entry: trade.reasoning?.liquidationFlowAtEntry || null,
+            institutional_evidence_at_entry: trade.reasoning?.institutional || null,
+            entry_quality_at_entry: trade.reasoning?.entryQuality || null,
+            market_alignment_at_entry: trade.reasoning?.marketAlignment || null,
             location_at_entry: trade.reasoning?.location || null
          },
          
@@ -842,7 +972,7 @@ export function logTradeDecision(trade: any, exitContext: {
       };
 
       memoryDecisions.unshift(event);
-      if (memoryDecisions.length > 200) memoryDecisions.pop();
+      if (memoryDecisions.length > 100) memoryDecisions.pop();
 
       activeTradesDirectionMap.delete(tradeId);
 
@@ -878,6 +1008,10 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
          trade.timeOfLowestPrice = now;
       }
 
+      // Keep updating price extremes on every exit pass, but persist research snapshots once/minute.
+      if (now - Number(trade.__lastJourneySnapshotAt || 0) < 60_000) return;
+      trade.__lastJourneySnapshotAt = now;
+
       const journeyItem = {
          timestamp: new Date().toISOString(),
          trade_id: `${trade.symbol}_${new Date(trade.entryTime).getTime()}`,
@@ -892,7 +1026,7 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
       };
 
       memoryJourneys.unshift(journeyItem);
-      if (memoryJourneys.length > 300) memoryJourneys.pop();
+      if (memoryJourneys.length > 150) memoryJourneys.pop();
 
       appendJsonlSafe(TRADE_JOURNEYS_FILE, journeyItem);
    } catch (err: any) {
@@ -904,6 +1038,19 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
 // 10. SUMMARY GENERATOR (Raw statistics without any trading recommendations)
 // ----------------------------------------------------------------------------
 function updateSummaries(lastTrade: any) {
+   const now = Date.now();
+   if (lastTrade && summaryBuildTimer) { clearTimeout(summaryBuildTimer); summaryBuildTimer = null; }
+   if (!lastTrade && now - lastSummaryBuildAt < 60_000) {
+      if (!summaryBuildTimer) {
+         summaryBuildTimer = setTimeout(() => {
+            summaryBuildTimer = null;
+            updateSummaries(null);
+         }, Math.max(1_000, 60_000 - (now - lastSummaryBuildAt)));
+         summaryBuildTimer.unref?.();
+      }
+      return;
+   }
+   lastSummaryBuildAt = now;
    try {
       const allTrades = memoryDecisions;
       const allRejected = memoryRejected;
@@ -1123,16 +1270,30 @@ function updateSummaries(lastTrade: any) {
 // ----------------------------------------------------------------------------
 // 11. PUBLIC ACCESS API EXPORTS
 // ----------------------------------------------------------------------------
+function latestRecords(filePath: string, memory: any[], limit: number, idField: string) {
+   const safeLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit) || 100)));
+   const merged = [...memory, ...loadJsonlTail(filePath, safeLimit)];
+   const seen = new Set<string>();
+   return merged.filter(item => {
+      const id = idField === "journey"
+         ? `${item?.trade_id ?? ""}:${item?.timestamp ?? ""}`
+         : String(item?.[idField] ?? `${item?.symbol ?? ""}:${item?.timestamp ?? ""}`);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+   }).slice(0, safeLimit);
+}
+
 export function getTradingDecisionsData(limit: number = 100) {
-   return memoryDecisions.slice(0, limit);
+   return latestRecords(TRADING_DECISIONS_FILE, memoryDecisions, limit, "trade_id");
 }
 
 export function getRejectedSignalsData(limit: number = 100) {
-   return memoryRejected.slice(0, limit);
+   return latestRecords(REJECTED_SIGNALS_FILE, memoryRejected, limit, "signal_id");
 }
 
 export function getTradeJourneysData(limit: number = 100) {
-   return memoryJourneys.slice(0, limit);
+   return latestRecords(TRADE_JOURNEYS_FILE, memoryJourneys, limit, "journey");
 }
 
 export function getPerformanceSummaryData() {
@@ -1151,14 +1312,30 @@ export function getPerformanceSummaryData() {
    };
 }
 
+export function getResearchDiagnostics() {
+   return {
+      schema_version: SCHEMA_VERSION,
+      bot_version: BOT_VERSION,
+      rejected_signals_recorded: memoryRejected.length,
+      rejected_outcomes_pending: pendingRejectedMap.size,
+      rejected_symbols_pending: pendingRejectedBySymbol.size,
+      max_rejected_outcomes_pending: MAX_PENDING_REJECTIONS,
+      directional_predictions_pending: activeTradesDirectionMap.size,
+      decisions_in_memory: memoryDecisions.length,
+      journeys_in_memory: memoryJourneys.length,
+      storage_mode: RESEARCH_DIR.startsWith(os.tmpdir()) ? "EPHEMERAL_FALLBACK" : "CONFIGURED_OR_LOCAL",
+      write_error_seen: hasLoggedWriteError
+   };
+}
+
 export function getFullExportBundle() {
    return {
       schema_version: SCHEMA_VERSION,
       exported_at: new Date().toISOString(),
       bot_version: BOT_VERSION,
       performance_summary: getPerformanceSummaryData(),
-      trading_decisions: memoryDecisions,
-      rejected_signals: memoryRejected,
-      trade_journeys: memoryJourneys
+      trading_decisions: getTradingDecisionsData(10_000),
+      rejected_signals: getRejectedSignalsData(10_000),
+      trade_journeys: getTradeJourneysData(10_000)
    };
 }

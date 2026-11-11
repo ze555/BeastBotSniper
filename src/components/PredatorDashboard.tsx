@@ -36,7 +36,7 @@ export const PredatorDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-    const inv = setInterval(fetchData, 5000);
+    const inv = setInterval(fetchData, 10000);
     return () => clearInterval(inv);
   }, []);
 

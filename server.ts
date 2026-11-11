@@ -3,13 +3,16 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState } from "./src/lib/apexPredator.js";
-import { 
-  getTradingDecisionsData, 
-  getRejectedSignalsData, 
-  getTradeJourneysData, 
-  getPerformanceSummaryData, 
-  getFullExportBundle 
+import {
+  getTradingDecisionsData,
+  getRejectedSignalsData,
+  getTradeJourneysData,
+  getPerformanceSummaryData,
+  getFullExportBundle,
+  getResearchDiagnostics
 } from "./src/lib/researchLogger.js";
+import { getFuturesWaveFeedStatus } from "./src/lib/futuresWaveFeed.js";
+import { getHeapStatistics } from "node:v8";
 
 async function startServer() {
   const app = express();
@@ -22,7 +25,20 @@ async function startServer() {
   startEngine();
 
   // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok", mode: "Apex Predator Only" }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok", mode: "Apex Predator Only", bot_version: "BeastBot-Apex-v2.5", build_revision: process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null, timestamp: new Date().toISOString() }));
+  app.get("/api/market/feeds", (req, res) => res.json({ timestamp: new Date().toISOString(), futures: getFuturesWaveFeedStatus() }));
+  app.get("/api/research/diagnostics", (req, res) => {
+    const memory = process.memoryUsage();
+    const heapLimit = getHeapStatistics().heap_size_limit;
+    res.json({ timestamp: new Date().toISOString(), runtime: {
+      uptime_seconds: Math.floor(process.uptime()), pid: process.pid
+    }, memory: {
+      rss_mb: Math.round(memory.rss / 1024 / 1024), heap_used_mb: Math.round(memory.heapUsed / 1024 / 1024),
+      heap_total_mb: Math.round(memory.heapTotal / 1024 / 1024), heap_limit_mb: Math.round(heapLimit / 1024 / 1024),
+      heap_used_percent: Number(((memory.heapUsed / heapLimit) * 100).toFixed(1)),
+      external_mb: Math.round(memory.external / 1024 / 1024)
+    }, research: getResearchDiagnostics(), scanner: getStats(), feeds: getFuturesWaveFeedStatus() });
+  });
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
@@ -83,7 +99,10 @@ async function startServer() {
   });
 
   app.get("/api/research/export-all", (req, res) => {
-    res.json(getFullExportBundle());
+    res.json({ ...getFullExportBundle(), runtime_diagnostics: {
+      timestamp: new Date().toISOString(), build_revision: process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null,
+      scanner: getStats(), research: getResearchDiagnostics(), feeds: getFuturesWaveFeedStatus()
+    }});
   });
   
   app.post("/api/gemini/analyze", async (req, res) => {

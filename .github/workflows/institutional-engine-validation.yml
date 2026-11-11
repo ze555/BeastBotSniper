@@ -1,0 +1,23 @@
+name: Institutional engine validation
+
+on:
+  push:
+    branches:
+      - feat/institutional-full-trading-engine
+      - feat/futures-only-violent-wave-engine
+      - feat/early-wave-entry-quality-v2
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
