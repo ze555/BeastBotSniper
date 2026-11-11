@@ -50,13 +50,13 @@ The institutional exit path uses Futures aggressor flow only. A full exit requir
 - The market tape is continuous through WebSocket streams, but candidate evaluation and order placement still run through the bot's 15-second loop and sequential REST-heavy evaluation. A very large candidate queue or API latency can delay evaluation.
 - OI is 15-minute history, not a live tick stream.
 - Liquidation events and full depth-delta/cancel dynamics are not yet integrated.
-- The rolling tape is in memory and resets on process restart.
+- The rolling Futures tape is in memory and rebuilds after a process restart. The paper-account snapshot (balance, active/closed trades, daily stats, configuration and bot-active flag) is atomically written to `bot_state.json` and restored on startup. This survives restarts only when `BEASTBOT_RESEARCH_DIR` points to a genuinely persistent Hostless volume; `/tmp` fallback is ephemeral and is explicitly reported by `/api/research/diagnostics`.
 - The engine has not yet completed a historical tick-level replay for AKEUSDT or ARIAUSDT. Existing candle-only records cannot reconstruct historical 5m/1m/30s executed aggressor windows, depth replenishment, or prove early Futures detection and profitability.
 - The rolling 5m tape resets on process restart; REST fallback requests up to 1,000 recent aggregate trades and only reports windows actually covered by those returned prints.
 
 ## Validation
 
-Run the targeted unit tests and build in CI. The full `npm test` script also invokes `exitEvidenceReplay.ts`; that historical replay is deliberately not run as part of this change. Unit coverage includes Futures-only ignition, flow quality, structure alignment, reverse-wave confirmation, rolling-tape discovery, and the new wave-stop/portfolio-risk calculations.
+Run the targeted unit tests and build in CI. The full `npm test` script also invokes `exitEvidenceReplay.ts`; that historical replay is deliberately not run as part of this change. Unit coverage includes Futures-only ignition, flow quality, structure alignment, reverse-wave confirmation, rolling-tape discovery, wave-stop/portfolio-risk calculations, and atomic state snapshot persistence.
 
 No merge to main or production deployment is part of this branch.
 
