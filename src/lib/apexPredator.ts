@@ -191,6 +191,9 @@ export function getStats() {
   const riskedTradesCount = activeTrades.filter(t => !t.be_done).length;
   const todayFloatingPnl = activeTrades.reduce((sum, trade) => sum + (Number(trade.pnl) || 0), 0);
   const todayNetPnl = todaysStats.pnl + todayFloatingPnl;
+  const remainingUnrealizedPnl = activeTrades.reduce((sum, trade) =>
+    sum + ((Number(trade.pnl) || 0) - (Number(trade.realizedPnl) || 0)), 0);
+  const totalAccountNetPnl = (virtualBalance - initialVirtualBalance) + remainingUnrealizedPnl;
 
   return { 
     ...apexPredatorStats,
@@ -222,7 +225,7 @@ export function getStats() {
     libyaOpen2,
     libyaClose2,
     isSleeping: false,
-    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && (virtualBalance - initialVirtualBalance) <= -haltLossTarget) || (haltProfitEnabled && (virtualBalance - initialVirtualBalance) >= haltProfitTarget),
+    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && totalAccountNetPnl <= -haltLossTarget) || (haltProfitEnabled && totalAccountNetPnl >= haltProfitTarget),
     scannerMode: "CONTINUOUS_DISCOVERY_WITH_EXECUTION_GUARDS",
     today: { ...todaysStats, floatingPnl: todayFloatingPnl, netPnl: todayNetPnl } 
   }; 
@@ -1473,13 +1476,11 @@ export async function runApexLoop() {
          await exitBrain(t, ctx);
       }
 
-      // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
-      let totalFloatingPnl = 0;
-      let totalRealizedPnl = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
-      for (const t of activeTrades) {
-         if (t.pnl) totalFloatingPnl += t.pnl; 
-      }
-      let currentNetPnl = totalRealizedPnl + totalFloatingPnl;
+      // Account-wide net PnL uses cumulative realized balance plus only the remaining unrealized portion.
+      // This avoids truncation after the 150-trade dashboard history cap and avoids double-counting partial closes.
+      const remainingUnrealizedPnl = activeTrades.reduce((sum, trade) =>
+         sum + ((Number(trade.pnl) || 0) - (Number(trade.realizedPnl) || 0)), 0);
+      const currentNetPnl = (virtualBalance - initialVirtualBalance) + remainingUnrealizedPnl;
       
       const profitExecutionLocked = haltProfitEnabled && currentNetPnl >= haltProfitTarget;
       const configuredLossExecutionLocked = haltLossEnabled && currentNetPnl <= -haltLossTarget;
