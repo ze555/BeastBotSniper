@@ -578,8 +578,9 @@ async function fetchOrderBookEvidence(symbol: string) {
    const bids = Array.isArray(res.data?.bids) ? res.data.bids : [];
    const asks = Array.isArray(res.data?.asks) ? res.data.asks : [];
    if (!bids.length || !asks.length) throw new Error("Order book unavailable");
-   const bidNotional = bids.reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
-   const askNotional = asks.reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
+   // Match the live depth5 WebSocket source: qualify only the executable top five levels.
+   const bidNotional = bids.slice(0, 5).reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
+   const askNotional = asks.slice(0, 5).reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
    const bestBid = Number(bids[0][0]);
    const bestAsk = Number(asks[0][0]);
    if (![bidNotional, askNotional, bestBid, bestAsk].every(Number.isFinite) || bestBid <= 0 || bestAsk < bestBid) {
