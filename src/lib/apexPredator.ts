@@ -1679,7 +1679,7 @@ export function startEngine() {
    if (storage.uses_temporary_storage) {
       addLog("⚠️ State/research storage is under temporary storage (" + storage.directory + "). Set BEASTBOT_RESEARCH_DIR to a persistent Hostless volume or database-backed mount to survive restarts.", "warn");
    } else {
-      addLog("💾 Bot state persistence enabled at " + storage.directory + ".", "success");
+      addLog("💾 Bot state snapshots write to " + storage.directory + "; verify that this Hostless mount is persistent across restarts.", "info");
    }
    persistRuntimeState();
    if (watcherInterval) clearInterval(watcherInterval);
