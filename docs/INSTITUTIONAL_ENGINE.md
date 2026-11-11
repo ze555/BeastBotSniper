@@ -54,7 +54,7 @@ The institutional exit path uses Futures aggressor flow only. A full exit requir
 - The rolling Futures tape is in memory and rebuilds after a process restart. The paper-account snapshot (balance, active/closed trades, daily stats, configuration and bot-active flag) is atomically written to `bot_state.json` and restored on startup. This survives restarts only when `BEASTBOT_RESEARCH_DIR` points to a genuinely persistent Hostless volume; `/tmp` fallback is ephemeral and is explicitly reported by `/api/research/diagnostics`.
 - The engine has not yet completed a historical tick-level replay for AKEUSDT or ARIAUSDT. Existing candle-only records cannot reconstruct historical 5m/1m/30s executed aggressor windows, depth replenishment, or prove early Futures detection and profitability.
 - The rolling 5m tape resets on process restart; REST fallback requests up to 1,000 recent aggregate trades and only reports windows actually covered by those returned prints.
-- Default concurrency is 10 positions. Their combined stop risk is dynamically budgeted to at most 3% of the initial virtual balance, bounded further by remaining daily-loss headroom; this is a portfolio cap, not 3% per trade.
+- Default concurrency is 10 positions. Their combined stop risk is dynamically budgeted to at most 3% of the lower of current virtual equity and initial virtual balance, bounded further by remaining daily-loss headroom; this is a portfolio cap, not 3% per trade.
 - The former `MIN_RR_REQUIRED` calculation is not a true obstacle-space test: TP3 is defined as 3.5 times the stop distance, so the computed ratio is fixed by construction. It does not prove there is enough market liquidity/structure room to reach TP3.
 
 ## Validation
