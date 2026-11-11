@@ -34,6 +34,7 @@ let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
 let riskLockLoggedAt = 0;
+let lastRuntimeStateSavedAt = 0;
 
 // Symbol-level cooldowns are disabled. Re-entry is governed by fresh wave evidence,
 // active-position checks, structural invalidation and execution feasibility.
@@ -136,6 +137,7 @@ if (restoredBotState?.schema_version === 1) {
       };
    }
    if (typeof restoredBotState.statsDay === "string") statsDay = restoredBotState.statsDay;
+   lastRuntimeStateSavedAt = Number.isFinite(Date.parse(restoredBotState.saved_at)) ? Date.parse(restoredBotState.saved_at) : 0;
    if (typeof restoredBotState.botActive === "boolean") botActive = restoredBotState.botActive;
    if (restoredBotState.config && typeof restoredBotState.config === "object") {
       const c = restoredBotState.config;
@@ -164,10 +166,12 @@ if (restoredBotState?.schema_version === 1) {
    }
 }
 
-export function persistRuntimeState() {
-   saveBotState({
+export function persistRuntimeState(force = false) {
+   const now = Date.now();
+   if (!force && now - lastRuntimeStateSavedAt < 30_000) return;
+   const saved = saveBotState({
       virtualBalance, initialVirtualBalance, activeTrades, botActive,
-      closedTrades: closedTrades.slice(0, 150), todaysStats, statsDay, apexPredatorStats,
+      closedTrades: closedTrades.slice(0, 30), todaysStats, statsDay, apexPredatorStats,
       config: {
          maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget,
          smartBtcHoldEnabled, btcVolThresholdStr, slAtrMultiplier, geniusMode, pullbackSniperEnabled,
@@ -175,6 +179,7 @@ export function persistRuntimeState() {
          libyaOpen1, libyaClose1, libyaOpen2, libyaClose2
       }
    });
+   if (saved) lastRuntimeStateSavedAt = now;
 }
 
 const institutionalStateBySymbol = new Map<string, { state: string; direction: string }>();
@@ -187,7 +192,7 @@ export function resetAccountState() {
   closedTrades = closedTrades.filter(t => t.symbol !== 'AMZNUSDT' && !((t.pos || t.initialPos) > 100));
   activeTrades = activeTrades.filter(t => t.symbol !== 'AMZNUSDT');
   addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
-  persistRuntimeState();
+  persistRuntimeState(true);
 }
 
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
@@ -217,7 +222,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.libyaOpen2 !== undefined) libyaOpen2 = opts.libyaOpen2;
       if (opts.libyaClose2 !== undefined) libyaClose2 = opts.libyaClose2;
   }
-  persistRuntimeState();
+  persistRuntimeState(true);
 }
 
 export function isLibyaTradingAllowed(): boolean {
@@ -348,7 +353,7 @@ export function setConfig(config: any) {
   if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
   if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
-export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); persistRuntimeState(); addLog(`BOT ACTIVE: ${val}`); }
+export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); persistRuntimeState(true); addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
 
 // --- DATA FETCHING ---
@@ -1156,6 +1161,7 @@ function executeTrade(symbol: string, decision: any) {
          }
       };
       activeTrades.push(newTrade);
+      persistRuntimeState(true);
       registerTradeForDirectionTracking(newTrade);
       addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    } else {
@@ -1224,6 +1230,7 @@ function executeTrade(symbol: string, decision: any) {
          }
       };
       activeTrades.push(newTrade);
+      persistRuntimeState(true);
       registerTradeForDirectionTracking(newTrade);
       addLog(`✅ SHORT ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    }
@@ -1489,6 +1496,7 @@ function closePart(t: any, part: string, pct: number) {
    t.realizedPnl = (t.realizedPnl || 0) + realizedPnl;
    t.totalFees = (t.totalFees || 0) + tradeFees;
    virtualBalance += realizedPnl;
+   persistRuntimeState(true);
 }
 
 function closeTradeFull(t: any, reason: string = "") {
@@ -1535,6 +1543,7 @@ function closeTradeFull(t: any, reason: string = "") {
       finalPnl: t.finalPnl,
       fees: t.totalFees || 0
    });
+   persistRuntimeState(true);
 }
 
 // --- SEC 9: MAIN LOOP ---
@@ -1681,7 +1690,7 @@ export function startEngine() {
    } else {
       addLog("💾 Bot state snapshots write to " + storage.directory + "; verify that this Hostless mount is persistent across restarts.", "info");
    }
-   persistRuntimeState();
+   persistRuntimeState(true);
    if (watcherInterval) clearInterval(watcherInterval);
    watcherInterval = setInterval(runApexLoop, 15 * 1000); // Check every 15 seconds for ultra-responsive breakout inception
    runApexLoop();
