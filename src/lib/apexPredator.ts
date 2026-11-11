@@ -35,6 +35,7 @@ let botActive = false;
 let isLoopRunning = false;
 let riskLockLoggedAt = 0;
 let lastRuntimeStateSavedAt = 0;
+let runtimeStateDirty = false;
 
 // Symbol-level cooldowns are disabled. Re-entry is governed by fresh wave evidence,
 // active-position checks, structural invalidation and execution feasibility.
@@ -1228,6 +1229,9 @@ function executeTrade(symbol: string, decision: any) {
 // --- SEC 6: EXIT BRAIN ---
 async function exitBrain(trade: any, ctx: any) {
    const t = trade;
+   const stopAtStart = Number(t.sl);
+   const peakRAtStart = Number(t.peak_r) || 0;
+   const peakPriceAtStart = Number(t.peakPrice) || 0;
    const w = await readWhale(t.symbol, 0); // Fast check
    const p = await readPrice(t.symbol, w.c15);
    
@@ -1465,6 +1469,9 @@ async function exitBrain(trade: any, ctx: any) {
    // Hard SL Hit
    if (t.direction === "LONG" && price <= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
    if (t.direction === "SHORT" && price >= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
+   if (activeTrades.includes(t) &&
+       (Number(t.sl) !== stopAtStart || (Number(t.peak_r) || 0) !== peakRAtStart ||
+        (Number(t.peakPrice) || 0) !== peakPriceAtStart)) runtimeStateDirty = true;
 }
 
 function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close - klines[klines.length-1].open); }
@@ -1667,7 +1674,8 @@ export async function runApexLoop() {
    } catch (e: any) {
       addLog(`Loop Error: ${e.message}`, "error");
    } finally {
-      persistRuntimeState();
+      persistRuntimeState(runtimeStateDirty);
+      runtimeStateDirty = false;
       isLoopRunning = false;
    }
 }
