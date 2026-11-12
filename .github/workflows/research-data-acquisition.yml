@@ -6,6 +6,8 @@ on:
       - research/profitability-redesign
     paths:
       - .github/workflows/research-data-acquisition.yml
+      - research/historical_data/download_binance_futures.py
+      - research/historical_data/audit_historical_data.py
   workflow_dispatch:
 
 permissions:
