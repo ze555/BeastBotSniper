@@ -30,3 +30,26 @@ jobs:
       - run: npx tsx src/lib/futuresWaveFeed.test.ts
       - run: npx tsc --noEmit
       - run: npm run build
+
+  official-binance-exit-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/profitability-redesign
+      - name: Run 78-trade replay from official Binance Vision archives
+        run: |
+          python research/historical_data/binance_official_exit_replay.py \
+            --trades study_all_trades_master.json \
+            --out research-results/official-binance-oct-2026 \
+            --fee-rate 0.0004 \
+            --slippage-rate 0.0002
+      - name: Publish replay report and per-trade audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: beastbot-official-binance-exit-replay-oct-2026
+          path: research-results/official-binance-oct-2026/
+          if-no-files-found: error
+          retention-days: 30
