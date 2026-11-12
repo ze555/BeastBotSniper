@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Download real Binance USD-M Futures history for reproducible research.
 
+Acquisition is run in GitHub Actions so users do not need a local Python setup.
+
 Tick data (trades/L2/OI/funding/liquidations) comes from CryptoHFTData's free
 public tier. 1m klines come directly from Binance Vision. No synthetic values
 are generated. Missing datasets remain missing and are reported in manifest.
