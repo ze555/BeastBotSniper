@@ -120,20 +120,33 @@ def main():
         report["klines_1m"] = download_klines(symbol, start, end, root)
         for dataset in datasets:
             method = getattr(client, methods[dataset])
-            try:
-                frame = method(symbol=symbol, exchange=EXCHANGE,
-                               start_date=str(start), end_date=str(end))
-                if frame is None: frame = pd.DataFrame()
-                path = root / symbol / dataset / f"{start}_{end}.parquet"
-                count = save_frame(frame, path)
-                report["datasets"][dataset] = {"rows": count, "file": str(path) if count else None,
-                                                "status": "OK" if count else "EMPTY"}
-                LOG.info("%s %s: %s rows", symbol, dataset, count)
-            except Exception as exc:
-                report["datasets"][dataset] = {"rows": 0, "file": None,
-                                                "status": "UNAVAILABLE", "error": str(exc)}
-                LOG.exception("%s %s download failed", symbol, dataset)
-            time.sleep(1.1)  # stay below the anonymous 60-files/minute tier
+            dataset_rows, dataset_files, failures = 0, [], []
+            for day in daterange(start, end):
+                path = root / symbol / dataset / f"{day}.parquet"
+                if path.exists():
+                    dataset_rows += len(pd.read_parquet(path))
+                    dataset_files.append(str(path))
+                    continue
+                try:
+                    frame = method(symbol=symbol, exchange=EXCHANGE,
+                                   start_date=str(day), end_date=str(day))
+                    if frame is None: frame = pd.DataFrame()
+                    count = save_frame(frame, path)
+                    dataset_rows += count
+                    if count: dataset_files.append(str(path))
+                    LOG.info("%s %s %s: %s rows", symbol, dataset, day, count)
+                except Exception as exc:
+                    failures.append({"date":str(day),"error":str(exc)})
+                    LOG.exception("%s %s %s download failed", symbol, dataset, day)
+                # A daily SDK call can fetch up to 24 hourly Parquet files. Leave a full
+                # minute between anonymous calls; a free API key removes this wait.
+                if not args.api_key:
+                    time.sleep(61)
+            report["datasets"][dataset] = {
+                "rows": dataset_rows, "files": dataset_files,
+                "status": "ERRORS" if failures else ("OK" if dataset_rows else "EMPTY"),
+                "failures": failures
+            }
         manifest["symbols"][symbol] = report
     root.mkdir(parents=True, exist_ok=True)
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
