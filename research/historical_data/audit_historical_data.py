@@ -18,10 +18,12 @@ def audit_orderbook(path: Path):
     # One exchange event can update many price levels. Collapse rows into message events
     # without changing their first-seen order.
     keys = [c for c in ["event_type","first_update_id","final_update_id","prev_final_update_id","last_update_id","event_time"] if c in df]
-    events = df.drop_duplicates(keys, keep="first") if keys else df.iloc[0:0]
+    grouped = df.groupby(keys, sort=False, dropna=False) if keys else []
     bids, asks, last_u, have_snapshot = {}, {}, None, False
-    gaps, crossed, updates = [], 0, 0
-    for _, ev in events.iterrows():
+    gaps, crossed, updates, event_count = [], 0, 0, 0
+    for _, rows in grouped:
+        event_count += 1
+        ev = rows.iloc[0]
         kind = str(ev.event_type).lower()
         if kind == "snapshot":
             bids.clear(); asks.clear(); last_u = ev.get("last_update_id")
@@ -40,9 +42,7 @@ def audit_orderbook(path: Path):
             updates += 1
         else:
             continue
-        event_time = ev.event_time
-        rows = df[df.event_time == event_time]
-        # Apply every level belonging to this event in original received order.
+        # Apply only levels belonging to this exact sequence event, preserving receive order.
         for row in rows.itertuples(index=False):
             side = str(getattr(row,"side")).lower()
             price, qty = float(getattr(row,"price")), float(getattr(row,"quantity"))
@@ -54,7 +54,7 @@ def audit_orderbook(path: Path):
             crossed += 1
             have_snapshot = False
     return {"status":"OK" if not missing and bad == 0 and not gaps and crossed == 0 else "REJECT",
-            "rows":len(df),"events":len(events),"updates":updates,"invalid_rows":bad,
+            "rows":len(df),"events":event_count,"updates":updates,"invalid_rows":bad,
             "sequence_gaps":len(gaps),"crossed_book_events":crossed,"gap_examples":gaps[:5]}
 
 def main():
