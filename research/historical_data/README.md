@@ -23,7 +23,13 @@ python research/historical_data/download_binance_futures.py \\
   --start-date 2025-06-28 --end-date 2025-07-02
 ```
 
-For the anonymous tier, keep date windows short and symbol batches small. To use a free provider key, set `CRYPTOHFTDATA_API_KEY` in the environment. Do not commit keys.
+For the anonymous tier, the downloader makes one symbol/dataset/day request at a time and waits 61 seconds between calls because one daily SDK request can fetch up to 24 hourly files. A one-day, one-symbol run across all five tick datasets can therefore take about five minutes. A free provider account/API key removes the rate limit; set `CRYPTOHFTDATA_API_KEY` in the environment. Do not commit keys.
+
+Run the data audit after download:
+
+```bash
+python research/historical_data/audit_historical_data.py --root research-data/binance-usdm
+```
 
 All downloaded files are Parquet. `manifest.json` records rows, file paths, empty datasets and download failures. An unavailable field is not imputed or fabricated. Order-book files are very large; begin with a few symbols/days, then expand after checking disk capacity.
 
