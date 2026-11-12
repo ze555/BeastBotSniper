@@ -1,4 +1,4 @@
-name: Research data acquisition (free public data)
+name: Official Binance archive exit replay
 
 on:
   push:
@@ -6,50 +6,35 @@ on:
       - research/profitability-redesign
     paths:
       - .github/workflows/research-data-acquisition.yml
-      - research/historical_data/download_binance_futures.py
-      - research/historical_data/audit_historical_data.py
+      - research/historical_data/binance_official_exit_replay.py
+      - study_all_trades_master.json
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  acquire:
+  official-binance-exit-replay:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
     steps:
       - name: Checkout research branch
         uses: actions/checkout@v4
         with:
           ref: research/profitability-redesign
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-
-      - name: Install research dependencies
+      - name: Run 78-trade exit-only replay from official Binance Vision archives
         run: |
-          python -m pip install --upgrade pip
-          pip install -r research/historical_data/requirements.txt
+          python research/historical_data/binance_official_exit_replay.py \
+            --trades study_all_trades_master.json \
+            --out research-results/official-binance-oct-2026 \
+            --fee-rate 0.0004 \
+            --slippage-rate 0.0002
 
-      - name: Download real Binance Futures history
-        run: |
-          python research/historical_data/download_binance_futures.py \
-            --symbols BTCUSDT,ETHUSDT,SOLUSDT \
-            --start-date 2026-09-02 \
-            --end-date 2026-09-02
-
-      - name: Audit downloaded data
-        run: |
-          python research/historical_data/audit_historical_data.py \
-            --root research-data/binance-usdm
-
-      - name: Publish research dataset and audit
+      - name: Publish replay report and per-trade audit
         uses: actions/upload-artifact@v4
         with:
-          name: beastbot-binance-research-2026-09-02
-          path: research-data/binance-usdm/
+          name: beastbot-official-binance-exit-replay-oct-2026
+          path: research-results/official-binance-oct-2026/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
