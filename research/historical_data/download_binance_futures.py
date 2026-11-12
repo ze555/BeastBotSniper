@@ -79,6 +79,11 @@ def download_klines(symbol: str, start: date, end: date, root: Path):
         cols = ["open_time","open","high","low","close","volume","close_time",
                 "quote_volume","trade_count","taker_buy_base","taker_buy_quote","ignore"]
         raw.columns = cols[:len(raw.columns)]
+        # Binance Vision CSV timestamps may be parsed as strings; normalize before
+        # applying the requested UTC window to avoid object/int comparisons.
+        raw["open_time"] = pd.to_numeric(raw["open_time"], errors="coerce")
+        raw = raw.dropna(subset=["open_time"])
+        raw["open_time"] = raw["open_time"].astype("int64")
         raw = raw[(raw.open_time >= int(pd.Timestamp(start, tz="UTC").timestamp()*1000)) &
                   (raw.open_time < int((pd.Timestamp(end, tz="UTC") + pd.Timedelta(days=1)).timestamp()*1000))]
         for c in ["open","high","low","close","volume","quote_volume","taker_buy_base","taker_buy_quote"]:
