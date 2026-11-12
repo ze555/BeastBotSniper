@@ -1,0 +1,53 @@
+name: Research data acquisition (free public data)
+
+on:
+  push:
+    branches:
+      - research/profitability-redesign
+    paths:
+      - .github/workflows/research-data-acquisition.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/profitability-redesign
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r research/historical_data/requirements.txt
+
+      - name: Download real Binance Futures history
+        run: |
+          python research/historical_data/download_binance_futures.py \
+            --symbols BTCUSDT,ETHUSDT,SOLUSDT \
+            --start-date 2026-09-02 \
+            --end-date 2026-09-02
+
+      - name: Audit downloaded data
+        run: |
+          python research/historical_data/audit_historical_data.py \
+            --root research-data/binance-usdm
+
+      - name: Publish research dataset and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: beastbot-binance-research-2026-09-02
+          path: research-data/binance-usdm/
+          if-no-files-found: error
+          retention-days: 14
