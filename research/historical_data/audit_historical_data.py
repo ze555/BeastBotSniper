@@ -34,7 +34,7 @@ def audit_orderbook(path: Path):
                 gaps.append("update_before_snapshot")
                 continue
             pu, final_u = ev.get("prev_final_update_id"), ev.get("final_update_id")
-            if pd.notna(pu) and last_u is not None and int(pu) != int(last_u):
+            if pd.notna(pu) and last_u is not None and pd.notna(last_u) and int(pu) != int(last_u):
                 gaps.append({"expected_prev":int(last_u),"actual_prev":int(pu),"event_time":int(ev.event_time)})
                 have_snapshot = False
                 continue
