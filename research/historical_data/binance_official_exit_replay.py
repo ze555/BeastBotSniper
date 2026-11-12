@@ -120,11 +120,11 @@ def simulate(trade, bars, emas, mode, giveback=0.35, intrabar="conservative",
         exit_reason, exit_time = reason, t
 
     for bar in bars:
-        hi_r = direction*(bar["h"]-entry)/risk
-        lo_r = direction*(bar["l"]-entry)/risk
+        favorable_r = (bar["h"]-entry)/risk if side=="LONG" else (entry-bar["l"])/risk
+        adverse_r = (bar["l"]-entry)/risk if side=="LONG" else (entry-bar["h"])/risk
         close_r = direction*(bar["c"]-entry)/risk
-        mfe = max(mfe, hi_r)
-        mae = min(mae, lo_r)
+        mfe = max(mfe, favorable_r)
+        mae = min(mae, adverse_r)
         if remaining <= 1e-9: break
 
         hit_stop, stop_fill = stop_touched(side,bar,active_stop_r,entry,risk)
