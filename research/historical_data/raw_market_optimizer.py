@@ -99,7 +99,21 @@ def get_symbol_data(symbol):
             except Exception as e:
                 meta["missing"].append({"type":"daily_klines","date":ds,"error":str(e)})
         day+=pd.Timedelta(days=1)
-    if not kl: return symbol,None,[],meta
+    # Fill missing funding days from the official daily fundingRate archive too.
+    funding_days=set(pd.to_datetime([x[0] for x in fund],unit="ms",utc=True).strftime("%Y-%m-%d")) if fund else set()
+    day=pd.Timestamp(START.date(),tz="UTC")
+    last_day=pd.Timestamp((END-pd.Timedelta(milliseconds=1)).date(),tz="UTC")
+    while day<=last_day:
+        ds=day.strftime("%Y-%m-%d")
+        if ds not in funding_days:
+            fdu=f"{BASE}/daily/fundingRate/{symbol}/{symbol}-fundingRate-{ds}.zip"
+            try:
+                raw,sha,size=download_zip(fdu); ff=parse_funding(raw); fund.extend(ff)
+                if ff: meta.setdefault("daily_funding_fallback",[]).append({"date":ds,"sha256":sha,"bytes":size,"rows":len(ff)})
+            except Exception as e:
+                meta["missing"].append({"type":"daily_fundingRate","date":ds,"error":str(e)})
+        day+=pd.Timedelta(days=1)
+    if not kl: return symbol,None,sorted(set(fund)),meta
     d=pd.concat(kl,ignore_index=True).drop_duplicates("t").sort_values("t").reset_index(drop=True)
     # Strict minute continuity audit; do not fabricate missing candles.
     d["gap_before"]=d.t.diff().fillna(60000).ne(60000)
