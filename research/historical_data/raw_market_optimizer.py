@@ -266,7 +266,9 @@ def portfolio(rows):
 
 def metrics(rows):
     # Caller applies the 10-position portfolio cap across the entire continuous
-    # timeline before splitting development/validation/holdout.
+    # timeline before splitting development/validation/holdout. Realized equity
+    # and drawdown must be ordered by exit time, not by entry time.
+    rows=sorted(rows,key=lambda x:(x["exit_ms"],x["entry_ms"]))
     vals=[float(x["net_r"]) for x in rows]
     wins=sum(x for x in vals if x>0); losses=-sum(x for x in vals if x<0)
     curve=peak=dd=0.0
