@@ -96,6 +96,7 @@ def features(d):
     d["prev_low_20"]=d.l.rolling(20,min_periods=20).min().shift(1)
     d["delta"]=np.where(d.qv>0,(2*d.tbq/d.qv)-1,0.0)
     d["trend15"]=c/c.shift(15)-1
+    d["continuous20"]=(~d.gap_before.astype(bool)).rolling(20,min_periods=20).min().fillna(0).astype(bool)
     return d
 
 def apply_slip(price,side,entry):
@@ -192,7 +193,7 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     prev_lo=d[f"prev_low_{lookback}"].to_numpy()
     c=d.c.to_numpy(); o=d.o.to_numpy(); qv=d.qv.to_numpy()
     avg=d.avgqv.to_numpy(); delta=d.delta.to_numpy(); ret5=d.ret5.to_numpy()
-    valid=np.isfinite(avg)&np.isfinite(d.atr.to_numpy())&(avg>0)
+    valid=np.isfinite(avg)&np.isfinite(d.atr.to_numpy())&(avg>0)&d.continuous20.to_numpy()
     liquid=(qv>=avg*vol_mult)
     if mode=="breakout":
         long=(c>prev_hi)&(c>o)&(delta>=delta_th)&liquid
@@ -203,7 +204,6 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     return np.where(valid&long)[0],np.where(valid&short)[0]
 
 def gen_trades(symbol,d,funding,entry_cfg,stop_atr,exit_mode):
-    d=features(d)
     longs,shorts=make_signal_masks(d,entry_cfg["mode"],entry_cfg["lookback"],entry_cfg["vol_mult"],entry_cfg["delta"])
     result=[]
     for side,indices in (("LONG",longs),("SHORT",shorts)):
@@ -268,7 +268,7 @@ def main():
             manifest["files"].append(meta)
             manifest["symbol_coverage"].append({"symbol":s,"bars":len(d) if d is not None else 0,
                 "funding_events":len(fund),"gaps":int(d.gap_before.sum()-1) if d is not None and len(d) else None})
-            if d is not None and len(d)>=10000: data[s]=(d,fund)
+            if d is not None and len(d)>=10000: data[s]=(features(d),fund)
             print(f"DATA {n}/{len(symbols)} {s} bars={len(d) if d is not None else 0} funding={len(fund)}",flush=True)
         except Exception as e:
             manifest["symbol_coverage"].append({"symbol":s,"bars":0,"error":str(e)})
