@@ -242,24 +242,30 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
 
 def gen_trades(symbol,d,funding,entry_cfg,stop_atr,exit_mode):
     longs,shorts=make_signal_masks(d,entry_cfg["mode"],entry_cfg["lookback"],entry_cfg["vol_mult"],entry_cfg["delta"])
-    result=[]
-    for side,indices in (("LONG",longs),("SHORT",shorts)):
-        busy_until=-1
-        for i in indices:
-            if i+1<=busy_until: continue
-            t=simulate(d,int(i),side,stop_atr,exit_mode,funding)
-            if not t: continue
-            t["symbol"]=symbol
-            result.append(t)
-            # No overlapping position in the same symbol for this strategy.
-            busy_until=int(np.searchsorted(d.t.to_numpy(),t["exit_ms"],side="right")-1)
+    # Merge LONG and SHORT signals into one chronological stream. A symbol can
+    # never hold both directions at once (One-way futures position semantics).
+    signals=sorted([(int(i),"LONG") for i in longs]+[(int(i),"SHORT") for i in shorts],key=lambda x:(x[0],x[1]))
+    result=[]; busy_until=-1; times=d.t.to_numpy()
+    for i,side in signals:
+        if i+1<=busy_until: continue
+        t=simulate(d,i,side,stop_atr,exit_mode,funding)
+        if not t: continue
+        t["symbol"]=symbol
+        avg=max(float(d.avgqv.iloc[i]),1e-12)
+        t["signal_strength"]=float((float(d.qv.iloc[i])/avg) + abs(float(d.delta.iloc[i])) + abs(float(d.ret5.iloc[i]))*10.0)
+        result.append(t)
+        busy_until=int(np.searchsorted(times,t["exit_ms"],side="right")-1)
     return result
 
 def portfolio(rows):
-    rows=sorted(rows,key=lambda x:(x["entry_ms"],x["symbol"],x["side"]))
+    # Enforce the global concurrent-position cap without alphabetical bias:
+    # at identical entry times, prefer stronger relative volume/flow signals.
+    rows=sorted(rows,key=lambda x:(x["entry_ms"],-x.get("signal_strength",0.0),x["symbol"],x["side"]))
     accepted=[]; active=[]
     for t in rows:
         active=[a for a in active if a["exit_ms"]>t["entry_ms"]]
+        # One-way mode: no duplicate/opposite-side exposure on the same symbol.
+        if any(a["symbol"]==t["symbol"] for a in active): continue
         if len(active)>=MAX_OPEN: continue
         accepted.append(t); active.append(t)
     return accepted
@@ -301,8 +307,10 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--universe",default="research/historical_data/universe_62_symbols.txt")
     ap.add_argument("--out",default="research-results/raw-market-optimizer-2026-08-15_to_2026-11-12")
+    ap.add_argument("--cache",default="research-cache/raw-market-data")
     args=ap.parse_args()
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
+    cache=Path(args.cache); cache.mkdir(parents=True,exist_ok=True)
     symbols=[x.strip().upper() for x in Path(args.universe).read_text().splitlines() if x.strip()]
     symbols=sorted(set(symbols))
     manifest={"source":"Official Binance Vision USD-M Futures 1m klines + monthly fundingRate archives, supplemented by official USD-M fundingRate API",
@@ -314,7 +322,22 @@ def main():
     # Download/parse one symbol at a time to keep peak RAM bounded.
     for n,s in enumerate(symbols,1):
         try:
-            sym,d,fund,meta=get_symbol_data(s)
+            cached_csv=cache/f"{s}.csv.gz"
+            cached_funding=cache/f"{s}.funding.json"
+            cached_meta=cache/f"{s}.meta.json"
+            if cached_csv.exists() and cached_funding.exists() and cached_meta.exists():
+                d=pd.read_csv(cached_csv,compression="gzip")
+                for col in ("t","ct","n"): d[col]=d[col].astype("int64")
+                d["gap_before"]=d.t.diff().fillna(60000).ne(60000)
+                fund=[(int(x[0]),float(x[1])) for x in json.loads(cached_funding.read_text())]
+                meta=json.loads(cached_meta.read_text())
+                print(f"CACHE HIT {s} bars={len(d)} funding={len(fund)}",flush=True)
+            else:
+                sym,d,fund,meta=get_symbol_data(s)
+                if d is not None and len(d):
+                    d.to_csv(cached_csv,index=False,compression="gzip")
+                    cached_funding.write_text(json.dumps(fund),encoding="utf-8")
+                    cached_meta.write_text(json.dumps(meta),encoding="utf-8")
             manifest["files"].append(meta)
             manifest["symbol_coverage"].append({"symbol":s,"bars":len(d) if d is not None else 0,
                 "first_bar_utc":pd.to_datetime(d.t.iloc[0],unit="ms",utc=True).isoformat() if d is not None and len(d) else None,
