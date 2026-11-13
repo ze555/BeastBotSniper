@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: raw-market-optimizer-corrected-v2
+  group: raw-market-optimizer-corrected-v3
   cancel-in-progress: false
 
 jobs:
