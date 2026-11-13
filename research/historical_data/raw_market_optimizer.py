@@ -78,6 +78,27 @@ def get_symbol_data(symbol):
             raw,sha,size=download_zip(fu); f=parse_funding(raw); fund.extend(f)
             meta["funding_files"].append({"month":month,"sha256":sha,"bytes":size,"rows":len(f)})
         except Exception as e: meta["missing"].append({"type":"fundingRate","month":month,"error":str(e)})
+    # Monthly archives can omit early-month history for some symbols. Fill only
+    # dates with no monthly bars using official daily archives; never synthesize candles.
+    if kl:
+        d0=pd.concat(kl,ignore_index=True).drop_duplicates("t").sort_values("t").reset_index(drop=True)
+        present=set(pd.to_datetime(d0.t,unit="ms",utc=True).dt.strftime("%Y-%m-%d"))
+    else:
+        d0=pd.DataFrame(columns=KCOLS); present=set()
+    day=pd.Timestamp(START.date(),tz="UTC")
+    last_day=pd.Timestamp((END-pd.Timedelta(milliseconds=1)).date(),tz="UTC")
+    while day<=last_day:
+        ds=day.strftime("%Y-%m-%d")
+        if ds not in present:
+            du=f"{BASE}/daily/klines/{symbol}/1m/{symbol}-1m-{ds}.zip"
+            try:
+                raw,sha,size=download_zip(du); dd=parse_klines(raw)
+                if len(dd):
+                    kl.append(dd)
+                    meta.setdefault("daily_fallback",[]).append({"date":ds,"sha256":sha,"bytes":size,"rows":len(dd)})
+            except Exception as e:
+                meta["missing"].append({"type":"daily_klines","date":ds,"error":str(e)})
+        day+=pd.Timedelta(days=1)
     if not kl: return symbol,None,[],meta
     d=pd.concat(kl,ignore_index=True).drop_duplicates("t").sort_values("t").reset_index(drop=True)
     # Strict minute continuity audit; do not fabricate missing candles.
@@ -134,7 +155,9 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
             rate=funding_events[f_ptr][1]
             funding_r += -direction*rate*(entry/risk_dist)*remaining
             f_ptr+=1
-        stop_px=entry+active_stop*risk_dist
+        # active_stop is measured in R along the trade direction. This sign
+        # is essential: a short's initial stop must be ABOVE entry, not below.
+        stop_px=entry+direction*active_stop*risk_dist
         stop_hit=(l<=stop_px) if side=="LONG" else (h>=stop_px)
         if stop_hit:
             raw=min(stop_px,o) if side=="LONG" else max(stop_px,o)
@@ -230,7 +253,8 @@ def portfolio(rows):
     return accepted
 
 def metrics(rows):
-    rows=portfolio(rows)
+    # Caller applies the 10-position portfolio cap across the entire continuous
+    # timeline before splitting development/validation/holdout.
     vals=[float(x["net_r"]) for x in rows]
     wins=sum(x for x in vals if x>0); losses=-sum(x for x in vals if x<0)
     curve=peak=dd=0.0
@@ -247,7 +271,17 @@ def metrics(rows):
             "symbols":len(set(x["symbol"] for x in rows)),
             "longs":sum(x["side"]=="LONG" for x in rows),"shorts":sum(x["side"]=="SHORT" for x in rows),
             "funding_r":round(sum(x["funding_r"] for x in rows),3),
-            "fees_r":round(sum(x["fee_r"] for x in rows),3)}
+            "fees_r":round(sum(x["fee_r"] for x in rows),3),
+            "long_net_r":round(sum(x["net_r"] for x in rows if x["side"]=="LONG"),3),
+            "short_net_r":round(sum(x["net_r"] for x in rows if x["side"]=="SHORT"),3),
+            "long_trades":sum(x["side"]=="LONG" for x in rows),
+            "short_trades":sum(x["side"]=="SHORT" for x in rows),
+            "long_pf":round((sum(x["net_r"] for x in rows if x["side"]=="LONG" and x["net_r"]>0) /
+                -sum(x["net_r"] for x in rows if x["side"]=="LONG" and x["net_r"]<0)),3)
+                if any(x["side"]=="LONG" and x["net_r"]<0 for x in rows) else 999,
+            "short_pf":round((sum(x["net_r"] for x in rows if x["side"]=="SHORT" and x["net_r"]>0) /
+                -sum(x["net_r"] for x in rows if x["side"]=="SHORT" and x["net_r"]<0)),3)
+                if any(x["side"]=="SHORT" and x["net_r"]<0 for x in rows) else 999}
 
 def main():
     ap=argparse.ArgumentParser()
@@ -269,6 +303,8 @@ def main():
             sym,d,fund,meta=get_symbol_data(s)
             manifest["files"].append(meta)
             manifest["symbol_coverage"].append({"symbol":s,"bars":len(d) if d is not None else 0,
+                "first_bar_utc":pd.to_datetime(d.t.iloc[0],unit="ms",utc=True).isoformat() if d is not None and len(d) else None,
+                "last_bar_utc":pd.to_datetime(d.t.iloc[-1],unit="ms",utc=True).isoformat() if d is not None and len(d) else None,
                 "funding_events":len(fund),"gaps":int(d.gap_before.sum()-1) if d is not None and len(d) else None})
             if d is not None and len(d)>=10000: data[s]=(features(d),fund)
             print(f"DATA {n}/{len(symbols)} {s} bars={len(d) if d is not None else 0} funding={len(fund)}",flush=True)
@@ -294,6 +330,9 @@ def main():
         rows=[]
         for s,(d,fund) in data.items():
             rows.extend(gen_trades(s,d,fund,entry,stop,exit_mode))
+        # Enforce concurrency across the whole continuous sample, including
+        # positions that cross a split boundary.
+        rows=portfolio(rows)
         train=[x for x in rows if x["entry_ms"]<train_end]
         val=[x for x in rows if train_end<=x["entry_ms"]<val_end]
         hold=[x for x in rows if x["entry_ms"]>=val_end]
@@ -311,7 +350,7 @@ def main():
     selected=ranked[0] if ranked else None
     holdout_result=None; selected_trades=[]
     if selected:
-        selected_trades=portfolio(trade_rows[str(selected["config_id"])])
+        selected_trades=trade_rows[str(selected["config_id"])]
         hold=[x for x in selected_trades if x["entry_ms"]>=val_end]
         holdout_result=metrics(hold)
     report={"title":"Independent raw-market strategy optimization (no recorded trades)",
