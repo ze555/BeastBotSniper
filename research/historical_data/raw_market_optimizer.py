@@ -147,6 +147,7 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
         if exit_mode=="fixed_2R": targets=[(2.0,1.0,"TP2")]
         elif exit_mode=="staged": targets=[(0.75,0.40,"TP1"),(1.80,0.35,"TP2"),(3.50,0.25,"TP3")]
         else: targets=[(1.0,0.40,"TP1"),(3.0,0.60,"TP3")]
+        target_filled_this_bar=False
         for trgt,frac,label in targets:
             if (label=="TP1" and tp1) or (label=="TP2" and tp2): continue
             px=entry+direction*trgt*risk_dist
@@ -157,14 +158,15 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
                 gross+=direction*(fill-entry)/risk_dist*frac
                 exit_fee+=FEE*fill/risk_dist*frac
                 remaining-=frac; exit_reason=label
+                target_filled_this_bar=True
                 if label=="TP1":
                     tp1=True
-                    active_stop=max(active_stop,0.05 if exit_mode=="staged" else 0.05)
+                    active_stop=max(active_stop,0.05)
                 elif label=="TP2":
                     tp2=True; active_stop=max(active_stop,0.75)
                 elif label=="TP3":
                     remaining=0
-                if remaining<=1e-9: break
+                break  # OHLC cannot establish the order of multiple intrabar targets.
         if remaining<=1e-9: exit_idx=k; break
         if exit_mode=="trail" and tp1:
             # Use only the ATR of the just-closed candle for the next candle's trailing stop.
