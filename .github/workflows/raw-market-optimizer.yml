@@ -1,0 +1,46 @@
+name: Independent raw Binance market optimizer
+
+on:
+  push:
+    branches:
+      - research/profitability-redesign
+    paths:
+      - research/historical_data/raw_market_optimizer.py
+      - research/historical_data/universe_62_symbols.txt
+      - .github/workflows/raw-market-optimizer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: raw-market-optimizer-research
+  cancel-in-progress: false
+
+jobs:
+  raw-market-optimizer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout research branch only
+        uses: actions/checkout@v4
+        with:
+          ref: research/profitability-redesign
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install numerical libraries
+        run: python -m pip install --disable-pip-version-check numpy pandas
+      - name: Download and verify official Binance archives; generate and optimize trades from raw market data
+        run: |
+          python -u research/historical_data/raw_market_optimizer.py \
+            --universe research/historical_data/universe_62_symbols.txt \
+            --out research-results/raw-market-optimizer-2026-08-15_to_2026-11-12
+      - name: Upload raw-data manifest, optimization matrix and independent holdout trades
+        uses: actions/upload-artifact@v4
+        with:
+          name: beastbot-raw-market-optimizer-2026-08-15_to_2026-11-12
+          path: research-results/raw-market-optimizer-2026-08-15_to_2026-11-12/
+          if-no-files-found: error
+          retention-days: 30
