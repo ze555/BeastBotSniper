@@ -36,7 +36,10 @@ import {
    extractEntryTiming,
    extractMarketRegimeContext,
    registerTradeForDirectionTracking,
-   updateDirectionTracking
+   updateDirectionTracking,
+   getResearchMemoryStats,
+   emergencyTrimResearchStores,
+   pruneResearchTrackingStores
 } from "./researchLogger.js";
 
 // Re-export so the Enhanced Execution Filter test suite (and any tooling) can
@@ -181,6 +184,144 @@ let libyaClose2 = 18;
 const logs: any[] = [];
 let closedTrades: any[] = [];
 
+// ═══ v3.4.1 MEMORY SHIELD — bounded closed-trade book ═══
+// closedTrades used to grow forever, and EVERY entry carried a 40-candle
+// snapshot (candlesBeforeEntry) + the full reasoning tree. At the v3.4
+// 200-trades/day cadence that is multiple MB/day of unreclaimable heap on
+// hostless — the direct path to the platform's OOM kill. The book is now
+// bounded: the newest CLOSED_TRADE_FULL_DEPTH entries keep full payloads
+// (research already flattened them into its own decision event at close;
+// the dashboard reads only scalar fields), older entries are slimmed, and
+// past MAX_CLOSED_TRADES_MEMORY they are dropped. cumulativeRealizedPnl
+// replaces the old closedTrades.reduce() so halt-profit / halt-loss /
+// net-PnL math survives the cap (it never resets on its own).
+const MAX_CLOSED_TRADES_MEMORY = 400;
+const CLOSED_TRADE_FULL_DEPTH = 60;
+const TRADE_CADENCE_RING_MAX = 2000;
+let cumulativeRealizedPnl = 0;
+const tradeCloseTimestamps: number[] = [];
+
+/** v3.4.1: bounded closed-trade bookkeeping (exported for the test suite). */
+export function addClosedTradeBounded(list: any[], t: any): { evicted: number; slimmed: number } {
+   const before = list.length;
+   list.unshift(t);
+   const evicted = Math.max(0, before + 1 - MAX_CLOSED_TRADES_MEMORY);
+   if (list.length > MAX_CLOSED_TRADES_MEMORY) list.length = MAX_CLOSED_TRADES_MEMORY;
+   let slimmed = 0;
+   for (let i = CLOSED_TRADE_FULL_DEPTH; i < list.length; i++) {
+      const old = list[i];
+      if (old && (old.candlesBeforeEntry || old.reasoning)) {
+         old.candlesBeforeEntry = null;
+         old.reasoning = null;
+         slimmed++;
+      }
+   }
+   return { evicted, slimmed };
+}
+
+/** v3.4.1: trades/hour + trades/day telemetry — direct visibility into the
+ *  ≥200 trades/day (4-5/hour) production directive. Pure + exported for tests. */
+export function computeTradeCadence(stamps: number[], nowMs: number): { tradesLast1h: number; tradesLast24h: number } {
+   let tradesLast1h = 0, tradesLast24h = 0;
+   for (const ts of stamps) {
+      if (nowMs - ts <= 60 * 60 * 1000) tradesLast1h++;
+      if (nowMs - ts <= 24 * 60 * 60 * 1000) tradesLast24h++;
+   }
+   return { tradesLast1h, tradesLast24h };
+}
+
+// ═══ v3.4.1 MEMORY SHIELD — watchdog + crash resilience ═══
+// hostless production evidence: the platform kills the process when memory
+// balloons (OOM), and Node ≥15 CRASHES the whole process on any unhandled
+// promise rejection — one stray async error outside the loop's try/catch and
+// the bot dies with positions open. The shield:
+//   (1) log-and-survive handlers for uncaughtException / unhandledRejection
+//       (a dead bot manages nothing — staying alive keeps ICE/SL exits working)
+//   (2) a 5-minute RSS watchdog that samples memory into /stats and
+//       force-trims the research stores when the trim threshold is crossed.
+const MEMORY_SHIELD_SAMPLE_MS = 5 * 60 * 1000;
+const MEMORY_SHIELD_SAMPLE_MAX = 48;   // 4h of samples
+const MEMORY_SHIELD_WARN_MB = Number(process.env.MEMORY_SHIELD_WARN_MB) || 320;
+const MEMORY_SHIELD_TRIM_MB = Number(process.env.MEMORY_SHIELD_TRIM_MB) || 420;
+let memoryShieldTimer: NodeJS.Timeout | null = null;
+let processHandlersInstalled = false;
+const memoryShieldState: any = {
+   samples: [] as any[],
+   trimCount: 0,
+   lastTrimAt: 0,
+   uncaughtCount: 0,
+   lastUncaughtAt: 0,
+   lastWarnLogAt: 0
+};
+
+function installMemoryShieldHandlers() {
+   if (processHandlersInstalled) return;
+   processHandlersInstalled = true;
+   process.on("uncaughtException", (err: any) => {
+      memoryShieldState.uncaughtCount++;
+      memoryShieldState.lastUncaughtAt = Date.now();
+      try { console.error("[MEMORY SHIELD] uncaughtException survived:", err?.stack || err?.message || String(err)); } catch { /* noop */ }
+      try { addLog(`🛡️ SHIELD: نجت العملية من خطأ غير معالج (${err?.message || "unknown"}) — البوت مستمر في إدارة الصفقات`, "error"); } catch { /* noop */ }
+   });
+   process.on("unhandledRejection", (reason: any) => {
+      memoryShieldState.uncaughtCount++;
+      memoryShieldState.lastUncaughtAt = Date.now();
+      try { console.error("[MEMORY SHIELD] unhandledRejection survived:", reason?.stack || reason?.message || String(reason)); } catch { /* noop */ }
+      try { addLog(`🛡️ SHIELD: نجت العملية من رفض Promise غير معالج (${reason?.message || reason || "unknown"}) — البوت مستمر`, "error"); } catch { /* noop */ }
+   });
+}
+
+function memoryShieldTick() {
+   try {
+      const mu = process.memoryUsage();
+      const rssMB = mu.rss / 1048576;
+      const heapMB = mu.heapUsed / 1048576;
+      memoryShieldState.samples.push({
+         ts: new Date().toISOString(),
+         rssMB: Number(rssMB.toFixed(1)),
+         heapMB: Number(heapMB.toFixed(1))
+      });
+      if (memoryShieldState.samples.length > MEMORY_SHIELD_SAMPLE_MAX) memoryShieldState.samples.shift();
+
+      if (rssMB >= MEMORY_SHIELD_TRIM_MB) {
+         memoryShieldState.trimCount++;
+         memoryShieldState.lastTrimAt = Date.now();
+         pruneResearchTrackingStores(Date.now());
+         const trimmed = emergencyTrimResearchStores();
+         if (closedTrades.length > 150) closedTrades.length = 150;
+         try { (global as any).gc && (global as any).gc(); } catch { /* gc not exposed */ }
+         addLog(`🛡️ MEMORY SHIELD TRIM: RSS ${rssMB.toFixed(0)}MB ≥ ${MEMORY_SHIELD_TRIM_MB}MB — تم تقليم مخازن البحث (رفضات معلّقة: ${trimmed.clearedPending}، متعقّبات اتجاه: ${trimmed.clearedDirection}) والصفقات المغلقة ≤150. المراقبة مستمرة والصفقات المفتوحة لم تُمس.`, "warn");
+      } else if (rssMB >= MEMORY_SHIELD_WARN_MB && Date.now() - memoryShieldState.lastWarnLogAt > 30 * 60 * 1000) {
+         memoryShieldState.lastWarnLogAt = Date.now();
+         addLog(`🛡️ MEMORY SHIELD WARN: RSS ${rssMB.toFixed(0)}MB فوق مستوى التحذير ${MEMORY_SHIELD_WARN_MB}MB (تقليم تلقائي عند ${MEMORY_SHIELD_TRIM_MB}MB).`, "warn");
+      }
+   } catch { /* the watchdog must never kill the engine */ }
+}
+
+function startMemoryShield() {
+   installMemoryShieldHandlers();
+   if (memoryShieldTimer) clearInterval(memoryShieldTimer);
+   memoryShieldTimer = setInterval(memoryShieldTick, MEMORY_SHIELD_SAMPLE_MS);
+   memoryShieldTick();
+}
+
+function getMemoryShieldStats() {
+   const mu = process.memoryUsage();
+   return {
+      rssMB: Number((mu.rss / 1048576).toFixed(1)),
+      heapUsedMB: Number((mu.heapUsed / 1048576).toFixed(1)),
+      heapTotalMB: Number((mu.heapTotal / 1048576).toFixed(1)),
+      externalMB: Number((mu.external / 1048576).toFixed(1)),
+      warnMB: MEMORY_SHIELD_WARN_MB,
+      trimMB: MEMORY_SHIELD_TRIM_MB,
+      trimCount: memoryShieldState.trimCount,
+      lastTrimAt: memoryShieldState.lastTrimAt,
+      uncaughtSurvived: memoryShieldState.uncaughtCount,
+      samples: memoryShieldState.samples.slice(-12),
+      research: getResearchMemoryStats()
+   };
+}
+
 let apexPredatorStats: any = {
   totalEvaluations: 0,
   totalLongScanned: 0,
@@ -209,6 +350,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
   initialVirtualBalance = balance;
   if (closedTrades.length === 0 && activeTrades.length === 0) {
      virtualBalance = balance;
+     cumulativeRealizedPnl = 0;   // v3.4.1: fresh-session bookkeeping (cap-safe running total)
   }
   maxOpenTradesConfig = maxTrades;
   if (opts) {
@@ -388,7 +530,15 @@ export function getStats() {
     violence: getViolenceState(),
     liveFeed: liveFeedEnabled ? liveFeed.getHealth() : { enabled: false },
     fetchHealth: { ...fetchHealth, cooldownActive: Date.now() < fetchHealth.cooldownUntil },
-    today: todaysStats 
+    today: todaysStats,
+    // v3.4.1 MEMORY SHIELD + cadence telemetry (production directive: ≥200 trades/day)
+    memoryShield: getMemoryShieldStats(),
+    cadence: {
+      ...computeTradeCadence(tradeCloseTimestamps, Date.now()),
+      tradesToday: todaysStats.count
+    },
+    closedTradesInMemory: closedTrades.length,
+    cumulativeRealizedPnl: Number(cumulativeRealizedPnl.toFixed(2))
   }; 
 }
 export function getConfig() {
@@ -2254,7 +2404,13 @@ function closeTradeFull(t: any, reason: string = "") {
    t.exitTime = new Date().toISOString();
    t.exitReason = reason;
    t.finalPnl = t.realizedPnl || 0;
-   closedTrades.unshift(t);
+   // v3.4.1 MEMORY SHIELD: bounded book + never-reset running total (the old
+   // closedTrades.reduce() in the main loop would under-report once capped)
+   cumulativeRealizedPnl += t.finalPnl;
+   addClosedTradeBounded(closedTrades, t);
+   tradeCloseTimestamps.push(Date.now());
+   while (tradeCloseTimestamps.length > 0 && Date.now() - tradeCloseTimestamps[0] > 24 * 60 * 60 * 1000) tradeCloseTimestamps.shift();
+   if (tradeCloseTimestamps.length > TRADE_CADENCE_RING_MAX) tradeCloseTimestamps.splice(0, tradeCloseTimestamps.length - TRADE_CADENCE_RING_MAX);
    t.pos = 0;
    todaysStats.count++;
 
@@ -2347,7 +2503,7 @@ export async function runApexLoop() {
 
       // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
       let totalFloatingPnl = 0;
-      let totalRealizedPnl = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
+      let totalRealizedPnl = cumulativeRealizedPnl;   // v3.4.1: survives the closedTrades cap
       for (const t of activeTrades) {
          if (t.pnl) totalFloatingPnl += t.pnl; 
       }
@@ -2497,7 +2653,8 @@ export async function runApexLoop() {
 
 export function startEngine() {
    if (watcherInterval) clearInterval(watcherInterval);
+   startMemoryShield();   // v3.4.1: crash-resilient handlers + RSS watchdog before anything else runs
    watcherInterval = setInterval(runApexLoop, 30 * 1000); // Check every 30 seconds for turbo responsiveness
    runApexLoop();
-   addLog("Apex Predator Engine Started with Turbo Scanner & Pullback Sniper", "success");
+   addLog("Apex Predator Engine Started — Turbo Scanner & Pullback Sniper (v3.4.1 MEMORY SHIELD active)", "success");
 }

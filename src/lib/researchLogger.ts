@@ -11,8 +11,8 @@
 import fs from "fs";
 import path from "path";
 
-const SCHEMA_VERSION = "3.4.0";
-const BOT_VERSION = "BeastBot-Apex-v3.4.0";
+const SCHEMA_VERSION = "3.4.1";
+const BOT_VERSION = "BeastBot-Apex-v3.4.1";
 const RESEARCH_DIR = path.resolve(process.cwd(), "data", "research");
 
 try {
@@ -39,12 +39,132 @@ const activeTradesDirectionMap = new Map<string, any>();
 
 let cachedSummary: any = null;
 
+// ═══ v3.4.1 MEMORY SHIELD ═══
+// Production evidence (hostless): the process grew until the platform killed
+// it. Two orphan maps were pinning FULL payloads (40-candle snapshots +
+// reasoning trees) with no evacuation path:
+//   1) pendingRejectedMap — entries are only deleted when the SAME symbol
+//      gets re-scanned past its 120m outcome horizon. Watchlist rotation
+//      (every 6h) makes that random, so orphans pinned their targetEvent
+//      forever — which ALSO defeated the memoryRejected 1000-cap (the Map
+//      kept "evicted" events alive). At the measured ~98 rejections/24min
+//      this compounds into tens of MB/day of unreclaimable heap.
+//   2) activeTradesDirectionMap.tradeRef — a direct reference to the whole
+//      trade object, orphaned whenever the close-path delete is missed.
+// Both maps now carry a hard TTL (3h = evaluation horizon + margin) and a
+// size ceiling; the append-only JSONL files rotate past 20MB so disk
+// pressure can never wedge the logger on small hostless volumes; the
+// 1000-event whole-file rewrite is throttled to once per minute.
+const PENDING_REJECTED_TTL_MS = 3 * 60 * 60 * 1000;   // 120m outcome horizon + 1h margin
+const PENDING_REJECTED_MAX = 600;                     // hard ceiling on in-flight outcome tracking
+const DIRECTION_TRACK_TTL_MS = 3 * 60 * 60 * 1000;    // 60m horizon + wide margin
+const JSONL_ROTATE_BYTES = 20 * 1024 * 1024;          // rotate append-only files past 20MB
+const JSONL_ROTATE_KEEP_LINES = 4000;                 // keep the freshest tail
+const REJECTED_REWRITE_MIN_INTERVAL_MS = 60 * 1000;   // whole-file rewrite throttle
+let appendCounterSinceRotateCheck = 0;
+let jsonlRotating = false;
+let lastRejectedFileRewriteMs = 0;
+
+function prunePendingRejectedMap(nowMs: number): number {
+   let evicted = 0;
+   for (const [id, item] of pendingRejectedMap.entries()) {
+      if (nowMs - item.signalTimeMs > PENDING_REJECTED_TTL_MS) {
+         pendingRejectedMap.delete(id);
+         evicted++;
+      }
+   }
+   // insertion order ≈ age (completed entries are removed on completion):
+   // evict oldest first to make room BEFORE the caller adds a fresh entry,
+   // so the map never exceeds PENDING_REJECTED_MAX at rest
+   while (pendingRejectedMap.size >= PENDING_REJECTED_MAX) {
+      const oldest = pendingRejectedMap.keys().next().value;
+      if (oldest === undefined) break;
+      pendingRejectedMap.delete(oldest);
+      evicted++;
+   }
+   return evicted;
+}
+
+function pruneActiveTradesDirectionMap(nowMs: number): number {
+   let evicted = 0;
+   for (const [id, item] of activeTradesDirectionMap.entries()) {
+      if (nowMs - item.entryTimeMs > DIRECTION_TRACK_TTL_MS) {
+         activeTradesDirectionMap.delete(id);
+         evicted++;
+      }
+   }
+   return evicted;
+}
+
+/** v3.4.1: public maintenance hook — engine watchdog + tests. */
+export function pruneResearchTrackingStores(nowMs: number = Date.now()): { evictedPending: number; evictedDirection: number } {
+   return {
+      evictedPending: prunePendingRejectedMap(nowMs),
+      evictedDirection: pruneActiveTradesDirectionMap(nowMs)
+   };
+}
+
+/** v3.4.1: bounded-store telemetry for the /stats memory block. */
+export function getResearchMemoryStats() {
+   return {
+      pendingRejected: pendingRejectedMap.size,
+      directionTracked: activeTradesDirectionMap.size,
+      memoryDecisions: memoryDecisions.length,
+      memoryRejected: memoryRejected.length,
+      memoryJourneys: memoryJourneys.length
+   };
+}
+
+/** v3.4.1: emergency drop — called by the engine watchdog when RSS crosses
+ *  the trim threshold. Research value degrades gracefully: in-flight outcome
+ *  evaluation is abandoned and the bounded memory arrays shrink; disk keeps
+ *  everything already flushed. Trading state is NOT touched. */
+export function emergencyTrimResearchStores(): { trimmedRejected: number; trimmedDecisions: number; trimmedJourneys: number; clearedPending: number; clearedDirection: number } {
+   const clearedPending = pendingRejectedMap.size;
+   const clearedDirection = activeTradesDirectionMap.size;
+   pendingRejectedMap.clear();
+   activeTradesDirectionMap.clear();
+   const trimmedRejected = Math.max(0, memoryRejected.length - 200);
+   if (memoryRejected.length > 200) memoryRejected.length = 200;
+   const trimmedDecisions = Math.max(0, memoryDecisions.length - 80);
+   if (memoryDecisions.length > 80) memoryDecisions.length = 80;
+   const trimmedJourneys = Math.max(0, memoryJourneys.length - 100);
+   if (memoryJourneys.length > 100) memoryJourneys.length = 100;
+   return { trimmedRejected, trimmedDecisions, trimmedJourneys, clearedPending, clearedDirection };
+}
+
+function maybeRotateJsonl(filePath: string) {
+   if (jsonlRotating) return;
+   try {
+      const st = fs.statSync(filePath);
+      if (st.size <= JSONL_ROTATE_BYTES) return;
+      jsonlRotating = true;
+      fs.readFile(filePath, "utf8", (err, content) => {
+         try {
+            if (!err && content) {
+               const lines = content.split("\n").filter(l => l.trim().length > 0);
+               const kept = lines.slice(-JSONL_ROTATE_KEEP_LINES);
+               fs.writeFile(filePath, kept.join("\n") + "\n", "utf8", () => { jsonlRotating = false; });
+               console.error(`[MEMORY SHIELD] rotated ${path.basename(filePath)}: ${lines.length} → ${kept.length} lines (${(st.size / 1048576).toFixed(1)}MB)`);
+            } else {
+               jsonlRotating = false;
+            }
+         } catch { jsonlRotating = false; }
+      });
+   } catch { /* stat failed — file may not exist yet */ }
+}
+
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
       const line = JSON.stringify(obj) + "\n";
       fs.appendFile(filePath, line, "utf8", (err) => {
          if (err) console.error(`Research Log error on ${path.basename(filePath)}:`, err.message);
       });
+      // v3.4.1: periodic size check — append-only files must not wedge small disks
+      if (++appendCounterSinceRotateCheck >= 250) {
+         appendCounterSinceRotateCheck = 0;
+         maybeRotateJsonl(filePath);
+      }
    } catch (err: any) {
       console.error(`Research Log synchronous exception:`, err?.message);
    }
@@ -354,6 +474,8 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
 // ----------------------------------------------------------------------------
 export function registerTradeForDirectionTracking(trade: any) {
    const tradeId = `${trade.symbol}_${new Date(trade.entryTime).getTime()}`;
+   // v3.4.1 MEMORY SHIELD: evict expired direction-trackers before adding
+   pruneActiveTradesDirectionMap(Date.now());
    activeTradesDirectionMap.set(tradeId, {
       tradeId,
       symbol: trade.symbol,
@@ -387,6 +509,7 @@ export function registerTradeForDirectionTracking(trade: any) {
 export function updateDirectionTracking(symbol: string, currentPrice: number) {
    if (activeTradesDirectionMap.size === 0 || !symbol || !currentPrice) return;
    const now = Date.now();
+   pruneActiveTradesDirectionMap(now);   // v3.4.1: TTL hygiene on every scan
 
    for (const [id, item] of activeTradesDirectionMap.entries()) {
       if (item.symbol !== symbol) continue;
@@ -553,6 +676,9 @@ export function logRejectedSignal(payload: {
       // invisible in the exports. 1000 ≈ 5 hours (memory cost ≈ 1MB).
       if (memoryRejected.length > 1000) memoryRejected.pop();
 
+      // v3.4.1 MEMORY SHIELD: evict expired / over-ceiling orphans BEFORE
+      // adding — otherwise rotation-orphans pin their targetEvent forever.
+      prunePendingRejectedMap(signalTime.getTime());
       pendingRejectedMap.set(signalId, {
          signalId,
          symbol,
@@ -579,6 +705,7 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    if (pendingRejectedMap.size === 0 || !symbol || !currentPrice) return;
 
    const now = Date.now();
+   prunePendingRejectedMap(now);   // v3.4.1: TTL hygiene on every outcome pass
    let needsRewrite = false;
 
    for (const [id, item] of pendingRejectedMap.entries()) {
@@ -668,7 +795,13 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    }
 
    if (needsRewrite) {
-      rewriteJsonlSafe(REJECTED_SIGNALS_FILE, memoryRejected);
+      // v3.4.1: throttle whole-file rewrites — the 1000-event file was being
+      // rewritten every few seconds under v3.4 rejection rates. The memory
+      // array stays authoritative for exports; the file lags at most 60s.
+      if (now - lastRejectedFileRewriteMs >= REJECTED_REWRITE_MIN_INTERVAL_MS) {
+         lastRejectedFileRewriteMs = now;
+         rewriteJsonlSafe(REJECTED_SIGNALS_FILE, memoryRejected);
+      }
       updateSummaries(null);
    }
 }
