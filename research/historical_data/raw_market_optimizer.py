@@ -99,20 +99,18 @@ def get_symbol_data(symbol):
             except Exception as e:
                 meta["missing"].append({"type":"daily_klines","date":ds,"error":str(e)})
         day+=pd.Timedelta(days=1)
-    # Fill missing funding days from the official daily fundingRate archive too.
-    funding_days=set(pd.to_datetime([x[0] for x in fund],unit="ms",utc=True).strftime("%Y-%m-%d")) if fund else set()
-    day=pd.Timestamp(START.date(),tz="UTC")
-    last_day=pd.Timestamp((END-pd.Timedelta(milliseconds=1)).date(),tz="UTC")
-    while day<=last_day:
-        ds=day.strftime("%Y-%m-%d")
-        if ds not in funding_days:
-            fdu=f"{BASE}/daily/fundingRate/{symbol}/{symbol}-fundingRate-{ds}.zip"
-            try:
-                raw,sha,size=download_zip(fdu); ff=parse_funding(raw); fund.extend(ff)
-                if ff: meta.setdefault("daily_funding_fallback",[]).append({"date":ds,"sha256":sha,"bytes":size,"rows":len(ff)})
-            except Exception as e:
-                meta["missing"].append({"type":"daily_fundingRate","date":ds,"error":str(e)})
-        day+=pd.Timedelta(days=1)
+    # Cross-check/supplement monthly archive funding with Binance's official
+    # USD-M fundingRate history API (monthly archives are the archive source).
+    api_url=(f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}"
+             f"&startTime={int(START.timestamp()*1000)}"
+             f"&endTime={int(END.timestamp()*1000)-1}&limit=1000")
+    try:
+        api_rows=json.loads(fetch(api_url))
+        api_funding=[(int(x["fundingTime"]),float(x["fundingRate"])) for x in api_rows]
+        fund.extend(api_funding)
+        meta["funding_api_rows"]=len(api_funding)
+    except Exception as e:
+        meta["funding_api_error"]=str(e)
     if not kl: return symbol,None,sorted(set(fund)),meta
     d=pd.concat(kl,ignore_index=True).drop_duplicates("t").sort_values("t").reset_index(drop=True)
     # Strict minute continuity audit; do not fabricate missing candles.
