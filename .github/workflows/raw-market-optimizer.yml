@@ -15,12 +15,12 @@ permissions:
 
 concurrency:
   group: raw-market-optimizer-corrected-v2
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   raw-market-optimizer:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 180
     steps:
       - name: Checkout research branch only
         uses: actions/checkout@v4
