@@ -303,7 +303,7 @@ def main():
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     symbols=[x.strip().upper() for x in Path(args.universe).read_text().splitlines() if x.strip()]
     symbols=sorted(set(symbols))
-    manifest={"source":"Official Binance Vision USD-M Futures monthly 1m klines + monthly fundingRate",
+    manifest={"source":"Official Binance Vision USD-M Futures 1m klines + monthly fundingRate archives, supplemented by official USD-M fundingRate API",
               "source_readme":"https://github.com/binance/binance-public-data",
               "start_utc":START.isoformat(),"end_exclusive_utc":END.isoformat(),
               "universe_symbols_only":symbols,"recorded_trade_logs_read":False,
@@ -371,7 +371,7 @@ def main():
       "split":split,"execution":{"signal":"closed 1m candle","entry":"next 1m candle open with adverse 2bp slippage",
         "exit":"1m OHLC with conservative stop-first intrabar ordering","fee_per_side":FEE,"slippage_per_side":SLIP,
         "max_holding_minutes":MAX_HOLD,"max_concurrent_positions":MAX_OPEN,"risk_per_trade":RISK_FRACTION,
-        "max_leverage":MAX_LEVERAGE,"funding":"official monthly fundingRate archives charged at settlement using entry notional approximation"},
+        "max_leverage":MAX_LEVERAGE,"funding":"official monthly fundingRate archives cross-checked/supplemented by Binance fundingRate API; charged at settlement using entry notional approximation"},
       "fidelity":{"recorded_trade_logs_read":False,"entry_and_exit_generated_from_raw_market_data":True,
         "lookahead":"No; signal at candle close, enter next candle open, rolling features use only prior closed bars",
         "intrabar":"Ambiguous same-minute stop/target collisions resolve against the strategy",
