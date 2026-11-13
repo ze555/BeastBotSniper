@@ -47,3 +47,17 @@ All downloaded files are Parquet. `manifest.json` records rows, file paths, empt
 ## Important limitation
 
 The live entry engine requires fresh futures aggressor flow and a current L2 book, with OI, funding and liquidation evidence used when available. A faithful historical replay must feed the same `evaluateInstitutionalMarket`, `evaluateMarketAlignment`, and `evaluateEntryQuality` functions with timestamp-correct snapshots. This downloader alone does not establish that the live algorithm is profitable. Do not replace missing tick/order-book evidence with candle-derived guesses.
+
+
+## Independent raw-market optimization (current study)
+
+The authoritative strategy research entry point is `raw_market_optimizer.py` and the pinned symbol-name universe is `universe_62_symbols.txt`.
+
+- The optimizer does **not** read `study_all_trades_master.json`, recorded entries/exits, recorded PnL, or old trade outcomes.
+- It downloads official Binance Vision USD-M Futures 1m kline and monthly fundingRate ZIPs and verifies every ZIP against its official `.CHECKSUM`.
+- Signals are generated from closed candles and filled at the next 1m open. It tests LONG and SHORT entry families (breakout and impulse), volume/taker-delta thresholds, ATR stops, and three exit families.
+- It uses a 60-day development period, 15-day validation period, and a final 15-day untouched holdout. Parameters are selected on validation only; holdout is not used for selection.
+- Execution assumptions: 0.04% fee per side, 0.02% adverse slippage per side, stop-first handling of ambiguous intrabar stop/target collisions, 180-minute max hold, 10 concurrent positions, 1% risk target and 10x leverage cap.
+- Historical L2/order book and full 90-day OI/force-order history are not assumed or fabricated. Funding charges use official archive rates and entry notional as an approximation.
+- This is a separate experimental strategy, not a production code change and not a claim that the live engine has been faithfully reproduced. No result is valid until the Actions run completes and archive coverage, logs, and holdout metrics are audited.
+- The prior 78-recorded-trade exit replay has been removed from the active research workflow and must not be used to select or recommend parameters.
