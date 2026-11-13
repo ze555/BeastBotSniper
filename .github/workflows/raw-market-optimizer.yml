@@ -1,13 +1,6 @@
 name: Independent raw Binance market optimizer
 
 on:
-  push:
-    branches:
-      - research/profitability-redesign
-    paths:
-      - research/historical_data/raw_market_optimizer.py
-      - research/historical_data/universe_62_symbols.txt
-      - .github/workflows/raw-market-optimizer.yml
   workflow_dispatch:
 
 permissions:
