@@ -61,3 +61,10 @@ The authoritative strategy research entry point is `raw_market_optimizer.py` and
 - Historical L2/order book and full 90-day OI/force-order history are not assumed or fabricated. Funding charges use official archive rates and entry notional as an approximation.
 - This is a separate experimental strategy, not a production code change and not a claim that the live engine has been faithfully reproduced. No result is valid until the Actions run completes and archive coverage, logs, and holdout metrics are audited.
 - The prior 78-recorded-trade exit replay has been removed from the active research workflow and must not be used to select or recommend parameters.
+
+
+## Corrective audit — 2026-11-13
+
+A code review of the first raw-market simulator found a directional-sign defect in stop-price construction: the short-side initial stop and its break-even/trailing stop were placed on the wrong side of entry. Therefore the previously printed negative LONG+SHORT aggregate metrics are **invalid and must not be used to judge the strategy or tune parameters**. The simulator now applies the stop in trade-direction coordinates and reports LONG and SHORT metrics separately.
+
+The same audit found that monthly archives did not cover the full requested 90-day window in the first run (78 days were present). The revised downloader requests official daily Binance klines and fundingRate archives only for missing UTC dates, records first/last bars and gaps, and applies the 10-position portfolio cap across the continuous timeline before splitting samples. The workflow timeout was increased so the full parameter grid can finish. All corrected results require a fresh completed run and an audit of its manifest and holdout.
