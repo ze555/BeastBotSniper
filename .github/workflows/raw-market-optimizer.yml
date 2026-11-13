@@ -1,6 +1,13 @@
 name: Independent raw Binance market optimizer
 
 on:
+  push:
+    branches:
+      - research/profitability-redesign
+    paths:
+      - research/historical_data/raw_market_optimizer.py
+      - research/historical_data/universe_62_symbols.txt
+      - .github/workflows/raw-market-optimizer.yml
   workflow_dispatch:
 
 permissions:
@@ -13,7 +20,7 @@ concurrency:
 jobs:
   raw-market-optimizer:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - name: Checkout research branch only
         uses: actions/checkout@v4
@@ -23,17 +30,33 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Restore verified raw-market cache
+        id: raw-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: research-cache/raw-market-data
+          key: ${{ runner.os }}-beastbot-raw-market-v2-${{ hashFiles('research/historical_data/universe_62_symbols.txt') }}
       - name: Install numerical libraries
         run: python -m pip install --disable-pip-version-check numpy pandas
-      - name: Download and verify official Binance archives; generate and optimize trades from raw market data
+      - name: Download missing official archives; reuse cached symbols; optimize raw-market trades
         run: |
           python -u research/historical_data/raw_market_optimizer.py \
             --universe research/historical_data/universe_62_symbols.txt \
+            --cache research-cache/raw-market-data \
             --out research-results/raw-market-optimizer-2026-08-15_to_2026-11-12
-      - name: Upload raw-data manifest, optimization matrix and independent holdout trades
+      - name: Save verified raw-market cache even after interrupted optimization
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: research-cache/raw-market-data
+          key: ${{ runner.os }}-beastbot-raw-market-v2-${{ hashFiles('research/historical_data/universe_62_symbols.txt') }}
+      - name: Preserve cache and any completed research outputs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: beastbot-raw-market-optimizer-2026-08-15_to_2026-11-12
-          path: research-results/raw-market-optimizer-2026-08-15_to_2026-11-12/
-          if-no-files-found: error
+          name: beastbot-raw-market-cache-and-results
+          path: |
+            research-cache/raw-market-data/
+            research-results/raw-market-optimizer-2026-08-15_to_2026-11-12/
+          if-no-files-found: warn
           retention-days: 30
