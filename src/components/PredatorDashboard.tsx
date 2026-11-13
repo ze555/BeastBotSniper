@@ -653,6 +653,26 @@ export const PredatorDashboard: React.FC = () => {
                </div>
              </div>
 
+             {stats.entryDiagnostics && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3" dir="rtl">
+                   <h2 className="text-lg text-white font-bold">تشخيص الدخول منذ تشغيل الخادم</h2>
+                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      {[
+                         ['فحوصات', stats.entryDiagnostics.evaluations],
+                         ['تأكيدات أولية', stats.entryDiagnostics.confirmed],
+                         ['مرشحون للتنفيذ', stats.entryDiagnostics.candidates],
+                         ['صفقات فُتحت', stats.entryDiagnostics.opened],
+                         ['منع عند التنفيذ', stats.entryDiagnostics.executionBlocked],
+                         ['انتظار', stats.entryDiagnostics.waits],
+                         ['أخطاء بيانات/فحص', stats.entryDiagnostics.errors],
+                         ['متابعة إعادة اختبار', stats.entryDiagnostics.retestWatchSize]
+                      ].map(([label, value]) => <div key={label} className="bg-slate-800 p-3 rounded"><span className="text-slate-400">{label}</span><p className="font-bold text-white">{value}</p></div>)}
+                   </div>
+                   <p className="text-sm text-slate-300 break-words">آخر سبب انتظار: {stats.entryDiagnostics.lastWait || 'لا يوجد'}</p>
+                   {stats.entryDiagnostics.lastError && <p className="text-sm text-rose-400 break-words">آخر خطأ: {stats.entryDiagnostics.lastError}</p>}
+                </div>
+             )}
+
              {/* Research & ChatGPT Analysis Dataset Card */}
              <div className="bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/40 rounded-xl p-5 shadow-lg">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

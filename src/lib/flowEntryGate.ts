@@ -1,3 +1,9 @@
+/** v3.4.2: confirmed directional pressure and risk-relative runway.
+ * Strong BTC trends are not exhaustion evidence by themselves. The live
+ * caller supplies fresh timing, persistence, structure and actual stop costs.
+ * Historical claims in the legacy documentation below are not validation
+ * of these new rules; profitability requires independent evaluation.
+ */
 /**
  * FLOW ENTRY GATE v3.3 — "ادخل على بداية الموجة، لا على بقاياها"
  * ================================================================
@@ -52,7 +58,19 @@ export interface FlowEntryGateTape {
    freshExtreme?: boolean;
 }
 
+export interface EntryQuality {
+   confirmed: boolean;
+   timingPassed: boolean;
+   persistent: boolean;
+   aligned: boolean;
+   atrPct: number;
+   stopPct: number;
+   costPct: number;
+}
+
 export interface FlowEntryGateOpts {
+   /** Required for the adaptive live path; absent callers keep conservative legacy checks. */
+   quality?: EntryQuality;
    side: FlowEntryGateSide;
    /** reasoning.flow.state — SHORT_BUILDUP / SELLING_PRESSURE / LONG_BUILDUP / BUYING_PRESSURE / MIXED / UNKNOWN */
    flowState: string;
@@ -111,7 +129,14 @@ export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateRes
    // ── G1 POSITIONING: fresh accumulation only ─────────────────────────────
    const wantsBuildup = side === "SHORT" ? "SHORT_BUILDUP" : "LONG_BUILDUP";
    const chaseState = side === "SHORT" ? "SELLING_PRESSURE" : "BUYING_PRESSURE";
-   if (flowState !== wantsBuildup) {
+   const q = opts.quality;
+   const qualityReady = !!q && q.confirmed && q.timingPassed && q.persistent && q.aligned &&
+      [q.atrPct, q.stopPct, q.costPct].every(Number.isFinite) &&
+      q.atrPct > 0 && q.stopPct > 0 && q.costPct >= 0;
+   // Pressure is acceptable only after the SAME directional confirmation,
+   // persistence, tape and structure checks used by the orchestrator.
+   const pressureConfirmed = flowState === chaseState && qualityReady;
+   if (flowState !== wantsBuildup && !pressureConfirmed) {
       const isChase = flowState === chaseState;
       return {
          blocked: true,
@@ -127,7 +152,22 @@ export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateRes
 
    // ── G2 RUNWAY: clean room to the target, or a real cascade break ────────
    const d = (side === "SHORT" ? opts.distanceToSupportPct : opts.distanceToResistancePct);
-   if (d !== undefined && Number.isFinite(d)) {
+   if (q) {
+      if (!qualityReady || d === undefined || !Number.isFinite(d)) {
+         return { blocked: true, rule: "G2_RUNWAY", reason: "Flow Entry Gate [G2-DATA]: incomplete confirmation or invalid risk/location data" };
+      }
+      // Reach the existing first scale-out (0.75R) NET of round-trip costs;
+      // also require one ATR of room. No change to stop/targets or sizing.
+      const required = Math.max(q.atrPct, 0.75 * q.stopPct + q.costPct);
+      const firstTargetPaysCosts = 0.75 * q.stopPct > q.costPct;
+      // A crossed level is now behind the trade, not a target ahead of it.
+      // Timing must already confirm a healthy break/retest; cap extension
+      // even during a cascade so the exception cannot chase late moves.
+      const healthyBreak = d <= 0 && -d <= 0.9 * q.atrPct;
+      if (!firstTargetPaysCosts || !(d >= required || healthyBreak)) {
+         return { blocked: true, rule: "G2_RUNWAY", reason: `Flow Entry Gate [G2-RISK-ROOM]: room ${(d * 100).toFixed(3)}%, required ${(required * 100).toFixed(3)}%; wait for a fresh confirmed retest` };
+      }
+   } else if (d !== undefined && Number.isFinite(d)) {
       const level = side === "SHORT" ? "الدعم" : "المقاومة";
       if (d >= RUNWAY_ROOM_PCT) {
          // clean room — pass
@@ -151,7 +191,7 @@ export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateRes
 
    // ── G3 EXHAUSTED REGIME: the move is mature unless a live cascade prints ─
    const exhaustedRegime = side === "SHORT" ? "BEAR_STRONG" : "BULL_STRONG";
-   if (btcRegime === exhaustedRegime && !cascadeLive) {
+   if (btcRegime === exhaustedRegime && !cascadeLive && !qualityReady) {
       return {
          blocked: true,
          rule: "G3_EXHAUSTED_REGIME",
@@ -160,7 +200,7 @@ export function evaluateFlowEntryGate(opts: FlowEntryGateOpts): FlowEntryGateRes
    }
 
    // ── G4 LATE-IMPULSE: never buy the printed candle in mean-reverting tape ─
-   if (opts.tape?.freshExtreme === true && !cascadeLive && isMeanRevertingRegime(btcRegime)) {
+   if (opts.tape?.freshExtreme === true && !cascadeLive && isMeanRevertingRegime(btcRegime) && !qualityReady) {
       return {
          blocked: true,
          rule: "G4_LATE_IMPULSE",

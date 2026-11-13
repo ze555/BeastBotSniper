@@ -1,3 +1,4 @@
+import { buildEntryQuality, RetestWatch } from "./entryQuality.js";
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult, computeRvolPace } from "./reasoningEngine.js";
@@ -473,6 +474,7 @@ export function getStats() {
 
   return { 
     ...apexPredatorStats,
+    entryDiagnostics: { ...entryDiagnostics, retestWatchSize: retestWatch.size },
     balance: virtualBalance,
     initialBalance: initialVirtualBalance,
     maxOpenTrades: maxOpenTradesConfig,
@@ -1234,6 +1236,20 @@ async function readPrice(symbol: string, kl: any[], kl5: any[] = []) {
 }
 
 // --- SEC 4: SCORE ENTRY ---
+const retestWatch = new RetestWatch();
+const entryDiagnostics = {
+   evaluations: 0, confirmed: 0, candidates: 0, opened: 0, executionBlocked: 0, waits: 0, errors: 0,
+   lastError: "", lastWait: "", flowGatePassed: 0,
+   flowRejected: {} as Record<string, number>
+};
+function checkedFlowGate(opts: Parameters<typeof evaluateFlowEntryGate>[0]) {
+   const result = evaluateFlowEntryGate(opts);
+   if (result.blocked) {
+      const key = result.rule || "UNKNOWN";
+      entryDiagnostics.flowRejected[key] = (entryDiagnostics.flowRejected[key] || 0) + 1;
+   } else entryDiagnostics.flowGatePassed++;
+   return result;
+}
 async function scoreEntry(symbol: string, ctx: any) {
    apexPredatorStats.totalEvaluations++;
 
@@ -1500,6 +1516,11 @@ async function scoreEntry(symbol: string, ctx: any) {
    }
    // Effective setup label: scenario pathway can promote to PULLBACK_SNIPER
    // even when the base scanner type is BREAKOUT_MOMENTUM.
+   if (reasoning.flow.persistenceState === "CONFLICTED" || reasoning.timingGate.state === "FAKE_BREAKOUT_RISK") {
+      retestWatch.remove(symbol);
+   } else if (["LATE_EXPANSION", "WAITING_FOR_RETEST"].includes(reasoning.timingGate.state)) {
+      retestWatch.remember(symbol);
+   }
    const effSetup = (reasoning.scenario?.primary?.type === "PULLBACK_LONG" ||
                      reasoning.scenario?.primary?.type === "PULLBACK_SHORT")
       ? "PULLBACK_SNIPER" : setupType;
@@ -1507,12 +1528,13 @@ async function scoreEntry(symbol: string, ctx: any) {
    // Confirmation Gatekeeper: PREDICTION != ENTRY and SIGNAL != CONFIRMATION
    // Both directional signal AND strict ConfirmationEngine must agree
    if (reasoning.confirmation.isConfirmed) {
+      entryDiagnostics.confirmed++;
       if (reasoning.confirmation.confirmedSignal === "LONG" && sl >= minScore && sl > ss) {
          // ═══ EXECUTION LAYER (v3.1) ═══
          // All regime/asset gates now live in reasoningEngine.checkConfirmation
          // (graduated positioning) — this layer enforces the execution matrix
          // and live microstructure vetoes as the final defense.
-         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "UP")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
+         const exFilterLong = evaluateExecutionFilter("LONG", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "UP")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined, confirmedTrend: reasoning.confirmation.isConfirmed && reasoning.timingGate.passed && reasoning.flow.persistenceState === "STRONG" });
          if (exFilterLong.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] LONG ${symbol} blocked: ${exFilterLong.reason}`, "warn");
             logRejectedSignal({
@@ -1526,7 +1548,7 @@ async function scoreEntry(symbol: string, ctx: any) {
                ctx,
                reasoning
             });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            return { signal: "WAIT", reason: exFilterLong.reason, sl, ss, reasoning, p, w, ctx };
          }
          if (vetoLong) {
             addLog(`🚨 [LIVE VETO] LONG ${symbol} blocked: ${vetoReason}`, "warn");
@@ -1547,7 +1569,8 @@ async function scoreEntry(symbol: string, ctx: any) {
          // ═══ FLOW ENTRY GATE (v3.3) — اركب بداية الموجة لا بقاياها ═══
          // G1 fresh accumulation / G2 runway / G3 exhausted regime / G4 late-impulse
          if (flowEntryGateEnabled) {
-            const flowGate = evaluateFlowEntryGate({
+            const flowGate = checkedFlowGate({
+               quality: buildEntryQuality("LONG", p, w, reasoning, effSetup, slAtrMultiplier, feeRate, slippageRate),
                side: "LONG",
                flowState: reasoning.flow.state,
                distanceToSupportPct: reasoning.location?.distanceToSupportPct,
@@ -1570,7 +1593,7 @@ async function scoreEntry(symbol: string, ctx: any) {
                   ctx,
                   reasoning
                });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+               return { signal: "WAIT", reason: flowGate.reason, sl, ss, reasoning, p, w, ctx };
             }
          }
 
@@ -1600,7 +1623,7 @@ async function scoreEntry(symbol: string, ctx: any) {
 
       if (reasoning.confirmation.confirmedSignal === "SHORT" && ss >= minScore && ss > sl) {
          // ═══ EXECUTION LAYER (v3.1) ═══
-         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "DOWN")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined });
+         const exFilterShort = evaluateExecutionFilter("SHORT", ctx.regime, reasoning.regime, { rvol: p.rvol, adx: p.adx, hourUtc: toxicHoursEnabled && !toxicHoursSoftMode && !(crashMode && ((ctx as any).violence?.active && (ctx as any).violence?.direction === "DOWN")) ? hourUtc : undefined, chg10Pct: flowAlignedEntry ? chg10Pct : undefined, setupType: setupRegimeMatrix ? effSetup : undefined, confirmedTrend: reasoning.confirmation.isConfirmed && reasoning.timingGate.passed && reasoning.flow.persistenceState === "STRONG" });
          if (exFilterShort.blocked) {
             addLog(`🛡️ [EXECUTION FILTER] SHORT ${symbol} blocked: ${exFilterShort.reason}`, "warn");
             logRejectedSignal({
@@ -1614,7 +1637,7 @@ async function scoreEntry(symbol: string, ctx: any) {
                ctx,
                reasoning
             });
-            return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+            return { signal: "WAIT", reason: exFilterShort.reason, sl, ss, reasoning, p, w, ctx };
          }
          if (vetoShort) {
             addLog(`🚨 [LIVE VETO] SHORT ${symbol} blocked: ${vetoReason}`, "warn");
@@ -1635,7 +1658,8 @@ async function scoreEntry(symbol: string, ctx: any) {
          // ═══ FLOW ENTRY GATE (v3.3) — اركب بداية الموجة لا بقاياها ═══
          // G1 fresh accumulation / G2 runway / G3 exhausted regime / G4 late-impulse
          if (flowEntryGateEnabled) {
-            const flowGate = evaluateFlowEntryGate({
+            const flowGate = checkedFlowGate({
+               quality: buildEntryQuality("SHORT", p, w, reasoning, effSetup, slAtrMultiplier, feeRate, slippageRate),
                side: "SHORT",
                flowState: reasoning.flow.state,
                distanceToSupportPct: reasoning.location?.distanceToSupportPct,
@@ -1658,7 +1682,7 @@ async function scoreEntry(symbol: string, ctx: any) {
                   ctx,
                   reasoning
                });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+               return { signal: "WAIT", reason: flowGate.reason, sl, ss, reasoning, p, w, ctx };
             }
          }
 
@@ -1739,7 +1763,7 @@ async function scoreEntry(symbol: string, ctx: any) {
          // flow (NVDA — ICE-nuked after 60 seconds). Every entry path now
          // passes the same institutional gate.
          if (flowEntryGateEnabled) {
-            const revFlowGate = evaluateFlowEntryGate({
+            const revFlowGate = checkedFlowGate({
                side: rev.signal,
                flowState: reasoning.flow.state,
                distanceToSupportPct: reasoning.location?.distanceToSupportPct,
@@ -1762,7 +1786,7 @@ async function scoreEntry(symbol: string, ctx: any) {
                   ctx,
                   reasoning
                });
-               return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+               return { signal: "WAIT", reason: revFlowGate.reason, sl, ss, reasoning, p, w, ctx };
             }
          }
 
@@ -1787,7 +1811,7 @@ async function scoreEntry(symbol: string, ctx: any) {
       }
    }
 
-   return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
+   return { signal: "WAIT", reason: reasoning.confirmation.isConfirmed ? `Score below threshold ${minScore} or direction mismatch` : reasoning.confirmation.reason, sl, ss, reasoning, p, w, ctx };
 }
 
 // ═══ PORTFOLIO GUARDS (v3.1) ═══
@@ -2598,7 +2622,7 @@ export async function runApexLoop() {
       const radarPicks = ignitionRadarEnabled ? drainIgnitionBatch() : [];
       const radarSet = new Set(radarPicks);
       const watchBatch = WATCHLIST.slice(currentBatchIndex, endBatchIndex);
-      const batchSymbols = [...radarPicks, ...watchBatch.filter((s: string) => !radarSet.has(s))];
+      const batchSymbols = [...new Set([...radarPicks, ...retestWatch.take(), ...watchBatch])];
 
       addLog(`🦅 SCANNING TURBO BATCH [${currentBatchIndex + 1} TO ${endBatchIndex}] من ${WATCHLIST.length} عملة${radarPicks.length > 0 ? ` + ${radarPicks.length} إشعال راداري 🔥` : ""}...`, "info");
       
@@ -2622,11 +2646,19 @@ export async function runApexLoop() {
          if (!canOpenMore()) break;
          const chunk = batchSymbols.slice(i, i + chunkSize);
          const promises = chunk.map(async (sym: string) => {
-            if (activeTrades.find(t => t.symbol === sym)) return null;
+            if (activeTrades.find(t => t.symbol === sym)) { retestWatch.remove(sym); return null; }
             try {
+               entryDiagnostics.evaluations++;
                const dec = await scoreEntry(sym, ctx);
+               if (dec.signal === "WAIT") {
+                  entryDiagnostics.waits++;
+                  entryDiagnostics.lastWait = `${sym}: ${(dec as any).reason || (dec as any).reasoning?.confirmation?.reason || "Score or entry gate"}`;
+               } else { entryDiagnostics.candidates++; retestWatch.remove(sym); }
                return { sym, dec };
-            } catch {
+            } catch (error: any) {
+               entryDiagnostics.errors++;
+               entryDiagnostics.lastError = `${sym}: ${String(error?.message || error).slice(0, 200)}`;
+               addLog(`⚠️ [ENTRY ERROR] ${entryDiagnostics.lastError}`, "warn");
                return null;
             }
          });
@@ -2639,7 +2671,10 @@ export async function runApexLoop() {
                if (activeTrades.find(t => t.symbol === sym)) continue;
                if (dec.signal === "LONG" || dec.signal === "SHORT") {
                   if (radarSet.has(sym)) apexPredatorStats.ignitionTraded++;
+                  const before = activeTrades.length;
                   executeTrade(sym, dec);
+                  if (activeTrades.length > before) entryDiagnostics.opened++;
+                  else entryDiagnostics.executionBlocked++;
                }
             }
          }

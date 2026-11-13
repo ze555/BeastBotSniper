@@ -2,6 +2,8 @@ import { MarketRegimeType } from "./reasoningEngine";
 import { TOXIC_HOURS_UTC } from "./flowMetrics.js";
 
 export interface ExecutionFilterOpts {
+   /** Confirmed timing + strong persistent flow; final flow gate still enforces structure/runway. */
+   confirmedTrend?: boolean;
    rvol?: number;
    adx?: number;
    hourUtc?: number;
@@ -96,7 +98,8 @@ export function evaluateExecutionFilter(
    // 3. SETUP x REGIME (forensic Rule B): pullback fades in a strong bear
    //    are squeeze food (-31.79 measured).
    // ------------------------------------------------------------------
-   if (opts?.setupType === "PULLBACK_SNIPER" && btcRegime === "BEAR_STRONG") {
+   if (opts?.setupType === "PULLBACK_SNIPER" && btcRegime === "BEAR_STRONG" &&
+       !(direction === "SHORT" && assetRegime === "TREND_DOWN" && opts.confirmedTrend === true)) {
       return {
          blocked: true,
          reason: `PULLBACK_SNIPER banned in BEAR_STRONG: bear-rally squeezes dominate pullbacks (forensic -31.79). Wait for regime shift.`,
