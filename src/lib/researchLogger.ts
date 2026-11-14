@@ -48,6 +48,48 @@ const REJECTED_SIGNALS_FILE = path.join(RESEARCH_DIR, "rejected_signals.jsonl");
 const TRADE_JOURNEYS_FILE = path.join(RESEARCH_DIR, "trade_journeys.jsonl");
 const PERFORMANCE_SUMMARY_FILE = path.join(RESEARCH_DIR, "performance_summary.json");
 const DAILY_SUMMARY_FILE = path.join(RESEARCH_DIR, "daily_summary.jsonl");
+const BOT_STATE_FILE = path.join(RESEARCH_DIR, "bot_state.json");
+
+/** Atomic snapshot for the paper account and open positions. Durable only when RESEARCH_DIR is mounted persistently. */
+export function loadBotState(): any | null {
+   try {
+      if (!fs.existsSync(BOT_STATE_FILE)) return null;
+      const parsed = JSON.parse(fs.readFileSync(BOT_STATE_FILE, "utf8"));
+      return parsed && parsed.schema_version === 1 ? parsed : null;
+   } catch {
+      return null;
+   }
+}
+
+export function saveBotState(state: any): boolean {
+   try {
+      fs.mkdirSync(RESEARCH_DIR, { recursive: true });
+      const tempFile = BOT_STATE_FILE + "." + process.pid + ".tmp";
+      fs.writeFileSync(tempFile, JSON.stringify({ ...state, schema_version: 1, saved_at: new Date().toISOString() }), "utf8");
+      fs.renameSync(tempFile, BOT_STATE_FILE);
+      return true;
+   } catch (error: any) {
+      if (!hasLoggedWriteError) {
+         hasLoggedWriteError = true;
+         console.warn("Bot state snapshot failed: " + (error?.message || "unknown storage error"));
+      }
+      return false;
+   }
+}
+
+export function getResearchStorageStatus() {
+   const resolved = path.resolve(RESEARCH_DIR);
+   const tempRoot = path.resolve(os.tmpdir());
+   const usesTemporaryStorage = resolved === tempRoot || resolved.startsWith(tempRoot + path.sep);
+   return {
+      directory: RESEARCH_DIR,
+      state_file: BOT_STATE_FILE,
+      custom_directory_configured: Boolean(process.env.BEASTBOT_RESEARCH_DIR),
+      uses_temporary_storage: usesTemporaryStorage,
+      durability: usesTemporaryStorage ? "TEMPORARY" : "UNVERIFIED_MOUNT_PERSISTENCE",
+      state_file_exists: fs.existsSync(BOT_STATE_FILE)
+   };
+}
 
 const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];

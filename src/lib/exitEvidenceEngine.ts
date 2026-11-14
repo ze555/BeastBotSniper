@@ -78,7 +78,7 @@ export function evaluateExitEvidence(input: ExitEvidenceInput): ExitEvidenceDeci
   return {
     action: exitConfirmed ? "EXIT" : score >= 3 ? "PROTECT" : "HOLD",
     score,
-    maxScore: 8,
+    maxScore: 9,
     reasons,
     dataQuality: {
       oiAvailable,
