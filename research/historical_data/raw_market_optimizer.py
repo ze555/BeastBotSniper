@@ -381,16 +381,14 @@ def main():
     val_end=train_end+15*86400000
     split={"development_end_ms":train_end,"validation_end_ms":val_end,"holdout_start_ms":val_end,
            "holdout_end_ms":int(END.timestamp()*1000),"development_days":60,"validation_days":15,"holdout_days":15}
+    # Focused audit: 12 combinations instead of another multi-hour 48-case sweep.
+    # Reuse exactly the cached 62-symbol market sample.
     configs=[]
-    # Focus on distinct entry hypotheses rather than repeatedly optimizing
-    # losing impulse thresholds. 48 combinations fit one Actions time window.
     for mode in ("breakout_confirmed","pullback_resume","failed_breakout_reversal"):
       for lookback in (10,20):
-       for vol in (1.5,2.0):
-        for delta in (0.10,0.20):
-         for stop in (1.2,1.6):
-          entry={"mode":mode,"lookback":lookback,"vol_mult":vol,"delta":delta}
-          configs.append((entry,stop,"fixed_2R"))
+       for stop in (1.2,1.6):
+        entry={"mode":mode,"lookback":lookback,"vol_mult":2.0,"delta":0.2}
+        configs.append((entry,stop,"fixed_2R"))
     all_reports=[]; trade_rows={}
     progress=out/"incremental_configs.jsonl"
     progress.write_text("",encoding="utf-8")
