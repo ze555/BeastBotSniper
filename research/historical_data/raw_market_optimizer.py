@@ -134,6 +134,8 @@ def features(d):
     d["flow5"]=signed.rolling(5).sum()/d.qv.rolling(5).sum().replace(0,np.nan)
     d["flow15"]=signed.rolling(15).sum()/d.qv.rolling(15).sum().replace(0,np.nan)
     d["flow5_prev"]=d.flow5.shift(1)
+    d["flow5_lag3"]=d.flow5.shift(3)
+    d["range_prev20"]=(d.h.rolling(20).max()-d.l.rolling(20).min()).shift(1)
     d["prior_close"]=c.shift(1)
     d["prev_high_5"]=d.h.rolling(5,min_periods=5).max().shift(1)
     d["prev_low_5"]=d.l.rolling(5,min_periods=5).min().shift(1)
@@ -254,6 +256,7 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     qv=d.qv.to_numpy(); avg=d.avgqv.to_numpy()
     delta=d.delta.to_numpy(); ret5=d.ret5.to_numpy()
     flow5=d.flow5.to_numpy(); flow15=d.flow15.to_numpy(); flow_prev=d.flow5_prev.to_numpy()
+    flow_lag3=d.flow5_lag3.to_numpy(); prior_range=d.range_prev20.to_numpy()
     trend15=d.trend15.to_numpy(); trend60=d.trend60.to_numpy()
     close_loc=d.close_location.to_numpy()
     atr=d.atr.to_numpy()
@@ -274,6 +277,18 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
         # A short countertrend retracement followed by renewed taker flow.
         long=(trend60>0.003)&(trend15>0)&(ret5<0.002)&(c>hi5)&bullish&stretch
         short=(trend60< -0.003)&(trend15<0)&(ret5> -0.002)&(c<lo5)&bearish&stretch
+    elif mode=="flow_ignition":
+        # Enter as signed taker pressure accelerates before a 10/20-bar breakout.
+        # Avoid already extended moves; prior range is strictly shifted.
+        acceleration=flow5-flow_lag3
+        early=(np.abs(ret5)<0.012)&(prior_range>0)&(prior_range<12*atr)
+        long=(flow5>0.12)&(flow15>0.02)&(acceleration>0.08)&(c>o)&(close_loc>0.60)&(trend15>0)&(c<prev_hi)&early&stretch
+        short=(flow5< -0.12)&(flow15< -0.02)&(acceleration< -0.08)&(c<o)&(close_loc<0.40)&(trend15<0)&(c>prev_lo)&early&stretch
+    elif mode=="sweep_reclaim":
+        # A liquidity sweep and reclaim, with recovering 5-minute taker flow.
+        # The 15-minute trend is not required to have flipped yet.
+        long=(l<prev_lo)&(c>prev_lo)&(close_loc>0.65)&(delta>0.10)&(flow5>flow_lag3+0.05)&(flow5>0.02)&stretch
+        short=(h>prev_hi)&(c<prev_hi)&(close_loc<0.35)&(delta< -0.10)&(flow5<flow_lag3-0.05)&(flow5< -0.02)&stretch
     elif mode=="failed_breakout_reversal":
         # Prior-range liquidity sweep followed by a close back inside the range.
         # Require opposite taker dominance; no synthetic L2/whale data.
@@ -402,13 +417,14 @@ def main():
     # Focused audit: 12 combinations instead of another multi-hour 48-case sweep.
     # Reuse exactly the cached 62-symbol market sample.
     configs=[]
-    for mode in ("breakout_confirmed","pullback_resume","failed_breakout_reversal"):
+    # Preserve the prior best as a control; compare two earlier-entry hypotheses.
+    configs.append(({"mode":"failed_breakout_reversal","lookback":20,"vol_mult":2.0,"delta":0.2},1.6,"staged"))
+    for mode in ("flow_ignition","sweep_reclaim"):
       for lookback in (10,20):
-       for stop in (1.2,1.6):
-        entry={"mode":mode,"lookback":lookback,"vol_mult":2.0,"delta":0.2}
-        configs.append((entry,stop,"fixed_2R"))
-        configs.append((entry,stop,"staged"))
-        configs.append((entry,stop,"flow_exit"))
+       for volume in (1.3,1.8):
+        for stop in (1.2,1.6):
+         entry={"mode":mode,"lookback":lookback,"vol_mult":volume,"delta":0.2}
+         configs.append((entry,stop,"staged"))
     all_reports=[]; trade_rows={}
     progress=out/"incremental_configs.jsonl"
     progress.write_text("",encoding="utf-8")
