@@ -129,6 +129,12 @@ def features(d):
     d["prev_low_20"]=d.l.rolling(20,min_periods=20).min().shift(1)
     d["delta"]=np.where(d.qv>0,(2*d.tbq/d.qv)-1,0.0)
     d["trend15"]=c/c.shift(15)-1
+    d["trend60"]=c/c.shift(60)-1
+    d["prior_close"]=c.shift(1)
+    d["prev_high_5"]=d.h.rolling(5,min_periods=5).max().shift(1)
+    d["prev_low_5"]=d.l.rolling(5,min_periods=5).min().shift(1)
+    d["range_frac"]=(d.h-d.l)/d.c.replace(0,np.nan)
+    d["close_location"]=(d.c-d.l)/(d.h-d.l).replace(0,np.nan)
     d["continuous20"]=(~d.gap_before.astype(bool)).rolling(20,min_periods=20).min().fillna(0).astype(bool)
     return d
 
@@ -226,19 +232,41 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
             "stop_pct":risk_dist/entry}
 
 def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
+    """Only completed candles; trend and sweep filters are observational proxies,
+    not historical order-book or open-interest evidence."""
     prev_hi=d[f"prev_high_{lookback}"].to_numpy()
     prev_lo=d[f"prev_low_{lookback}"].to_numpy()
-    c=d.c.to_numpy(); o=d.o.to_numpy(); qv=d.qv.to_numpy()
-    avg=d.avgqv.to_numpy(); delta=d.delta.to_numpy(); ret5=d.ret5.to_numpy()
-    valid=np.isfinite(avg)&np.isfinite(d.atr.to_numpy())&(avg>0)&d.continuous20.to_numpy()
-    liquid=(qv>=avg*vol_mult)
-    if mode=="breakout":
-        long=(c>prev_hi)&(c>o)&(delta>=delta_th)&liquid
-        short=(c<prev_lo)&(c<o)&(delta<=-delta_th)&liquid
+    hi5=d.prev_high_5.to_numpy(); lo5=d.prev_low_5.to_numpy()
+    c=d.c.to_numpy(); o=d.o.to_numpy(); h=d.h.to_numpy(); l=d.l.to_numpy()
+    qv=d.qv.to_numpy(); avg=d.avgqv.to_numpy()
+    delta=d.delta.to_numpy(); ret5=d.ret5.to_numpy()
+    trend15=d.trend15.to_numpy(); trend60=d.trend60.to_numpy()
+    close_loc=d.close_location.to_numpy()
+    atr=d.atr.to_numpy()
+    valid=(np.isfinite(avg)&np.isfinite(atr)&np.isfinite(trend60)
+           &np.isfinite(close_loc)&(avg>0)&(atr>0)
+           &d.continuous20.to_numpy())
+    liquid=qv>=avg*vol_mult
+    # Exclude late, stretched candles and low-quality closes; avoid chasing
+    # the final minute of an already exhausted pump/dump.
+    stretch=(h-l)<=3.0*atr
+    bullish=(close_loc>=0.70)&(c>o)&(delta>=delta_th)
+    bearish=(close_loc<=0.30)&(c<o)&(delta<=-delta_th)
+    if mode=="breakout_confirmed":
+        long=(c>prev_hi)&bullish&(trend15>0)&(trend60>0)&stretch
+        short=(c<prev_lo)&bearish&(trend15<0)&(trend60<0)&stretch
+    elif mode=="pullback_resume":
+        # A short countertrend retracement followed by renewed taker flow.
+        long=(trend60>0.003)&(trend15>0)&(ret5<0.002)&(c>hi5)&bullish&stretch
+        short=(trend60< -0.003)&(trend15<0)&(ret5> -0.002)&(c<lo5)&bearish&stretch
+    elif mode=="failed_breakout_reversal":
+        # Prior-range liquidity sweep followed by a close back inside the range.
+        # Require opposite taker dominance; no synthetic L2/whale data.
+        long=(l<prev_lo)&(c>prev_lo)&bullish&stretch
+        short=(h>prev_hi)&(c<prev_hi)&bearish&stretch
     else:
-        long=(ret5>=0.0025)&(c>o)&(delta>=delta_th)&liquid
-        short=(ret5<=-0.0025)&(c<o)&(delta<=-delta_th)&liquid
-    return np.where(valid&long)[0],np.where(valid&short)[0]
+        raise ValueError(f"Unknown entry mode: {mode}")
+    return np.where(valid&liquid&long)[0],np.where(valid&liquid&short)[0]
 
 def gen_trades(symbol,d,funding,entry_cfg,stop_atr,exit_mode):
     longs,shorts=make_signal_masks(d,entry_cfg["mode"],entry_cfg["lookback"],entry_cfg["vol_mult"],entry_cfg["delta"])
@@ -354,14 +382,15 @@ def main():
     split={"development_end_ms":train_end,"validation_end_ms":val_end,"holdout_start_ms":val_end,
            "holdout_end_ms":int(END.timestamp()*1000),"development_days":60,"validation_days":15,"holdout_days":15}
     configs=[]
-    for mode in ("breakout","impulse"):
+    # Focus on distinct entry hypotheses rather than repeatedly optimizing
+    # losing impulse thresholds. 48 combinations fit one Actions time window.
+    for mode in ("breakout_confirmed","pullback_resume","failed_breakout_reversal"):
       for lookback in (10,20):
        for vol in (1.5,2.0):
         for delta in (0.10,0.20):
          for stop in (1.2,1.6):
           entry={"mode":mode,"lookback":lookback,"vol_mult":vol,"delta":delta}
-          for exit_mode in ("fixed_2R","staged","trail"):
-            configs.append((entry,stop,exit_mode))
+          configs.append((entry,stop,"fixed_2R"))
     all_reports=[]; trade_rows={}
     for ci,(entry,stop,exit_mode) in enumerate(configs,1):
         rows=[]
