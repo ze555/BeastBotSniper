@@ -130,6 +130,10 @@ def features(d):
     d["delta"]=np.where(d.qv>0,(2*d.tbq/d.qv)-1,0.0)
     d["trend15"]=c/c.shift(15)-1
     d["trend60"]=c/c.shift(60)-1
+    signed=2*d.tbq-d.qv
+    d["flow5"]=signed.rolling(5).sum()/d.qv.rolling(5).sum().replace(0,np.nan)
+    d["flow15"]=signed.rolling(15).sum()/d.qv.rolling(15).sum().replace(0,np.nan)
+    d["flow5_prev"]=d.flow5.shift(1)
     d["prior_close"]=c.shift(1)
     d["prev_high_5"]=d.h.rolling(5,min_periods=5).max().shift(1)
     d["prev_low_5"]=d.l.rolling(5,min_periods=5).min().shift(1)
@@ -240,18 +244,20 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     c=d.c.to_numpy(); o=d.o.to_numpy(); h=d.h.to_numpy(); l=d.l.to_numpy()
     qv=d.qv.to_numpy(); avg=d.avgqv.to_numpy()
     delta=d.delta.to_numpy(); ret5=d.ret5.to_numpy()
+    flow5=d.flow5.to_numpy(); flow15=d.flow15.to_numpy(); flow_prev=d.flow5_prev.to_numpy()
     trend15=d.trend15.to_numpy(); trend60=d.trend60.to_numpy()
     close_loc=d.close_location.to_numpy()
     atr=d.atr.to_numpy()
-    valid=(np.isfinite(avg)&np.isfinite(atr)&np.isfinite(trend60)
+    valid=(np.isfinite(flow5)&np.isfinite(flow15)&np.isfinite(flow_prev)
+           &np.isfinite(avg)&np.isfinite(atr)&np.isfinite(trend60)
            &np.isfinite(close_loc)&(avg>0)&(atr>0)
            &d.continuous20.to_numpy())
     liquid=qv>=avg*vol_mult
     # Exclude late, stretched candles and low-quality closes; avoid chasing
     # the final minute of an already exhausted pump/dump.
     stretch=(h-l)<=3.0*atr
-    bullish=(close_loc>=0.70)&(c>o)&(delta>=delta_th)
-    bearish=(close_loc<=0.30)&(c<o)&(delta<=-delta_th)
+    bullish=(close_loc>=0.70)&(c>o)&(delta>=delta_th)&(flow5>=0.08)&(flow15>=0.03)
+    bearish=(close_loc<=0.30)&(c<o)&(delta<=-delta_th)&(flow5<=-0.08)&(flow15<=-0.03)
     if mode=="breakout_confirmed":
         long=(c>prev_hi)&bullish&(trend15>0)&(trend60>0)&stretch
         short=(c<prev_lo)&bearish&(trend15<0)&(trend60<0)&stretch
@@ -266,6 +272,9 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
         short=(h>prev_hi)&(c<prev_hi)&bearish&stretch
     else:
         raise ValueError(f"Unknown entry mode: {mode}")
+    # Require flow to persist rather than reverse on the signal candle.
+    long=long&(flow5>=flow_prev)
+    short=short&(flow5<=flow_prev)
     return np.where(valid&liquid&long)[0],np.where(valid&liquid&short)[0]
 
 def gen_trades(symbol,d,funding,entry_cfg,stop_atr,exit_mode):
@@ -389,6 +398,7 @@ def main():
        for stop in (1.2,1.6):
         entry={"mode":mode,"lookback":lookback,"vol_mult":2.0,"delta":0.2}
         configs.append((entry,stop,"fixed_2R"))
+        configs.append((entry,stop,"staged"))
     all_reports=[]; trade_rows={}
     progress=out/"incremental_configs.jsonl"
     progress.write_text("",encoding="utf-8")
