@@ -171,12 +171,17 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
         favorable=(h-entry)/risk_dist if side=="LONG" else (entry-l)/risk_dist
         adverse=(l-entry)/risk_dist if side=="LONG" else (entry-h)/risk_dist
         mfe=max(mfe,favorable); mae=min(mae,adverse)
-        # Funding settles against the remaining position at the official event timestamp.
+        # Flow reversal is known from two fully closed bars; fill next open.
+        if exit_mode=="flow_exit" and k>=j+2:
+            fa=float(d.flow5.iloc[k-1]); fb=float(d.flow5.iloc[k-2])
+            tr=float(d.trend15.iloc[k-1])
+            reverse=(fa< -0.06 and fb< -0.03 and tr<0) if direction==1 else (fa>0.06 and fb>0.03 and tr>0)
+            if reverse and direction*(o-entry)/risk_dist>0.25:
+                fill=apply_slip(o,side,False)
+                gross+=direction*(fill-entry)/risk_dist*remaining
+                exit_fee+=FEE*fill/risk_dist*remaining
+                remaining=0; exit_reason="FLOW_REVERSAL"; exit_idx=k; break
         bar_close=int(d.ct.iloc[k])
-        while f_ptr<len(funding_events) and funding_events[f_ptr][0]<=bar_close:
-            rate=funding_events[f_ptr][1]
-            funding_r += -direction*rate*(entry/risk_dist)*remaining
-            f_ptr+=1
         # active_stop is measured in R along the trade direction. This sign
         # is essential: a short's initial stop must be ABOVE entry, not below.
         stop_px=entry+direction*active_stop*risk_dist
@@ -190,7 +195,7 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
             exit_idx=k; break
         targets=[]
         if exit_mode=="fixed_2R": targets=[(2.0,1.0,"TP2")]
-        elif exit_mode=="staged": targets=[(0.75,0.40,"TP1"),(1.80,0.35,"TP2"),(3.50,0.25,"TP3")]
+        elif exit_mode in ("staged","flow_exit"): targets=[(0.75,0.40,"TP1"),(1.80,0.35,"TP2"),(3.50,0.25,"TP3")]
         else: targets=[(1.0,0.40,"TP1"),(3.0,0.60,"TP3")]
         target_filled_this_bar=False
         for trgt,frac,label in targets:
@@ -213,6 +218,10 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
                     remaining=0
                 break  # OHLC cannot establish the order of multiple intrabar targets.
         if remaining<=1e-9: exit_idx=k; break
+        while f_ptr<len(funding_events) and funding_events[f_ptr][0]<=bar_close:
+            rate=funding_events[f_ptr][1]
+            funding_r += -direction*rate*(entry/risk_dist)*remaining
+            f_ptr+=1
         if exit_mode=="trail" and tp1:
             # Use only the ATR of the just-closed candle for the next candle's trailing stop.
             a=float(d.atr.iloc[k]) if math.isfinite(float(d.atr.iloc[k])) else atr
@@ -399,6 +408,7 @@ def main():
         entry={"mode":mode,"lookback":lookback,"vol_mult":2.0,"delta":0.2}
         configs.append((entry,stop,"fixed_2R"))
         configs.append((entry,stop,"staged"))
+        configs.append((entry,stop,"flow_exit"))
     all_reports=[]; trade_rows={}
     progress=out/"incremental_configs.jsonl"
     progress.write_text("",encoding="utf-8")
