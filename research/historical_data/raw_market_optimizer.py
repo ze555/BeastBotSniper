@@ -150,7 +150,7 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
     atr=float(d.atr.iloc[i])
     if not math.isfinite(atr) or atr<=0 or entry<=0: return None
     risk_dist=atr*stop_atr
-    if risk_dist/entry<0.0005 or risk_dist/entry>0.04: return None
+    if risk_dist/entry<4*(2*(FEE+SLIP)) or risk_dist/entry>0.04: return None  # fee-aware stop distance
     direction=1 if side=="LONG" else -1
     initial_stop=entry-direction*risk_dist
     active_stop=-1.0
@@ -159,7 +159,7 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
     exit_reason="TIME_STOP"; exit_idx=min(len(d)-1,j+MAX_HOLD)
     f_times=[x[0] for x in funding]
     f_start=bisect.bisect_right(f_times,int(d.t.iloc[j]))
-    f_end=bisect.bisect_right(f_times,int(d.t.iloc[exit_idx]))
+    f_end=bisect.bisect_right(f_times,int(d.ct.iloc[exit_idx]))
     funding_events=funding[f_start:f_end]
     f_ptr=0
     for k in range(j,exit_idx+1):
@@ -392,6 +392,8 @@ def main():
           entry={"mode":mode,"lookback":lookback,"vol_mult":vol,"delta":delta}
           configs.append((entry,stop,"fixed_2R"))
     all_reports=[]; trade_rows={}
+    progress=out/"incremental_configs.jsonl"
+    progress.write_text("",encoding="utf-8")
     for ci,(entry,stop,exit_mode) in enumerate(configs,1):
         rows=[]
         for s,(d,fund) in data.items():
@@ -408,12 +410,13 @@ def main():
         report={"config_id":ci,"entry":entry,"stop_atr":stop,"exit":exit_mode,
                 "development":mt,"validation":mv,"holdout":mh,"validation_score":round(score,4)}
         all_reports.append(report)
+        with progress.open("a",encoding="utf-8") as fp: fp.write(json.dumps(report)+"\n")
         trade_rows[str(ci)]=rows
         print(f"CFG {ci}/{len(configs)} {entry} SL{stop} {exit_mode} VAL={mv['net_r']}R PF={mv['profit_factor']} n={mv['trades']} OOS={mh['net_r']}R",flush=True)
     eligible=[x for x in all_reports if x["validation"]["trades"]>=20]
-    ranked=sorted(eligible,key=lambda x:(x["validation_score"],x["validation"]["profit_factor"],x["validation"]["trades"]),reverse=True)
+    ranked=sorted(eligible,key=lambda x:(x["validation"]["profit_factor"],x["validation"]["expectancy_r"],-x["validation"]["max_dd_pct"]),reverse=True)
     # Choose on validation only; the final holdout is not used for parameter selection.
-    selected=ranked[0] if ranked else None
+    selected=ranked[0] if ranked and ranked[0]["validation"]["profit_factor"]>1 and ranked[0]["validation"]["expectancy_r"]>0 else None
     holdout_result=None; selected_trades=[]
     if selected:
         selected_trades=trade_rows[str(selected["config_id"])]
@@ -434,6 +437,7 @@ def main():
         "liquidations":"Not used; no complete historical force-order tape",
         "limitations":"Universe is the pinned 62-symbol research universe, not a full all-contract exchange census; report coverage exposes missing symbols."},
       "data_manifest":manifest,"configs_tested":len(configs),"selection":"highest validation netR - 0.35*validation maxDD among configs with >=20 validation trades; holdout not used to select",
+      "acceptance":{"minimum_holdout_pf":1.5,"positive_holdout_expectancy":True,"passed":bool(selected and holdout_result and holdout_result["profit_factor"]>=1.5 and holdout_result["expectancy_r"]>0)},
       "selected_config":selected,"selected_holdout_recalculated":holdout_result,
       "top_validation_configs":ranked[:10],"all_configs":all_reports}
     (out/"optimization_report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
