@@ -456,6 +456,61 @@ def main():
         selected_trades=trade_rows[str(selected["config_id"])]
         hold=[x for x in selected_trades if x["entry_ms"]>=val_end]
         holdout_result=metrics(hold)
+    # Explain losses using generated trades only; no historical bot logs.
+    # Report every configuration by symbol, direction, and UTC entry-hour,
+    # plus MFE/MAE and fee burden. Holdout is diagnostic, never selection.
+    diagnostics={}
+    for config in all_reports:
+        cid=str(config["config_id"])
+        rows=trade_rows[cid]
+        splits={"development":[x for x in rows if x["entry_ms"]<train_end],
+                "validation":[x for x in rows if train_end<=x["entry_ms"]<val_end],
+                "holdout":[x for x in rows if x["entry_ms"]>=val_end]}
+        per_split={}
+        for split_name, subset in splits.items():
+            def grouped(keyfn):
+                groups={}
+                for trade in subset:
+                    key=str(keyfn(trade))
+                    groups.setdefault(key,[]).append(trade)
+                return {key:metrics(group) for key,group in sorted(groups.items())}
+            winners=[x for x in subset if x["net_r"]>0]
+            losers=[x for x in subset if x["net_r"]<=0]
+            def summary(group):
+                if not group:return {"trades":0}
+                return {"trades":len(group),
+                        "avg_mfe_r":round(float(np.mean([x["mfe_r"] for x in group])),4),
+                        "avg_mae_r":round(float(np.mean([x["mae_r"] for x in group])),4),
+                        "avg_fee_r":round(float(np.mean([x["fee_r"] for x in group])),4),
+                        "avg_funding_r":round(float(np.mean([x["funding_r"] for x in group])),4),
+                        "avg_gross_r":round(float(np.mean([x["gross_r"] for x in group])),4),
+                        "avg_net_r":round(float(np.mean([x["net_r"] for x in group])),4),
+                        "had_1r_favorable_pct":round(100*sum(x["mfe_r"]>=1 for x in group)/len(group),2)}
+            per_split[split_name]={
+                "by_side":grouped(lambda x:x["side"]),
+                "by_symbol":grouped(lambda x:x["symbol"]),
+                "by_entry_hour_utc":grouped(lambda x:pd.to_datetime(x["entry_ms"],unit="ms",utc=True).hour),
+                "by_exit_reason":grouped(lambda x:x["exit_reason"]),
+                "all_trades":summary(subset),"winners":summary(winners),"losers":summary(losers)}
+        diagnostics[cid]=per_split
+    (out/"trade_diagnostics.json").write_text(json.dumps(diagnostics,indent=2),encoding="utf-8")
+    # A compact human-readable diagnostic table, for subsequent hypothesis design.
+    with (out/"loss_diagnostics.csv").open("w",newline="") as fp:
+        w=csv.writer(fp)
+        w.writerow(["config_id","split","side","trades","net_r","pf","avg_mfe_r","avg_mae_r","avg_fee_r","losers_reached_1R_pct"])
+        for cid,by_split in diagnostics.items():
+            for split_name,detail in by_split.items():
+                for side,side_stats in detail["by_side"].items():
+                    side_rows=[x for x in trade_rows[cid] if x["side"]==side and
+                               (x["entry_ms"]<train_end if split_name=="development" else
+                                train_end<=x["entry_ms"]<val_end if split_name=="validation" else x["entry_ms"]>=val_end)]
+                    loss=[x for x in side_rows if x["net_r"]<=0]
+                    w.writerow([cid,split_name,side,side_stats["trades"],side_stats["net_r"],side_stats["profit_factor"],
+                                round(float(np.mean([x["mfe_r"] for x in side_rows])),4) if side_rows else 0,
+                                round(float(np.mean([x["mae_r"] for x in side_rows])),4) if side_rows else 0,
+                                round(float(np.mean([x["fee_r"] for x in side_rows])),4) if side_rows else 0,
+                                round(100*sum(x["mfe_r"]>=1 for x in loss)/len(loss),2) if loss else 0])
+    print("DIAGNOSTICS: trade_diagnostics.json and loss_diagnostics.csv written",flush=True)
     report={"title":"Independent raw-market strategy optimization (no recorded trades)",
       "date_range_utc":{"start":START.isoformat(),"end_exclusive":END.isoformat()},
       "universe":{"requested":len(symbols),"with_sufficient_official_data":len(data),"symbols_with_data":sorted(data)},
