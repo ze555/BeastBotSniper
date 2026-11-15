@@ -442,13 +442,22 @@ def main():
     # Focused audit: 12 combinations instead of another multi-hour 48-case sweep.
     # Reuse exactly the cached 62-symbol market sample.
     configs=[]
-    # Confirm the sweep on one or two completed candles, versus the control.
+    # Autonomous bounded multi-stage search, without touching production.
+    # All candidates are compared on development/validation; the holdout is
+    # disclosed only for the final validation-selected candidate.
     configs.append(({"mode":"failed_breakout_reversal","lookback":20,"vol_mult":2.0,"delta":0.2},1.6,"staged"))
-    for mode in ("reclaim_confirm_1","reclaim_confirm_2"):
-      for lookback in (10,20):
-       for vol_mult in (1.3,2.0):
-        for stop in (1.2,1.6):
-         configs.append(({"mode":mode,"lookback":lookback,"vol_mult":vol_mult,"delta":0.2},stop,"staged"))
+    stages=[
+      ("entry_family",[(m,lb,v,sl,"staged") for m in
+          ("failed_breakout_reversal","reclaim_confirm_1","reclaim_confirm_2",
+           "breakout_confirmed","pullback_resume","flow_ignition","sweep_reclaim")
+          for lb in (10,20) for v in (1.3,2.0) for sl in (1.2,1.6)]),
+      ("execution",[]),
+      ("robustness",[])]
+    # First pass is broad, later stages are generated from validation winners.
+    stage_candidates=stages[0][1]
+    for m,lb,v,sl,ex in stage_candidates:
+        candidate=({"mode":m,"lookback":lb,"vol_mult":v,"delta":0.2},sl,ex)
+        if candidate not in configs: configs.append(candidate)
     all_reports=[]; trade_rows={}
     progress=out/"incremental_configs.jsonl"
     progress.write_text("",encoding="utf-8")
@@ -471,6 +480,52 @@ def main():
         with progress.open("a",encoding="utf-8") as fp: fp.write(json.dumps(report)+"\n")
         trade_rows[str(ci)]=rows
         print(f"CFG {ci}/{len(configs)} {entry} SL{stop} {exit_mode} VAL={mv['net_r']}R PF={mv['profit_factor']} n={mv['trades']} OOS={mh['net_r']}R",flush=True)
+    # Stage 2: refine exit method and delta/volume around top validation
+    # families. Stage 3: local stop/volume robustness. All stages finish in
+    # this one workflow run, with a bounded candidate budget.
+    stage_summaries=[{"stage":"entry_family","candidates":len(all_reports)}]
+    def run_candidate(entry,stop,exit_mode,stage):
+        key=(entry["mode"],entry["lookback"],entry["vol_mult"],entry["delta"],stop,exit_mode)
+        if key in evaluated:return
+        evaluated.add(key)
+        rows=[]
+        for symbol,(df,fund) in data.items():
+            rows.extend(gen_trades(symbol,df,fund,entry,stop,exit_mode))
+        rows=portfolio(rows)
+        tr=[x for x in rows if x["entry_ms"]<train_end]
+        va=[x for x in rows if train_end<=x["entry_ms"]<val_end]
+        ho=[x for x in rows if x["entry_ms"]>=val_end]
+        mt,mv,mh=metrics(tr),metrics(va),metrics(ho)
+        cid=len(all_reports)+1
+        score=mv["net_r"]-0.35*mv["max_dd_r"] if mv["trades"]>=20 else -1e9
+        record={"config_id":cid,"entry":entry,"stop_atr":stop,"exit":exit_mode,
+                "development":mt,"validation":mv,"holdout":mh,"validation_score":round(score,4),"stage":stage}
+        all_reports.append(record);trade_rows[str(cid)]=rows
+        with progress.open("a",encoding="utf-8") as fp:fp.write(json.dumps(record)+"\\n")
+        print(f"STAGE {stage} CFG {cid} {entry} SL{stop} {exit_mode} VAL={mv['net_r']}R PF={mv['profit_factor']} n={mv['trades']}",flush=True)
+    evaluated={(x["entry"]["mode"],x["entry"]["lookback"],x["entry"]["vol_mult"],x["entry"]["delta"],x["stop_atr"],x["exit"]) for x in all_reports}
+    def leaders():
+        viable=[x for x in all_reports if x["validation"]["trades"]>=20 and
+                x["development"]["trades"]>=40]
+        return sorted(viable,key=lambda x:(x["validation"]["net_r"]-0.35*x["validation"]["max_dd_r"],
+                   x["validation"]["profit_factor"]),reverse=True)
+    # Stage 2: best two families plus baseline; vary exit and flow threshold.
+    seeds=leaders()[:2]+all_reports[:1]
+    for seed in seeds:
+        for exit_mode in ("staged","flow_exit","fixed_2R"):
+            for delta_th in (0.1,0.2,0.3):
+                entry=dict(seed["entry"]);entry["delta"]=delta_th
+                run_candidate(entry,seed["stop_atr"],exit_mode,"execution")
+    stage_summaries.append({"stage":"execution","candidates":len(all_reports)-stage_summaries[0]["candidates"]})
+    # Stage 3: explore a small local neighborhood, never unrestricted grid search.
+    prior=len(all_reports)
+    for seed in leaders()[:3]:
+        for stop in (1.2,1.6,2.0):
+            for vol in (1.3,1.8,2.0):
+                entry=dict(seed["entry"]);entry["vol_mult"]=vol
+                run_candidate(entry,stop,seed["exit"],"robustness")
+    stage_summaries.append({"stage":"robustness","candidates":len(all_reports)-prior})
+    print("STAGE_SUMMARY",json.dumps(stage_summaries),flush=True)
     eligible=[x for x in all_reports if x["validation"]["trades"]>=20]
     ranked=sorted(eligible,key=lambda x:(x["validation"]["profit_factor"],x["validation"]["expectancy_r"],-x["validation"]["max_dd_pct"]),reverse=True)
     # Choose on validation only; the final holdout is not used for parameter selection.
@@ -565,7 +620,7 @@ def main():
         "historical_OI":"Not used; official OI history is limited to the latest 30 days and does not cover the full 90-day window",
         "liquidations":"Not used; no complete historical force-order tape",
         "limitations":"Universe is the pinned 62-symbol research universe, not a full all-contract exchange census; report coverage exposes missing symbols."},
-      "data_manifest":manifest,"configs_tested":len(configs),"selection":"highest validation profit factor, then expectancy, among configs with >=20 validation trades; holdout not used to select",
+      "data_manifest":manifest,"configs_tested":len(all_reports),"stage_summaries":stage_summaries,"selection":"highest validation profit factor, then expectancy, among configs with >=20 validation trades; holdout not used to select",
       "acceptance":{"minimum_holdout_pf":1.5,"positive_holdout_expectancy":True,"passed":bool(selected and holdout_result and holdout_result["profit_factor"]>=1.5 and holdout_result["expectancy_r"]>0)},
       "selected_config":selected,"selected_holdout_recalculated":holdout_result,
       "top_validation_configs":ranked[:10],"all_configs":all_reports}
