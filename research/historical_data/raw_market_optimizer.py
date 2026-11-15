@@ -570,6 +570,54 @@ def main():
         selected_trades=trade_rows[str(selected["config_id"])]
         hold=[x for x in selected_trades if x["entry_ms"]>=val_end]
         holdout_result=metrics(hold)
+    # EXIT-ONLY EXPERIMENT: lock the original CFG34 entry timestamps, symbols and sides.
+    # No entry filter or signal generation is changed. Re-simulate from archived 1m bars.
+    baseline=next((r for r in all_reports if r["config_id"]==34 and
+                   r["entry"]["mode"]=="pullback_resume"),None)
+    if baseline:
+        fixed_entries=trade_rows["34"]
+        by_symbol={}
+        for sym,(df,funding) in data.items():
+            by_symbol[sym]=(df,funding,{int(t):i for i,t in enumerate(df.t.to_numpy())})
+        exit_tests=[]
+        for stop in (1.2,1.4,1.6,2.0):
+            for exit_style in ("staged","fixed_2R","trail","flow_exit"):
+                replay=[]
+                missing=0
+                for original in fixed_entries:
+                    df,funding,lookup=by_symbol[original["symbol"]]
+                    j=lookup.get(original["entry_ms"])
+                    if j is None or j<1:
+                        missing+=1;continue
+                    trade=simulate(df,j-1,original["side"],stop,exit_style,funding)
+                    if trade is None:
+                        missing+=1;continue
+                    trade["symbol"]=original["symbol"]
+                    replay.append(trade)
+                dev=[x for x in replay if x["entry_ms"]<train_end]
+                val=[x for x in replay if train_end<=x["entry_ms"]<val_end]
+                hold=[x for x in replay if x["entry_ms"]>=val_end]
+                result={"stop_atr":stop,"exit":exit_style,"fixed_entries":len(fixed_entries),
+                        "replayed":len(replay),"missing":missing,
+                        "development":metrics(dev),"validation":metrics(val),
+                        "holdout":metrics(hold),
+                        "note":"Fixed-entry counterfactual; overlapping exits may invalidate original portfolio occupancy"}
+                exit_tests.append(result)
+                print("EXIT_ONLY",json.dumps({"stop_atr":stop,"exit":exit_style,
+                     "development":result["development"],"missing":missing}),flush=True)
+        # Selection is STRICTLY development-only; validation/holdout are audits.
+        eligible_exit=[x for x in exit_tests if x["missing"]==0 and
+                       x["development"]["trades"]==baseline["development"]["trades"]]
+        exit_rank=sorted(eligible_exit,key=lambda x:(
+            x["development"]["net_r"]-0.4*x["development"]["max_dd_r"],
+            x["development"]["profit_factor"]),reverse=True)
+        winner_exit=exit_rank[0] if exit_rank else None
+        exit_report={"baseline_config":34,"baseline":baseline,
+            "fixed_entry_experiment":True,"exit_variants":exit_tests,
+            "selected_on_development_only":winner_exit,
+            "warning":"This is in-sample optimization; do not deploy without forward/out-of-sample confirmation."}
+        (out/"exit_only_cfg34.json").write_text(json.dumps(exit_report,indent=2),encoding="utf-8")
+        print("EXIT_ONLY_WINNER",json.dumps(winner_exit),flush=True)
     # Explain losses using generated trades only; no historical bot logs.
     # Report every configuration by symbol, direction, and UTC entry-hour,
     # plus MFE/MAE and fee burden. Holdout is diagnostic, never selection.
