@@ -317,13 +317,23 @@ async function updateDynamicWatchlist() {
             "SUIUSDT", "NEARUSDT", "AVAXUSDT", "DOGEUSDT"
          ];
 
+         // Apexv2-inspired impulse staging: prioritize early 2-12% movers near
+         // the directional edge of their 24h range, without narrowing the universe.
+         // 24h staging is only a watchlist priority, NOT proof of a fresh breakout.
+         const impulsePriority = (s: any) => {
+            const change = parseFloat(s.priceChangePercent) || 0;
+            const absChange = Math.abs(change);
+            const high = parseFloat(s.highPrice) || 0;
+            const low = parseFloat(s.lowPrice) || 0;
+            const last = parseFloat(s.lastPrice) || 0;
+            const location = high > low ? (last - low) / (high - low) : 0.5;
+            const aligned = change > 0 ? location >= 0.65 : location <= 0.35;
+            const stageBonus = aligned && absChange <= 12 ? 35 : aligned && absChange <= 25 ? 15 : 0;
+            return stageBonus + absChange * Math.log10(Math.max(1, parseFloat(s.quoteVolume) || 1));
+         };
          const activeMovers = [...validTickers]
             .filter((s: any) => Math.abs(parseFloat(s.priceChangePercent) || 0) >= 2.0)
-            .sort((a: any, b: any) => {
-               const scoreA = Math.abs(parseFloat(a.priceChangePercent) || 0) * Math.log10(parseFloat(a.quoteVolume) || 1);
-               const scoreB = Math.abs(parseFloat(b.priceChangePercent) || 0) * Math.log10(parseFloat(b.quoteVolume) || 1);
-               return scoreB - scoreA;
-            })
+            .sort((a: any, b: any) => impulsePriority(b) - impulsePriority(a))
             .map((s: any) => s.symbol);
 
          const combinedHot = Array.from(new Set([...activeMovers.slice(0, 14), ...coreCryptoMajors])).slice(0, 20);
@@ -1175,6 +1185,25 @@ function executeTrade(symbol: string, decision: any) {
    }
 
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
+   // Apexv2-inspired completed-candle trap gate. Confirm a failed liquidity
+   // sweep AND opposing institutional flow; never reject on wick alone.
+   // Use completed 15m candle (-2), not the still-forming latest candle.
+   const candles = p?.klines;
+   if (Array.isArray(candles) && candles.length >= 4) {
+      const last = candles[candles.length - 2];
+      const a = candles[candles.length - 3];
+      const b = candles[candles.length - 4];
+      const high = Math.max(Number(a.high), Number(b.high));
+      const low = Math.min(Number(a.low), Number(b.low));
+      const close = Number(last.close);
+      const valid = [high, low, close, Number(last.high), Number(last.low)].every(Number.isFinite);
+      const bullTrap = valid && Number(last.high) > high && close < high && Number(w?.slope15) < 0 && Number(p?.taker) < 0.5;
+      const bearTrap = valid && Number(last.low) < low && close > low && Number(w?.slope15) > 0 && Number(p?.taker) > 0.5;
+      if ((decision.signal === "LONG" && bullTrap) || (decision.signal === "SHORT" && bearTrap)) {
+         addLog(`🪤 [APEX TRAP GATE] ${symbol}: completed 15m liquidity sweep failed with opposing CVD/taker flow; entry skipped.`, "warn");
+         return;
+      }
+   }
    const isPullback = setupType === "PULLBACK_SNIPER";
    // Dynamic Risk Sizing based on Market Regime:
    // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
@@ -1463,6 +1492,13 @@ async function exitBrain(trade: any, ctx: any) {
       addLog(`🛡️ [تأمين تدريجي مرن] ${t.symbol} حقق +${profitR.toFixed(2)}R | تم رفع الوقف لتقليص المخاطرة إلى -0.25R مع إبقاء مساحة للتنفس حتى TP1!`, 'info');
    }
 
+   // Apexv2-inspired pre-TP1 ratchet: when peak reaches +0.50R,
+   // limit the remaining downside to -0.15R, without moving SL backwards.
+   if (!t.a_closed && t.peak_r >= 0.50 && profitR < TP1_R) {
+      const candidate = t.direction === "LONG" ? t.entry - slDist * 0.15 : t.entry + slDist * 0.15;
+      t.sl = t.direction === "LONG" ? Math.max(t.sl, candidate) : Math.min(t.sl, candidate);
+   }
+
    // PILLAR 2: TIME-DECAY STAGNATION EXIT (قاعدة الساعة الرملية لركود الزخم بعد 45 دقيقة)
    const elapsedSeconds = (Date.now() - new Date(t.entryTime).getTime()) / 1000;
    if (!isTsunamiRunner && !isBenignPullback && !t.a_closed && elapsedSeconds >= 2700) {
@@ -1492,6 +1528,13 @@ async function exitBrain(trade: any, ctx: any) {
          t.be_done = true;
          addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
       }
+   }
+
+   // Apexv2-inspired TP1-to-TP2 bridge: lock +0.60R after a +1.15R peak.
+   // Keep existing institutional runner and exit guards unchanged.
+   if (t.a_closed && !t.b_closed && t.peak_r >= 1.15 && profitR < TP2_R) {
+      const candidate = t.direction === "LONG" ? t.entry + slDist * 0.60 : t.entry - slDist * 0.60;
+      t.sl = t.direction === "LONG" ? Math.max(t.sl, candidate) : Math.min(t.sl, candidate);
    }
 
    // 2. PROFIT EXPANSION (TP2: +1.80R)
