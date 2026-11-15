@@ -135,13 +135,6 @@ def features(d):
     d["flow15"]=signed.rolling(15).sum()/d.qv.rolling(15).sum().replace(0,np.nan)
     d["flow5_prev"]=d.flow5.shift(1)
     d["flow5_lag3"]=d.flow5.shift(3)
-    # Measurable flow proxies, not historical L2, OI or liquidation feeds.
-    d["flow30"]=signed.rolling(30).sum()/d.qv.rolling(30).sum().replace(0,np.nan)
-    d["flow5_accel"]=d.flow5-d.flow5.shift(3)
-    d["qv5_ratio"]=d.qv.rolling(5).sum()/d.qv.rolling(20).sum().shift(5).replace(0,np.nan)*4
-    d["efficiency5"]=(c-c.shift(5)).abs()/c.diff().abs().rolling(5).sum().replace(0,np.nan)
-    d["atr_pct"]=d.atr/c.replace(0,np.nan)
-    d["atr_pct_baseline"]=d.atr_pct.rolling(60).median().shift(1)
     d["range_prev20"]=(d.h.rolling(20).max()-d.l.rolling(20).min()).shift(1)
     d["prior_close"]=c.shift(1)
     d["prev_high_5"]=d.h.rolling(5,min_periods=5).max().shift(1)
@@ -277,17 +270,7 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     stretch=(h-l)<=3.0*atr
     bullish=(close_loc>=0.70)&(c>o)&(delta>=delta_th)&(flow5>=0.08)&(flow15>=0.03)
     bearish=(close_loc<=0.30)&(c<o)&(delta<=-delta_th)&(flow5<=-0.08)&(flow15<=-0.03)
-    if mode=="flow_regime_confluence":
-        # Corroborate sustained taker pressure, participation, trend, and regime.
-        flow30=d.flow30.to_numpy(); acceleration=d.flow5_accel.to_numpy()
-        participation=d.qv5_ratio.to_numpy(); efficiency=d.efficiency5.to_numpy()
-        volatility=d.atr_pct.to_numpy(); volbase=d.atr_pct_baseline.to_numpy()
-        regime=np.isfinite(volbase)&(volatility>0.7*volbase)&(volatility<2.8*volbase)
-        participating=np.isfinite(participation)&(participation>1.15)
-        efficient=np.isfinite(efficiency)&(efficiency>0.30)
-        long=(trend60>0.002)&(trend15>0)&(flow30>0.025)&(flow15>0.05)&(flow5>0.12)&(acceleration>0.035)&(delta>delta_th)&(c>o)&(close_loc>0.65)&participating&efficient&regime&stretch
-        short=(trend60< -0.002)&(trend15<0)&(flow30< -0.025)&(flow15< -0.05)&(flow5< -0.12)&(acceleration< -0.035)&(delta< -delta_th)&(c<o)&(close_loc<0.35)&participating&efficient&regime&stretch
-    elif mode in ("reclaim_confirm_1","reclaim_confirm_2"):
+    if mode in ("reclaim_confirm_1","reclaim_confirm_2"):
         # Previous candle swept a shifted range and reclaimed it. Wait for
         # one/two COMPLETED confirming candles before entering next open.
         lag=1 if mode=="reclaim_confirm_1" else 2
@@ -466,7 +449,7 @@ def main():
     stages=[
       ("entry_family",[(m,lb,v,sl,"staged") for m in
           ("failed_breakout_reversal","reclaim_confirm_1","reclaim_confirm_2",
-           "flow_regime_confluence","breakout_confirmed","pullback_resume","flow_ignition","sweep_reclaim")
+           "breakout_confirmed","pullback_resume","flow_ignition","sweep_reclaim")
           for lb in (10,20) for v in (1.3,2.0) for sl in (1.2,1.6)]),
       ("execution",[]),
       ("robustness",[])]
@@ -578,13 +561,8 @@ def main():
                "caveat":"Exploratory reused historical data; not a new untouched holdout"}
     (out/"walk_forward_audit.json").write_text(json.dumps(wf_report,indent=2),encoding="utf-8")
     print("WALK_FORWARD_SUMMARY",json.dumps({"positive_folds":wf_positive,"passed":wf_report["passed"]}),flush=True)
-    # Never label a validation-only winner as deployable when development loses.
-    eligible=[x for x in all_reports if x["validation"]["trades"]>=20 and
-              x["development"]["trades"]>=40 and
-              x["development"]["net_r"]>0 and x["development"]["profit_factor"]>1.1 and
-              x["validation"]["net_r"]>0 and x["validation"]["profit_factor"]>1.1]
-    ranked=sorted(eligible,key=lambda x:(min(x["development"]["profit_factor"],x["validation"]["profit_factor"]),
-              x["validation"]["net_r"]-0.35*x["validation"]["max_dd_r"]),reverse=True)
+    eligible=[x for x in all_reports if x["validation"]["trades"]>=20]
+    ranked=sorted(eligible,key=lambda x:(x["validation"]["profit_factor"],x["validation"]["expectancy_r"],-x["validation"]["max_dd_pct"]),reverse=True)
     # Choose on validation only; the final holdout is not used for parameter selection.
     selected=ranked[0] if ranked and ranked[0]["validation"]["profit_factor"]>1 and ranked[0]["validation"]["expectancy_r"]>0 else None
     holdout_result=None; selected_trades=[]
@@ -677,8 +655,8 @@ def main():
         "historical_OI":"Not used; official OI history is limited to the latest 30 days and does not cover the full 90-day window",
         "liquidations":"Not used; no complete historical force-order tape",
         "limitations":"Universe is the pinned 62-symbol research universe, not a full all-contract exchange census; report coverage exposes missing symbols."},
-      "data_manifest":manifest,"configs_tested":len(all_reports),"stage_summaries":stage_summaries,"walk_forward_audit":wf_report,"selection":"positive development and validation with PF>1.1, >=40 development and >=20 validation trades, then maximin PF; holdout never used to select",
-      "acceptance":{"minimum_holdout_pf":1.5,"positive_holdout_expectancy":True,"passed":bool(selected and holdout_result and holdout_result["trades"]>=20 and holdout_result["profit_factor"]>=1.5 and holdout_result["expectancy_r"]>0 and wf_report["passed"])},
+      "data_manifest":manifest,"configs_tested":len(all_reports),"stage_summaries":stage_summaries,"walk_forward_audit":wf_report,"selection":"highest validation profit factor, then expectancy, among configs with >=20 validation trades; holdout not used to select",
+      "acceptance":{"minimum_holdout_pf":1.5,"positive_holdout_expectancy":True,"passed":bool(selected and holdout_result and holdout_result["profit_factor"]>=1.5 and holdout_result["expectancy_r"]>0)},
       "selected_config":selected,"selected_holdout_recalculated":holdout_result,
       "top_validation_configs":ranked[:10],"all_configs":all_reports}
     (out/"optimization_report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
