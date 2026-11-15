@@ -511,6 +511,22 @@ def main():
                                 round(float(np.mean([x["fee_r"] for x in side_rows])),4) if side_rows else 0,
                                 round(100*sum(x["mfe_r"]>=1 for x in loss)/len(loss),2) if loss else 0])
     print("DIAGNOSTICS: trade_diagnostics.json and loss_diagnostics.csv written",flush=True)
+    # Print a compact, inspectable summary in GitHub Actions logs; the full
+    # ZIP artifact is too large to inspect interactively.
+    for config in all_reports:
+        cid=str(config["config_id"])
+        if cid not in ("1","2","10"):continue
+        print("AUDIT_CONFIG",cid,config["entry"]["mode"],flush=True)
+        for split_name in ("development","validation","holdout"):
+            d=diagnostics[cid][split_name]
+            print("AUDIT",cid,split_name,"ALL",json.dumps(d["all_trades"]),flush=True)
+            print("AUDIT",cid,split_name,"LOSERS",json.dumps(d["losers"]),flush=True)
+            print("AUDIT",cid,split_name,"SIDES",json.dumps(d["by_side"]),flush=True)
+            for group_name in ("by_symbol","by_entry_hour_utc","by_exit_reason"):
+                items=sorted(d[group_name].items(),key=lambda item:item[1]["net_r"])
+                print("AUDIT",cid,split_name,group_name,"worst",json.dumps(items[:8]),flush=True)
+                print("AUDIT",cid,split_name,group_name,"best",json.dumps(items[-5:]),flush=True)
+
     report={"title":"Independent raw-market strategy optimization (no recorded trades)",
       "date_range_utc":{"start":START.isoformat(),"end_exclusive":END.isoformat()},
       "universe":{"requested":len(symbols),"with_sufficient_official_data":len(data),"symbols_with_data":sorted(data)},
