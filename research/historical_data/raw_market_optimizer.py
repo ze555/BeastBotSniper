@@ -270,7 +270,30 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     stretch=(h-l)<=3.0*atr
     bullish=(close_loc>=0.70)&(c>o)&(delta>=delta_th)&(flow5>=0.08)&(flow15>=0.03)
     bearish=(close_loc<=0.30)&(c<o)&(delta<=-delta_th)&(flow5<=-0.08)&(flow15<=-0.03)
-    if mode=="breakout_confirmed":
+    if mode in ("reclaim_confirm_1","reclaim_confirm_2"):
+        # Previous candle swept a shifted range and reclaimed it. Wait for
+        # one/two COMPLETED confirming candles before entering next open.
+        lag=1 if mode=="reclaim_confirm_1" else 2
+        sweep_long=(l<prev_lo)&(c>prev_lo)&bullish&stretch&(flow5>=flow_prev)
+        sweep_short=(h>prev_hi)&(c<prev_hi)&bearish&stretch&(flow5<=flow_prev)
+        prior_long=np.roll(sweep_long,lag); prior_short=np.roll(sweep_short,lag)
+        prior_long[:lag]=False; prior_short[:lag]=False
+        # All comparisons use only signal candle and completed prior candles.
+        sweep_close=np.roll(c,lag)
+        sweep_close[:lag]=np.nan
+        if lag==2:
+            mid_close=np.roll(c,1); mid_close[0]=np.nan
+            mid_ok_long=mid_close>=sweep_close
+            mid_ok_short=mid_close<=sweep_close
+        else:
+            mid_ok_long=np.ones(len(c),dtype=bool)
+            mid_ok_short=np.ones(len(c),dtype=bool)
+        long=prior_long&mid_ok_long&(c>sweep_close)&(c>o)&(flow5>0.02)&(delta>0)&(close_loc>0.55)&stretch
+        short=prior_short&mid_ok_short&(c<sweep_close)&(c<o)&(flow5< -0.02)&(delta<0)&(close_loc<0.45)&stretch
+        # Liquidity threshold applies to sweep, not confirmation candle.
+        sweep_liquid=np.roll(liquid,lag); sweep_liquid[:lag]=False
+        liquid=sweep_liquid
+    elif mode=="breakout_confirmed":
         long=(c>prev_hi)&bullish&(trend15>0)&(trend60>0)&stretch
         short=(c<prev_lo)&bearish&(trend15<0)&(trend60<0)&stretch
     elif mode=="pullback_resume":
@@ -296,9 +319,11 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
         short=(h>prev_hi)&(c<prev_hi)&bearish&stretch
     else:
         raise ValueError(f"Unknown entry mode: {mode}")
-    # Require flow to persist rather than reverse on the signal candle.
-    long=long&(flow5>=flow_prev)
-    short=short&(flow5<=flow_prev)
+    # Confirmation modes require direction-consistent flow on the last candle;
+    # other modes retain their original momentum-persistence condition.
+    if mode not in ("reclaim_confirm_1","reclaim_confirm_2"):
+        long=long&(flow5>=flow_prev)
+        short=short&(flow5<=flow_prev)
     return np.where(valid&liquid&long)[0],np.where(valid&liquid&short)[0]
 
 def gen_trades(symbol,d,funding,entry_cfg,stop_atr,exit_mode):
@@ -417,14 +442,13 @@ def main():
     # Focused audit: 12 combinations instead of another multi-hour 48-case sweep.
     # Reuse exactly the cached 62-symbol market sample.
     configs=[]
-    # Preserve the prior best as a control; compare two earlier-entry hypotheses.
+    # Confirm the sweep on one or two completed candles, versus the control.
     configs.append(({"mode":"failed_breakout_reversal","lookback":20,"vol_mult":2.0,"delta":0.2},1.6,"staged"))
-    for mode in ("flow_ignition","sweep_reclaim"):
+    for mode in ("reclaim_confirm_1","reclaim_confirm_2"):
       for lookback in (10,20):
-       for volume in (1.3,1.8):
+       for vol_mult in (1.3,2.0):
         for stop in (1.2,1.6):
-         entry={"mode":mode,"lookback":lookback,"vol_mult":volume,"delta":0.2}
-         configs.append((entry,stop,"staged"))
+         configs.append(({"mode":mode,"lookback":lookback,"vol_mult":vol_mult,"delta":0.2},stop,"staged"))
     all_reports=[]; trade_rows={}
     progress=out/"incremental_configs.jsonl"
     progress.write_text("",encoding="utf-8")
@@ -515,7 +539,7 @@ def main():
     # ZIP artifact is too large to inspect interactively.
     for config in all_reports:
         cid=str(config["config_id"])
-        if cid not in ("1","2","10"):continue
+        if cid not in ("1","2","10","17"):continue
         print("AUDIT_CONFIG",cid,config["entry"]["mode"],flush=True)
         for split_name in ("development","validation","holdout"):
             d=diagnostics[cid][split_name]
@@ -541,7 +565,7 @@ def main():
         "historical_OI":"Not used; official OI history is limited to the latest 30 days and does not cover the full 90-day window",
         "liquidations":"Not used; no complete historical force-order tape",
         "limitations":"Universe is the pinned 62-symbol research universe, not a full all-contract exchange census; report coverage exposes missing symbols."},
-      "data_manifest":manifest,"configs_tested":len(configs),"selection":"highest validation netR - 0.35*validation maxDD among configs with >=20 validation trades; holdout not used to select",
+      "data_manifest":manifest,"configs_tested":len(configs),"selection":"highest validation profit factor, then expectancy, among configs with >=20 validation trades; holdout not used to select",
       "acceptance":{"minimum_holdout_pf":1.5,"positive_holdout_expectancy":True,"passed":bool(selected and holdout_result and holdout_result["profit_factor"]>=1.5 and holdout_result["expectancy_r"]>0)},
       "selected_config":selected,"selected_holdout_recalculated":holdout_result,
       "top_validation_configs":ranked[:10],"all_configs":all_reports}
