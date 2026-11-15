@@ -526,6 +526,41 @@ def main():
                 run_candidate(entry,stop,seed["exit"],"robustness")
     stage_summaries.append({"stage":"robustness","candidates":len(all_reports)-prior})
     print("STAGE_SUMMARY",json.dumps(stage_summaries),flush=True)
+    # Rolling-origin audit. This is a diagnostic, not fresh OOS evidence:
+    # candidate families have already been inspected on this historical range.
+    # Select solely on each fold's prior 30-day window; evaluate next 15 days.
+    wf_folds=[]
+    start_ms=int(START.timestamp()*1000)
+    day_ms=86400000
+    for fold_index in (0,1,2):
+        train_start=start_ms+fold_index*15*day_ms
+        train_stop=train_start+30*day_ms
+        test_stop=train_stop+15*day_ms
+        scored=[]
+        for cfg in all_reports:
+            trades=trade_rows[str(cfg["config_id"])]
+            tr=metrics([t for t in trades if train_start<=t["entry_ms"]<train_stop])
+            if tr["trades"]<15 or tr["net_r"]<=0 or tr["profit_factor"]<=1.0:continue
+            scored.append((tr["net_r"]-0.35*tr["max_dd_r"],cfg,tr))
+        scored.sort(key=lambda v:v[0],reverse=True)
+        winner=scored[0] if scored else None
+        test=metrics([t for t in trade_rows[str(winner[1]["config_id"])]
+                      if train_stop<=t["entry_ms"]<test_stop]) if winner else None
+        result={"fold":fold_index+1,"train_start_ms":train_start,
+                "train_end_ms":train_stop,"test_end_ms":test_stop,
+                "eligible_candidates":len(scored),
+                "selected_config_id":winner[1]["config_id"] if winner else None,
+                "train_metrics":winner[2] if winner else None,"test_metrics":test}
+        wf_folds.append(result)
+        print("WALK_FORWARD",json.dumps(result),flush=True)
+    wf_positive=sum(bool(x["test_metrics"] and x["test_metrics"]["net_r"]>0) for x in wf_folds)
+    wf_report={"folds":wf_folds,"positive_folds":wf_positive,
+               "passed":wf_positive==3 and all(x["test_metrics"] and
+                         x["test_metrics"]["trades"]>=10 and
+                         x["test_metrics"]["profit_factor"]>=1.2 for x in wf_folds),
+               "caveat":"Exploratory reused historical data; not a new untouched holdout"}
+    (out/"walk_forward_audit.json").write_text(json.dumps(wf_report,indent=2),encoding="utf-8")
+    print("WALK_FORWARD_SUMMARY",json.dumps({"positive_folds":wf_positive,"passed":wf_report["passed"]}),flush=True)
     eligible=[x for x in all_reports if x["validation"]["trades"]>=20]
     ranked=sorted(eligible,key=lambda x:(x["validation"]["profit_factor"],x["validation"]["expectancy_r"],-x["validation"]["max_dd_pct"]),reverse=True)
     # Choose on validation only; the final holdout is not used for parameter selection.
@@ -620,7 +655,7 @@ def main():
         "historical_OI":"Not used; official OI history is limited to the latest 30 days and does not cover the full 90-day window",
         "liquidations":"Not used; no complete historical force-order tape",
         "limitations":"Universe is the pinned 62-symbol research universe, not a full all-contract exchange census; report coverage exposes missing symbols."},
-      "data_manifest":manifest,"configs_tested":len(all_reports),"stage_summaries":stage_summaries,"selection":"highest validation profit factor, then expectancy, among configs with >=20 validation trades; holdout not used to select",
+      "data_manifest":manifest,"configs_tested":len(all_reports),"stage_summaries":stage_summaries,"walk_forward_audit":wf_report,"selection":"highest validation profit factor, then expectancy, among configs with >=20 validation trades; holdout not used to select",
       "acceptance":{"minimum_holdout_pf":1.5,"positive_holdout_expectancy":True,"passed":bool(selected and holdout_result and holdout_result["profit_factor"]>=1.5 and holdout_result["expectancy_r"]>0)},
       "selected_config":selected,"selected_holdout_recalculated":holdout_result,
       "top_validation_configs":ranked[:10],"all_configs":all_reports}
