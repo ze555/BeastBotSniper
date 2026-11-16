@@ -264,7 +264,10 @@ class LiveDataFeed {
           [...this.desired].every(s => this.subscribed.has(s))) return;
 
       const lower = (s: string) => s.toLowerCase();
-      const oldSet = new Set(this.subscribed);
+      // The socket starts with BTC aggTrade; later diffs must compare stream names.
+      const oldSet = force
+         ? new Set(["btcusdt@aggTrade"])
+         : new Set([...this.subscribed].flatMap(s => [`${lower(s)}@aggTrade`, `${lower(s)}@bookTicker`]));
       const newSet = new Set<string>([...this.desired].flatMap(s => [`${lower(s)}@aggTrade`, `${lower(s)}@bookTicker`]));
 
       const toAdd = [...newSet].filter(s => !oldSet.has(s));
@@ -293,7 +296,8 @@ class LiveDataFeed {
    // -----------------------------------------------------------------------
    private handleStream(streamName: string, data: any) {
       if (streamName === "!forceOrder@arr") {
-         this.handleLiquidation(data as LiquidationRaw);
+         // Combined streams wrap the liquidation order inside data.o.
+         this.handleLiquidation((data?.o ?? data) as LiquidationRaw);
          return;
       }
       if (streamName === "!markPrice@arr") {
