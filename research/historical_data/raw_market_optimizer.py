@@ -174,11 +174,11 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
         adverse=(l-entry)/risk_dist if side=="LONG" else (entry-h)/risk_dist
         mfe=max(mfe,favorable); mae=min(mae,adverse)
         # Flow reversal is known from two fully closed bars; fill next open.
-        if exit_mode=="flow_exit" and k>=j+2:
+        if exit_mode in ("flow_exit","flow_guard") and k>=j+2:
             fa=float(d.flow5.iloc[k-1]); fb=float(d.flow5.iloc[k-2])
             tr=float(d.trend15.iloc[k-1])
             reverse=(fa< -0.06 and fb< -0.03 and tr<0) if direction==1 else (fa>0.06 and fb>0.03 and tr>0)
-            if reverse and direction*(o-entry)/risk_dist>0.25:
+            if reverse and direction*(o-entry)/risk_dist>(0.05 if exit_mode=="flow_guard" else 0.25):
                 fill=apply_slip(o,side,False)
                 gross+=direction*(fill-entry)/risk_dist*remaining
                 exit_fee+=FEE*fill/risk_dist*remaining
@@ -197,7 +197,7 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
             exit_idx=k; break
         targets=[]
         if exit_mode=="fixed_2R": targets=[(2.0,1.0,"TP2")]
-        elif exit_mode in ("staged","flow_exit"): targets=[(0.75,0.40,"TP1"),(1.80,0.35,"TP2"),(3.50,0.25,"TP3")]
+        elif exit_mode in ("staged","flow_exit","early_guard","flow_guard","atr_guard"): targets=[(0.75,0.40,"TP1"),(1.80,0.35,"TP2"),(3.50,0.25,"TP3")]
         else: targets=[(1.0,0.40,"TP1"),(3.0,0.60,"TP3")]
         target_filled_this_bar=False
         for trgt,frac,label in targets:
@@ -233,6 +233,19 @@ def simulate(d, i, side, stop_atr, exit_mode, funding):
             else:
                 best=min(best,l); trail_px=best+1.5*a
                 active_stop=max(active_stop,(entry-trail_px)/risk_dist)
+        # Additional exit-only policies use information from the CLOSED bar k.
+        # The updated stop can only execute on bar k+1, avoiding look-ahead.
+        if exit_mode in ("early_guard","flow_guard","atr_guard") and remaining>1e-9:
+            current_favorable=direction*(c-entry)/risk_dist
+            if exit_mode=="early_guard" and current_favorable>=0.55:
+                active_stop=max(active_stop,0.0)
+            if exit_mode=="flow_guard" and current_favorable>=0.40:
+                active_stop=max(active_stop,-0.15)
+            if exit_mode=="atr_guard" and current_favorable>=0.75:
+                a=float(d.atr.iloc[k])
+                if math.isfinite(a) and a>0:
+                    trailing=(c-1.2*a) if direction==1 else (c+1.2*a)
+                    active_stop=max(active_stop,direction*(trailing-entry)/risk_dist)
         # Staged stop changes apply from the next full candle, not retroactively in this candle.
     if remaining>1e-9:
         k=exit_idx; raw=float(d.c.iloc[k]); fill=apply_slip(raw,side,False)
@@ -580,8 +593,8 @@ def main():
         for sym,(df,funding) in data.items():
             by_symbol[sym]=(df,funding,{int(t):i for i,t in enumerate(df.t.to_numpy())})
         exit_tests=[]
-        for stop in (1.2,1.4,1.6,2.0):
-            for exit_style in ("staged","fixed_2R","trail","flow_exit"):
+        for stop in (1.6,):  # preserve all 104 CFG34 entries; no stop-distance eligibility drift
+            for exit_style in ("staged","fixed_2R","trail","flow_exit","early_guard","flow_guard","atr_guard"):
                 replay=[]
                 missing=0
                 for original in fixed_entries:
