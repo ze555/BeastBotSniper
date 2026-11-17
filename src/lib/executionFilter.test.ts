@@ -1,7 +1,7 @@
 // ============================================================================
 // Execution Filter Verification Suite for BeastBotSniper Architecture
 // ============================================================================
-import { evaluateExecutionFilter } from "./apexPredator.js";
+import { evaluateExecutionFilter } from "./executionFilter.js";
 
 let passedCount = 0;
 let failedCount = 0;
@@ -87,16 +87,16 @@ console.log("=======================================================");
 {
   // Toxic hours blocked
   const resHour13 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 13 });
-  assert(resHour13.blocked === true && resHour13.reason?.includes("toxic hour 13:00 UTC"), "Entry blocked at 13:00 UTC (London/NY overlap chop)");
+  assert(resHour13.blocked === true && resHour13.reason?.includes("toxic hour 13:00 UTC") === true, "Entry blocked at 13:00 UTC (London/NY overlap chop)");
 
   const resHour18 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 18 });
-  assert(resHour18.blocked === true && resHour18.reason?.includes("toxic hour 18:00 UTC"), "Entry blocked at 18:00 UTC (Late NY liquidation chop)");
+  assert(resHour18.blocked === true && resHour18.reason?.includes("toxic hour 18:00 UTC") === true, "Entry blocked at 18:00 UTC (Late NY liquidation chop)");
 
   const resHour05 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 5 });
-  assert(resHour05.blocked === true && resHour05.reason?.includes("toxic hour 5:00 UTC"), "Entry blocked at 05:00 UTC (Asia end chop)");
+  assert(resHour05.blocked === true && resHour05.reason?.includes("toxic hour 5:00 UTC") === true, "Entry blocked at 05:00 UTC (Asia end chop)");
 
   const resHour06 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 6 });
-  assert(resHour06.blocked === true && resHour06.reason?.includes("toxic hour 6:00 UTC"), "Entry blocked at 06:00 UTC");
+  assert(resHour06.blocked === true && resHour06.reason?.includes("toxic hour 6:00 UTC") === true, "Entry blocked at 06:00 UTC");
 
   // Golden hours allowed
   const resHour12 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 12 });
@@ -112,11 +112,11 @@ console.log("=======================================================");
 {
   // Dead chop with RVOL < 1.2 is blocked
   const resLowVol = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 0.8, adx: 25 });
-  assert(resLowVol.blocked === true && resLowVol.reason?.includes("RVOL"), "Dead chop in RANGE blocked when RVOL < 1.20");
+  assert(resLowVol.blocked === true && resLowVol.reason?.includes("RVOL") === true, "Dead chop in RANGE blocked when RVOL < 1.20");
 
   // Dead chop with ADX < 18 is blocked
   const resLowAdx = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.5, adx: 12 });
-  assert(resLowAdx.blocked === true && resLowAdx.reason?.includes("ADX"), "Dead chop in RANGE blocked when ADX < 18");
+  assert(resLowAdx.blocked === true && resLowAdx.reason?.includes("ADX") === true, "Dead chop in RANGE blocked when ADX < 18");
 
   // Pre-breakout with high RVOL and ADX is allowed
   const resGoodRange = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.6, adx: 24 });
@@ -159,6 +159,17 @@ console.log("=======================================================");
   const openLongTrade = simulatedActiveTrades.find(t => t.id === "trade-2");
   assert(openLongTrade !== undefined && openLongTrade.status === "OPEN", "Open LONG trade is NOT closed by execution filter");
 }
+
+// Missing and malformed RANGE observations must never bypass the entry gate.
+for (const options of [undefined, {}, { rvol: 1.5 }, { adx: 22 },
+  { rvol: NaN, adx: 22 }, { rvol: 1.5, adx: NaN },
+  { rvol: Infinity, adx: 22 }, { rvol: 1.5, adx: Infinity }]) {
+  const result = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "RANGE", options);
+  assert(result.blocked && !result.allowed && result.ruleTriggered === "DEAD_CHOP_RANGE",
+    `Invalid RANGE data rejected: ${String(options)}`);
+}
+const boundary = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "RANGE", { rvol: 1.2, adx: 18 });
+assert(boundary.allowed && !boundary.blocked, "Valid RANGE boundary values accepted");
 
 console.log("=======================================================");
 console.log(`📊 EXECUTION FILTER TEST SUMMARY: ${passedCount} PASSED | ${failedCount} FAILED`);

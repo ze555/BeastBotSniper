@@ -1205,6 +1205,23 @@ async function executeTrade(symbol: string, decision: any) {
    }
 
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
+   // Final entry gate shared by hot-momentum and broad-universe scans.
+   // Recheck the execution hour now, since analysis may cross an hour boundary.
+   if (decision.signal !== "LONG" && decision.signal !== "SHORT") return;
+   const executionFilter = evaluateExecutionFilter(decision.signal, ctx?.regime, reasoning?.regime, {
+      rvol: p?.rvol,
+      adx: p?.adx,
+      hourUtc: new Date().getUTCHours()
+   });
+   if (executionFilter.blocked) {
+      addLog(`🛡️ [EXECUTION FILTER] ${symbol}: ${executionFilter.reason}`, "warn");
+      logRejectedSignal({
+         symbol, timeframe: "15m", direction: decision.signal, signal_score: score,
+         rejection_reason: executionFilter.reason || "Execution filter blocked entry",
+         p, w, ctx, reasoning
+      });
+      return;
+   }
    if (reasoning?.regime === "RANGE" || reasoning?.triRegime?.setupClass === "RANGE_MEAN_REVERSION") {
       diagnostics.rangeShadow++;
       recordCandidate(symbol, decision.signal, "RANGE_OBSERVATION_ONLY", false);
