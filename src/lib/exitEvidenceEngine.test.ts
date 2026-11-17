@@ -77,3 +77,11 @@ const mixedFlow = evaluateExitEvidence({
 assert.notEqual(mixedFlow.action, "EXIT");
 
 console.log("exitEvidenceEngine: tests passed");
+
+// Both directions can reach the declared maximum when every evidence item is adverse.
+for (const input of [base, { ...base, direction: "SHORT" as const,
+  priceChangePct: 0.003, cvd5: 100, cvd15: 200, cvd4h: 300, takerRatio: 0.6 }]) {
+  const result = evaluateExitEvidence({ ...input, hiddenFlowAgainst: true });
+  assert.equal(result.score, 9);
+  assert.equal(result.maxScore, result.score);
+}

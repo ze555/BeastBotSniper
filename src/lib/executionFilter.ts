@@ -1,4 +1,4 @@
-import { MarketRegimeType } from "./reasoningEngine";
+import type { MarketRegimeType } from "./reasoningEngine";
 
 export interface ExecutionFilterResult {
    allowed: boolean;
@@ -94,8 +94,14 @@ export function evaluateExecutionFilter(
 
    // 5. Dead chop in RANGE: Requires RVOL >= 1.20 and ADX >= 18
    if (assetRegime === "RANGE") {
-      if (options?.rvol !== undefined && options.rvol < 1.20) {
-         const reason = `Execution Filter: Blocked in RANGE due to low volume (RVOL: ${options.rvol.toFixed(2)} < 1.20).`;
+      const rvol = options?.rvol;
+      const adx = options?.adx;
+      if (typeof rvol !== "number" || !Number.isFinite(rvol) || typeof adx !== "number" || !Number.isFinite(adx)) {
+         const reason = "Execution Filter: Blocked in RANGE because RVOL and ADX must both be finite.";
+         return { allowed: false, blocked: true, reason, blockedReason: reason, ruleTriggered: "DEAD_CHOP_RANGE" };
+      }
+      if (rvol < 1.20) {
+         const reason = `Execution Filter: Blocked in RANGE due to low volume (RVOL: ${rvol.toFixed(2)} < 1.20).`;
          return {
             allowed: false,
             blocked: true,
@@ -104,8 +110,8 @@ export function evaluateExecutionFilter(
             ruleTriggered: "DEAD_CHOP_RANGE"
          };
       }
-      if (options?.adx !== undefined && options.adx < 18) {
-         const reason = `Execution Filter: Blocked in RANGE due to low directional momentum (ADX: ${options.adx.toFixed(1)} < 18).`;
+      if (adx < 18) {
+         const reason = `Execution Filter: Blocked in RANGE due to low directional momentum (ADX: ${adx.toFixed(1)} < 18).`;
          return {
             allowed: false,
             blocked: true,
