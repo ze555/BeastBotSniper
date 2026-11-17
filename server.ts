@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import axios from "axios";
-import { startEngine, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState } from "./src/lib/apexPredator.js";
+import { startEngine, getCandidateAudit, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState } from "./src/lib/apexPredator.js";
 import { 
   getTradingDecisionsData, 
   getRejectedSignalsData, 
@@ -30,6 +30,7 @@ async function startServer() {
     res.json({ active: isActive() });
   });
 
+  app.get("/api/research/candidate-audit", (req, res) => res.json(getCandidateAudit()));
   app.get("/api/predator/stats", (req, res) => res.json(getStats()));
   app.post("/api/predator/config", (req, res) => {
      updateConfig(req.body.balance, req.body.maxTrades, {

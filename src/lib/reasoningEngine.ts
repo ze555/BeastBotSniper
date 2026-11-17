@@ -249,7 +249,7 @@ export function interpretFlow(p: any, w: any): FlowAnalysis {
    else if (pChg < -0.001 && oiChg > 0.002) persistencePoints += 30; // Institutional Short Accumulation
    else if (pChg > 0.001 && oiChg < -0.002) persistencePoints += 10; // Short unwinding (fragile)
    else if (pChg < -0.001 && oiChg < -0.002) persistencePoints += 10; // Long liquidation (fragile)
-   else if (Math.abs(oiChg) <= 0.002) persistencePoints += 15; // Stable OI
+   else if (w.oiAvailable !== false && Math.abs(oiChg) <= 0.002) persistencePoints += 15; // Stable OI
 
    // 3. Taker Buy/Sell Aggression Alignment (25 pts)
    if ((pChg > 0 && takerRatio >= 0.54) || (pChg < 0 && takerRatio <= 0.46)) persistencePoints += 25;
@@ -778,7 +778,7 @@ export function generateScenarios(
       };
    }
 
-   if (regime === "TREND_DOWN" || (flow.state === "SHORT_BUILDUP" && regime !== "TREND_UP")) {
+   if (regime === "TREND_DOWN" || flow.state === "SHORT_BUILDUP") {
       if (loc.nearSupport) {
          missingConfirmation.push("Clean 15m candle close clearly below " + loc.nearestSupport.toFixed(4));
          missingConfirmation.push("RVOL > 1.2 confirming breakdown volume");

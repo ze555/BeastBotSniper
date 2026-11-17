@@ -16,7 +16,7 @@ const SCHEMA_VERSION = "2.4.0";
 const BOT_VERSION = "BeastBot-Apex-v2.4";
 
 function getWritableResearchDir(): string {
-   const defaultPath = path.resolve(process.cwd(), "data", "research");
+   const defaultPath = path.resolve(process.env.BEAST_RESEARCH_DIR || path.join(process.cwd(), "data", "research"));
    try {
       if (!fs.existsSync(defaultPath)) {
          fs.mkdirSync(defaultPath, { recursive: true });
@@ -765,6 +765,8 @@ export function logTradeDecision(trade: any, exitContext: {
          schema_version: SCHEMA_VERSION,
          bot_version: BOT_VERSION,
          event_type: "TRADING_DECISION",
+         strategy_revision: trade.strategyRevision || "legacy",
+         execution_mode: trade.executionMode || "PAPER",
          trade_id: tradeId,
          timestamp_entry: trade.entryTime,
          timestamp_exit: exitTime.toISOString(),
