@@ -631,6 +631,40 @@ def main():
             "warning":"This is in-sample optimization; do not deploy without forward/out-of-sample confirmation."}
         (out/"exit_only_cfg34.json").write_text(json.dumps(exit_report,indent=2),encoding="utf-8")
         print("EXIT_ONLY_WINNER",json.dumps(winner_exit),flush=True)
+    # Root-cause audit of development losses using ORIGINAL baseline fills.
+    # MFE alone cannot establish the chronology of favorable/adverse moves;
+    # these are excursion buckets, NOT claims about the path before stop-out.
+    if baseline is not None:
+        base_rows=trade_rows.get("34",[])
+        dev_rows=[t for t in base_rows if t["entry_ms"]<train_end]
+        losers=[t for t in dev_rows if t["net_r"]<=0]
+        def loss_bucket(t):
+            mfe=float(t["mfe_r"])
+            if mfe<0.25: return "never_reached_0_25R"
+            if mfe<0.75: return "reached_0_25_to_0_75R"
+            if mfe<1.8: return "reached_0_75_to_1_8R"
+            return "reached_at_least_1_8R"
+        audit={"config_id":34,"development_trades":len(dev_rows),
+            "losing_trades":len(losers),
+            "total_losing_net_r":round(sum(t["net_r"] for t in losers),3),
+            "buckets":{},"exit_reasons":{},"by_side":{},
+            "warning":"MFE/MAE measure maximum intratrade excursions, not the chronological sequence. Loss after favorable excursion is not proof of a profitable tradable exit."}
+        for t in losers:
+            b=loss_bucket(t)
+            v=audit["buckets"].setdefault(b,{"trades":0,"net_r":0.0,"fee_r":0.0})
+            v["trades"]+=1;v["net_r"]+=float(t["net_r"]);v["fee_r"]+=float(t["fee_r"])
+            e=str(t["exit_reason"])
+            w=audit["exit_reasons"].setdefault(e,{"trades":0,"net_r":0.0})
+            w["trades"]+=1;w["net_r"]+=float(t["net_r"])
+            side=str(t["side"])
+            q=audit["by_side"].setdefault(side,{"trades":0,"net_r":0.0})
+            q["trades"]+=1;q["net_r"]+=float(t["net_r"])
+        for groups in (audit["buckets"],audit["exit_reasons"],audit["by_side"]):
+            for v in groups.values():
+                for key in ("net_r","fee_r"):
+                    if key in v:v[key]=round(v[key],3)
+        (out/"cfg34_loss_root_cause.json").write_text(json.dumps(audit,indent=2),encoding="utf-8")
+        print("CFG34_LOSS_ROOT_CAUSE",json.dumps(audit),flush=True)
     # Explain losses using generated trades only; no historical bot logs.
     # Report every configuration by symbol, direction, and UTC entry-hour,
     # plus MFE/MAE and fee burden. Holdout is diagnostic, never selection.
