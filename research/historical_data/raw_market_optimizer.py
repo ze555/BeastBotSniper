@@ -309,6 +309,20 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     elif mode=="breakout_confirmed":
         long=(c>prev_hi)&bullish&(trend15>0)&(trend60>0)&stretch
         short=(c<prev_lo)&bearish&(trend15<0)&(trend60<0)&stretch
+    elif mode in ("pullback_flow_accel","pullback_strong_close","pullback_trend_align"):
+        # Same baseline pullback setup, with alternative independent confirmation.
+        # Only already CLOSED signal/previous candles are consulted.
+        base_long=(trend60>0.003)&(trend15>0)&(ret5<0.002)&(c>hi5)&bullish&stretch
+        base_short=(trend60< -0.003)&(trend15<0)&(ret5> -0.002)&(c<lo5)&bearish&stretch
+        if mode=="pullback_flow_accel":
+            long=base_long&(flow5-flow_lag3>=0.04)&(flow5>=flow_prev+0.01)
+            short=base_short&(flow5-flow_lag3<=-0.04)&(flow5<=flow_prev-0.01)
+        elif mode=="pullback_strong_close":
+            long=base_long&(close_loc>=0.85)&(delta>=0.30)&(qv>=avg*1.6)
+            short=base_short&(close_loc<=0.15)&(delta<=-0.30)&(qv>=avg*1.6)
+        else:
+            long=base_long&(trend15>=0.002)&(flow15>=0.06)
+            short=base_short&(trend15<=-0.002)&(flow15<=-0.06)
     elif mode=="pullback_resume":
         # A short countertrend retracement followed by renewed taker flow.
         long=(trend60>0.003)&(trend15>0)&(ret5<0.002)&(c>hi5)&bullish&stretch
@@ -665,6 +679,34 @@ def main():
                     if key in v:v[key]=round(v[key],3)
         (out/"cfg34_loss_root_cause.json").write_text(json.dumps(audit,indent=2),encoding="utf-8")
         print("CFG34_LOSS_ROOT_CAUSE",json.dumps(audit),flush=True)
+    # Entry confirmation experiments: full signal generation + real portfolio
+    # concurrency, not fixed-entry counterfactuals. Select on development ONLY.
+    entry_variants=[]
+    for entry_mode in ("pullback_resume","pullback_flow_accel",
+                       "pullback_strong_close","pullback_trend_align"):
+        for exit_style in ("staged","atr_guard"):
+            entry={"mode":entry_mode,"lookback":10,"vol_mult":1.3,"delta":0.2}
+            rows=[]
+            for symbol,(df,fund) in data.items():
+                rows.extend(gen_trades(symbol,df,fund,entry,1.6,exit_style))
+            rows=portfolio(rows)
+            dev=[t for t in rows if t["entry_ms"]<train_end]
+            val=[t for t in rows if train_end<=t["entry_ms"]<val_end]
+            hold=[t for t in rows if t["entry_ms"]>=val_end]
+            result={"entry_mode":entry_mode,"exit":exit_style,
+                    "development":metrics(dev),"validation":metrics(val),
+                    "holdout":metrics(hold)}
+            entry_variants.append(result)
+            print("ENTRY_CONFIRM",json.dumps(result),flush=True)
+    # No holdout information is used to select a candidate.
+    ranked=sorted(entry_variants,key=lambda x:(
+        x["development"]["net_r"]-0.4*x["development"]["max_dd_r"],
+        x["development"]["profit_factor"]),reverse=True)
+    entry_report={"variants":entry_variants,
+        "selected_on_development_only":ranked[0] if ranked else None,
+        "warning":"Out-of-sample periods are diagnostic only; all variants need walk-forward and forward testing before deployment."}
+    (out/"cfg34_entry_confirmation.json").write_text(json.dumps(entry_report,indent=2),encoding="utf-8")
+    print("ENTRY_CONFIRM_WINNER",json.dumps(ranked[0] if ranked else None),flush=True)
     # Explain losses using generated trades only; no historical bot logs.
     # Report every configuration by symbol, direction, and UTC entry-hour,
     # plus MFE/MAE and fee burden. Holdout is diagnostic, never selection.
