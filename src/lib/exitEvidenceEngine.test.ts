@@ -20,6 +20,11 @@ const confirmed = evaluateExitEvidence(base);
 assert.equal(confirmed.action, "EXIT");
 assert.ok(confirmed.score >= 6);
 
+// Score ceiling must match the nine independently countable evidence points.
+const maximumEvidence = evaluateExitEvidence({ ...base, hiddenFlowAgainst: true });
+assert.equal(maximumEvidence.score, 9);
+assert.equal(maximumEvidence.maxScore, 9);
+
 // A single broken EMA/structure without aligned flow is not enough to exit.
 const structureOnly = evaluateExitEvidence({
   ...base,

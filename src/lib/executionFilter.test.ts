@@ -87,16 +87,16 @@ console.log("=======================================================");
 {
   // Toxic hours blocked
   const resHour13 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 13 });
-  assert(resHour13.blocked === true && resHour13.reason?.includes("toxic hour 13:00 UTC"), "Entry blocked at 13:00 UTC (London/NY overlap chop)");
+  assert(resHour13.blocked === true && Boolean(resHour13.reason?.includes("toxic hour 13:00 UTC")), "Entry blocked at 13:00 UTC (London/NY overlap chop)");
 
   const resHour18 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 18 });
-  assert(resHour18.blocked === true && resHour18.reason?.includes("toxic hour 18:00 UTC"), "Entry blocked at 18:00 UTC (Late NY liquidation chop)");
+  assert(resHour18.blocked === true && Boolean(resHour18.reason?.includes("toxic hour 18:00 UTC")), "Entry blocked at 18:00 UTC (Late NY liquidation chop)");
 
   const resHour05 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 5 });
-  assert(resHour05.blocked === true && resHour05.reason?.includes("toxic hour 5:00 UTC"), "Entry blocked at 05:00 UTC (Asia end chop)");
+  assert(resHour05.blocked === true && Boolean(resHour05.reason?.includes("toxic hour 5:00 UTC")), "Entry blocked at 05:00 UTC (Asia end chop)");
 
   const resHour06 = evaluateExecutionFilter("SHORT", "BEAR_WEAK", "TREND_DOWN", { hourUtc: 6 });
-  assert(resHour06.blocked === true && resHour06.reason?.includes("toxic hour 6:00 UTC"), "Entry blocked at 06:00 UTC");
+  assert(resHour06.blocked === true && Boolean(resHour06.reason?.includes("toxic hour 6:00 UTC")), "Entry blocked at 06:00 UTC");
 
   // Golden hours allowed
   const resHour12 = evaluateExecutionFilter("LONG", "BULL_STRONG", "TREND_UP", { hourUtc: 12 });
@@ -112,11 +112,11 @@ console.log("=======================================================");
 {
   // Dead chop with RVOL < 1.2 is blocked
   const resLowVol = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 0.8, adx: 25 });
-  assert(resLowVol.blocked === true && resLowVol.reason?.includes("RVOL"), "Dead chop in RANGE blocked when RVOL < 1.20");
+  assert(resLowVol.blocked === true && Boolean(resLowVol.reason?.includes("RVOL")), "Dead chop in RANGE blocked when RVOL < 1.20");
 
   // Dead chop with ADX < 18 is blocked
   const resLowAdx = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.5, adx: 12 });
-  assert(resLowAdx.blocked === true && resLowAdx.reason?.includes("ADX"), "Dead chop in RANGE blocked when ADX < 18");
+  assert(resLowAdx.blocked === true && Boolean(resLowAdx.reason?.includes("ADX")), "Dead chop in RANGE blocked when ADX < 18");
 
   // Pre-breakout with high RVOL and ADX is allowed
   const resGoodRange = evaluateExecutionFilter("SHORT", "BULL_WEAK", "RANGE", { rvol: 1.6, adx: 24 });
