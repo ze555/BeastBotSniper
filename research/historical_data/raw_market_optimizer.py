@@ -707,6 +707,46 @@ def main():
         "warning":"Out-of-sample periods are diagnostic only; all variants need walk-forward and forward testing before deployment."}
     (out/"cfg34_entry_confirmation.json").write_text(json.dumps(entry_report,indent=2),encoding="utf-8")
     print("ENTRY_CONFIRM_WINNER",json.dumps(ranked[0] if ranked else None),flush=True)
+    # Diagnose signal quality without removing trades or fitting thresholds.
+    # Features are read at the already CLOSED signal candle (entry is next open).
+    if baseline is not None:
+        feature_rows=[]
+        lookup={sym:{int(t):i for i,t in enumerate(df.t.to_numpy())} for sym,(df,_) in data.items()}
+        for t in trade_rows.get("34",[]):
+            sym=t["symbol"]; df=data[sym][0]
+            j=lookup[sym].get(int(t["entry_ms"]))
+            if j is None or j<1: continue
+            i=j-1
+            def safe(name):
+                v=float(getattr(df,name).iloc[i])
+                return round(v,7) if math.isfinite(v) else None
+            feature_rows.append({"symbol":sym,"side":t["side"],
+                "split":"development" if t["entry_ms"]<train_end else
+                    ("validation" if t["entry_ms"]<val_end else "holdout"),
+                "entry_ms":t["entry_ms"],"net_r":round(float(t["net_r"]),5),
+                "mfe_r":round(float(t["mfe_r"]),5),
+                "delta":safe("delta"),"flow5":safe("flow5"),
+                "flow15":safe("flow15"),"trend15":safe("trend15"),
+                "trend60":safe("trend60"),"ret5":safe("ret5"),
+                "volume_multiple":round(float(df.qv.iloc[i])/max(float(df.avgqv.iloc[i]),1e-12),5)})
+        feature_report={"warning":"Descriptive analysis only; no filter thresholds selected on holdout.",
+            "features":feature_rows,"development_feature_quartiles":{}}
+        dev_features=[x for x in feature_rows if x["split"]=="development"]
+        for key in ("delta","flow5","flow15","trend15","trend60","ret5","volume_multiple"):
+            values=np.array([x[key] for x in dev_features if x[key] is not None],dtype=float)
+            if len(values)<8: continue
+            cuts=np.quantile(values,[0,.25,.5,.75,1])
+            buckets=[]
+            for k in range(4):
+                subset=[x for x in dev_features if x[key] is not None and
+                    (cuts[k]<=x[key]<(cuts[k+1]) if k<3 else cuts[k]<=x[key]<=cuts[k+1])]
+                buckets.append({"quartile":k+1,"lower":round(float(cuts[k]),6),
+                    "upper":round(float(cuts[k+1]),6),"metrics":metrics([
+                    t for t in trade_rows["34"] if any(x["entry_ms"]==t["entry_ms"] and
+                    x["symbol"]==t["symbol"] and x["side"]==t["side"] for x in subset)])})
+            feature_report["development_feature_quartiles"][key]=buckets
+            print("ENTRY_FEATURE_AUDIT",key,json.dumps(buckets),flush=True)
+        (out/"cfg34_signal_feature_audit.json").write_text(json.dumps(feature_report,indent=2),encoding="utf-8")
     # Explain losses using generated trades only; no historical bot logs.
     # Report every configuration by symbol, direction, and UTC entry-hour,
     # plus MFE/MAE and fee burden. Holdout is diagnostic, never selection.
