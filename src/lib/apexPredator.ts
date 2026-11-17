@@ -1,3 +1,5 @@
+import { STRATEGY_REVISION, closedCandles, tightenStop, markTrade, waveEvidence } from "./tradingIntegrity.js";
+import { fetchExecutionQuote } from "./executionQuotes.js";
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult, evaluateInstitutionalTradeGuard, InstitutionalGuardResult } from "./reasoningEngine.js";
@@ -24,6 +26,17 @@ let todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
 let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
+let protectionInterval: NodeJS.Timeout | null = null;
+let protectionRunning = false;
+const diagnostics = { quoteErrors: 0, protectionCycles: 0, lastProtectionAt: 0, opened: 0, waveAccepted: 0, waveRejected: 0, rangeShadow: 0, lastReason: "", reasons: {} as Record<string, number> };
+const candidateAudit: any[] = [];
+function recordCandidate(symbol: string, side: string, reason: string, allowed: boolean) {
+   diagnostics.lastReason = reason;
+   diagnostics.reasons[reason] = (diagnostics.reasons[reason] || 0) + 1;
+   candidateAudit.unshift({time: new Date().toISOString(), revision: STRATEGY_REVISION, symbol, side, reason, allowed});
+   if (candidateAudit.length > 200) candidateAudit.pop();
+}
+export function getCandidateAudit() { return candidateAudit; }
 
 // ═══ ANTI-CHURN COOLDOWN SYSTEM ═══
 // Prevents rapid repetitive entries and micro-churn fee burn on the same symbol
@@ -201,6 +214,10 @@ export function getStats() {
 
   return { 
     ...apexPredatorStats,
+    strategyRevision: STRATEGY_REVISION,
+    executionMode: "PAPER",
+    strategyMode: "WAVE_ONLY_RANGE_OBSERVATION",
+    diagnostics,
     balance: virtualBalance,
     initialBalance: initialVirtualBalance,
     maxOpenTrades: maxOpenTradesConfig,
@@ -402,10 +419,10 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
    else if (interval === "5m") ttl = 10000;
 
    const res = await axios.get(`${BINANCE_FAPI}/fapi/v1/klines`, {
-      params: { symbol, interval, limit },
+      params: { symbol, interval, limit: limit + 1 },
       timeout: 5000
    });
-   const parsed = res.data.map((k: any) => ({
+   const parsed = closedCandles(res.data.map((k: any) => ({
       openTime: k[0],
       open: parseFloat(k[1]),
       high: parseFloat(k[2]),
@@ -415,7 +432,7 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
       closeTime: k[6],
       takerBuy: parseFloat(k[9]),
       takerSell: parseFloat(k[5]) - parseFloat(k[9]) // volume - taker buy = taker sell
-   }));
+   }))).slice(-limit);
 
    setCached(klineCache, cacheKey, parsed, ttl);
    return parsed;
@@ -547,9 +564,9 @@ async function getContext() {
 
 // --- SEC 2: WHALE READER ---
 async function readWhale(symbol: string, btc_chg: number) {
-   const c15 = await fetchKl(symbol, "15m", 210);
-   const c5 = await fetchKl(symbol, "5m", 30);
-   const c4h = await fetchKl(symbol, "4h", 20);
+   const [c15, c5, c4h] = await Promise.all([
+      fetchKl(symbol, "15m", 210), fetchKl(symbol, "5m", 30), fetchKl(symbol, "4h", 20)
+   ]);
 
    if (c15.length < 20 || c5.length < 15 || c4h.length < 10) {
       throw new Error("Insufficient klines for whale reader");
@@ -582,7 +599,9 @@ async function readWhale(symbol: string, btc_chg: number) {
 
    const oiData = await fetchOI(symbol, "15m", 4);
    let oi_chg = 0;
-   if (oiData && oiData.length >= 4) {
+   const oiTime = Number(oiData?.[oiData.length - 1]?.timestamp);
+   const oiAvailable = oiData?.length >= 4 && Number.isFinite(oiTime) && Date.now() - oiTime < 20 * 60_000 && oiTime <= Date.now() + 1000 && oiData.every((o: any) => Number(o.sumOpenInterest) > 0);
+   if (oiAvailable) {
       const oi0 = parseFloat(oiData[oiData.length-1].sumOpenInterest);
       const oi3 = parseFloat(oiData[0].sumOpenInterest);
       oi_chg = (oi0 - oi3) / oi3;
@@ -609,13 +628,13 @@ async function readWhale(symbol: string, btc_chg: number) {
       triple_bull, triple_bear, cvd_mixed,
       hidden_buy: slope15 < 0 && pressure > 0,
       hidden_sell: slope15 > 0 && pressure < 0,
-      scenario, oi_chg, p_chg, fund,
+      scenario, oi_chg, oiAvailable, p_chg, fund,
       f_danger: Math.abs(fund) > 0.07/100,
       f_gold_long: fund < -0.03/100,
       f_gold_short: fund > 0.04/100,
       strong_acc: pressure > avgVol * 2.0,
       strong_dis: pressure < -avgVol * 2.0,
-      asset_strong, c15, c5, slope5, slope15
+      asset_strong, c15, c5, slope5, slope15, slope4h
    };
 }
 
@@ -744,6 +763,7 @@ async function scoreEntry(symbol: string, ctx: any) {
    let earlyReason = null;
    if (!ctx.tradeable) earlyReason = "BLOCKED";
    else if (!isLibyaTradingAllowed()) earlyReason = "OUTSIDE_LIBYA_HOURS";
+   else if (!w.oiAvailable) earlyReason = "OI_UNAVAILABLE";
    else if (w.cvd_mixed) earlyReason = "CVD Mixed";
    else if (w.f_danger) earlyReason = "Funding Danger";
    else if (p.rvol > 5.0) earlyReason = "RVOL Crazy";
@@ -1178,21 +1198,37 @@ async function scoreEntry(symbol: string, ctx: any) {
 }
 
 // --- SEC 5: EXECUTION ---
-function executeTrade(symbol: string, decision: any) {
+async function executeTrade(symbol: string, decision: any) {
    if (isSymbolInCooldown(symbol)) {
       addLog(`⏳ [تبريد رمزي] تم تخطي تنفيذ صفقة على ${symbol} لأن الرمز يخضع لفترة تهدئة بعد إغلاق سابق لمنع التكرار وحرق الرسوم.`, 'info');
       return;
    }
 
    const { p, w, score, grade, setupType, ctx, reasoning } = decision;
+   if (reasoning?.regime === "RANGE" || reasoning?.triRegime?.setupClass === "RANGE_MEAN_REVERSION") {
+      diagnostics.rangeShadow++;
+      recordCandidate(symbol, decision.signal, "RANGE_OBSERVATION_ONLY", false);
+      return;
+   }
+   let quote;
+   try { quote = await fetchExecutionQuote(symbol); }
+   catch { diagnostics.quoteErrors++; recordCandidate(symbol, decision.signal, "QUOTE_UNAVAILABLE", false); return; }
+   if (!botActive || activeTrades.some(t => t.symbol === symbol) || isSymbolInCooldown(symbol)) return;
+   const evidence = waveEvidence(decision.signal, w.c5, quote, p.atr14, feeRate, slippageRate);
+   recordCandidate(symbol, decision.signal, evidence.reason, evidence.allowed);
+   if (!evidence.allowed) { diagnostics.waveRejected++; return; }
+   diagnostics.waveAccepted++;
+   // Buy at ask / sell at bid, then model entry slippage as well as exit slippage.
+   p.price = decision.signal === "LONG" ? quote.ask * (1 + slippageRate) : quote.bid * (1 - slippageRate);
+
    // Apexv2-inspired completed-candle trap gate. Confirm a failed liquidity
    // sweep AND opposing institutional flow; never reject on wick alone.
-   // Use completed 15m candle (-2), not the still-forming latest candle.
+   // fetchKl provides only completed candles; use the newest one.
    const candles = p?.klines;
    if (Array.isArray(candles) && candles.length >= 4) {
-      const last = candles[candles.length - 2];
-      const a = candles[candles.length - 3];
-      const b = candles[candles.length - 4];
+      const last = candles[candles.length - 1];
+      const a = candles[candles.length - 2];
+      const b = candles[candles.length - 3];
       const high = Math.max(Number(a.high), Number(b.high));
       const low = Math.min(Number(a.low), Number(b.low));
       const close = Number(last.close);
@@ -1209,7 +1245,11 @@ function executeTrade(symbol: string, decision: any) {
    // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
    const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
    const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   const openRisk = activeTrades.reduce((sum, t) => sum + Math.max(0,
+      (t.direction === "LONG" ? t.entry - t.sl : t.sl - t.entry) * t.pos + t.entry * t.pos * 2 * (feeRate + slippageRate)), 0);
+   const riskBudget = Math.max(0, initialVirtualBalance * MAX_DAILY_LOSS + Math.min(0, todaysStats.pnl) - openRisk);
+   const riskAmt = Math.min(virtualBalance * grade.risk * grade.mult * regimeRiskMult, riskBudget);
+   if (!(riskAmt > 0)) { recordCandidate(symbol, decision.signal, "PORTFOLIO_RISK_BUDGET", false); return; }
    if (regimeRiskMult < 1.0) {
       addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
    }
@@ -1252,14 +1292,14 @@ function executeTrade(symbol: string, decision: any) {
       const maxMarginCap = virtualBalance * 0.15;
       const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
 
-      let pos = riskAmt / realSlDist;
+      let pos = riskAmt / (realSlDist + entry * 2 * (feeRate + slippageRate));
       if (pos > maxPosCap) {
          addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
          pos = maxPosCap;
       }
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
-         symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
+         symbol, strategyRevision: STRATEGY_REVISION, executionMode: "PAPER", direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
@@ -1286,6 +1326,7 @@ function executeTrade(symbol: string, decision: any) {
          }
       };
       activeTrades.push(newTrade);
+      diagnostics.opened++;
       registerTradeForDirectionTracking(newTrade);
       addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    } else {
@@ -1323,14 +1364,14 @@ function executeTrade(symbol: string, decision: any) {
       const maxMarginCap = virtualBalance * 0.15;
       const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
 
-      let pos = riskAmt / realSlDist;
+      let pos = riskAmt / (realSlDist + entry * 2 * (feeRate + slippageRate));
       if (pos > maxPosCap) {
          addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
          pos = maxPosCap;
       }
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
-         symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
+         symbol, strategyRevision: STRATEGY_REVISION, executionMode: "PAPER", direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
          part_a: 0.40, part_b: 0.35, part_c: 0.25,
@@ -1357,6 +1398,7 @@ function executeTrade(symbol: string, decision: any) {
          }
       };
       activeTrades.push(newTrade);
+      diagnostics.opened++;
       registerTradeForDirectionTracking(newTrade);
       addLog(`✅ SHORT ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | النقاط: ${score.toFixed(1)}/10`, "success");
    }
@@ -1365,10 +1407,18 @@ function executeTrade(symbol: string, decision: any) {
 // --- SEC 6: EXIT BRAIN ---
 async function exitBrain(trade: any, ctx: any) {
    const t = trade;
-   const w = await readWhale(t.symbol, 0); // Fast check
-   const p = await readPrice(t.symbol, w.c15);
-   
-   const price = p.price;
+   // Hard protection is independent of BTC context and slow indicator requests.
+   const before = await fetchExecutionQuote(t.symbol);
+   protectTradeAtPrice(t, t.direction === "LONG" ? before.bid : before.ask, before.time);
+   if (!activeTrades.includes(t)) return;
+   const w = await readWhale(t.symbol, 0);
+   const p = await readPrice(t.symbol, w.c15, w.c5);
+   const quote = await fetchExecutionQuote(t.symbol);
+   if (!activeTrades.includes(t) || quote.time < (t.lastQuoteTime || 0)) return;
+   const price = t.direction === "LONG" ? quote.bid : quote.ask;
+   protectTradeAtPrice(t, price, quote.time);
+   if (!activeTrades.includes(t)) return;
+   p.price = price;
    t.currentPrice = price;
 
    const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
@@ -1487,7 +1537,7 @@ async function exitBrain(trade: any, ctx: any) {
    // بدلاً من خنق الصفقة وسحب الوقف لنقطة الدخول فوراً عند +0.35R (مما يخرج الصفقة بربح سنتات عند أي تذبذب طبيعي)،
    // نقوم بتقليص المخاطرة بنسبة 75% عند +0.45R برفع الوقف إلى -0.25R فقط وترك مسافة كافية للوصول للأهداف الكبرى TP1 و TP2!
    if (!t.micro_banked && profitR >= 0.45) {
-      t.sl = t.direction === "LONG" ? t.entry - (slDist * 0.25) : t.entry + (slDist * 0.25);
+      tightenStop(t, t.direction === "LONG" ? t.entry - (slDist * 0.25) : t.entry + (slDist * 0.25));
       t.micro_banked = true;
       addLog(`🛡️ [تأمين تدريجي مرن] ${t.symbol} حقق +${profitR.toFixed(2)}R | تم رفع الوقف لتقليص المخاطرة إلى -0.25R مع إبقاء مساحة للتنفس حتى TP1!`, 'info');
    }
@@ -1517,13 +1567,13 @@ async function exitBrain(trade: any, ctx: any) {
       if (profitR >= TP1_R) {
          closePart(t, "A", t.part_a);
          // Move SL to Entry + 0.30R (Model B: secures profit floor on remaining 60%)
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30);
+         tightenStop(t, t.direction === "LONG" ? t.entry + (slDist * 0.30) : t.entry - (slDist * 0.30));
          t.a_closed = true; 
          t.be_done = true;
          addLog(`🎯 هدف أول (40%) ${t.symbol} | +${TP1_R}R | 🛡️ تم نقل الوقف لمستوى +0.30R (حماية أرباح الكمية المتبقية)`, 'success');
       } else if ((exhaust >= 5 || peak >= 5) && profitR > 0.35) {
          closePart(t, "A", t.part_a);
-         t.sl = t.entry;
+         tightenStop(t, t.entry);
          t.a_closed = true;
          t.be_done = true;
          addLog(`🎯 تأمين مبكر ${t.symbol} لرصد ارتداد | تم تحريك الوقف للدخول`, 'info');
@@ -1543,7 +1593,7 @@ async function exitBrain(trade: any, ctx: any) {
          closePart(t, "B", t.part_b);
          t.b_closed = true;
          // Lock in TP1 level as floor profit
-         t.sl = t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R);
+         tightenStop(t, t.direction === "LONG" ? t.entry + (slDist * TP1_R) : t.entry - (slDist * TP1_R));
          addLog(`🎯 هدف ثانٍ (35%) ${t.symbol} | +${TP2_R}R | تم حجز الأرباح ورفع الوقف لمستوى +${TP1_R}R`, 'success');
       } else if ((exhaust >= 7 || peak >= 7) && profitR > 1.2) {
          closePart(t, "B", t.part_b);
@@ -1631,7 +1681,8 @@ async function exitBrain(trade: any, ctx: any) {
 function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close - klines[klines.length-1].open); }
 
 function closePart(t: any, part: string, pct: number) {
-   const size = t.initialPos * pct;
+   if (!activeTrades.includes(t) || t.pos <= 0) return;
+   const size = Math.min(t.pos, t.initialPos * pct);
    t.pos -= size;
    
    // Effective exit price with simulated slippage
@@ -1649,6 +1700,7 @@ function closePart(t: any, part: string, pct: number) {
 }
 
 function closeTradeFull(t: any, reason: string = "") {
+   if (!activeTrades.includes(t) || t.exitTime) return;
    if (t.pos > 0) {
       const effectiveExitPrice = t.direction === "LONG"
          ? t.currentPrice * (1 - slippageRate)
@@ -1705,13 +1757,17 @@ export async function runApexLoop() {
    isLoopRunning = true;
    try {
       resetDailyStatsIfNeeded();
-      await updateDynamicWatchlist();
-      const ctx = await getContext();
+      await runProtectionCycle();
+      let ctx;
+      try { ctx = await getContext(); }
+      catch (e: any) { addLog(`Entry paused: BTC context unavailable: ${e.message}`, "warn"); return; }
       
       // Manage open trades FIRST (Always runs, updating fresh mark-to-market prices, exits, and fees)
-      for (const t of activeTrades) {
-         await exitBrain(t, ctx);
+      for (const t of [...activeTrades]) {
+         try { await exitBrain(t, ctx); }
+         catch (e: any) { addLog(`Exit evidence unavailable for ${t.symbol}: ${e.message}; price protection remains active`, "warn"); }
       }
+      await updateDynamicWatchlist();
 
       // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
       let totalFloatingPnl = 0;
@@ -1806,7 +1862,7 @@ export async function runApexLoop() {
                if (!canOpenMore()) break;
                if (activeTrades.some(t => t.symbol === sym)) continue;
                if (dec.signal === "LONG" || dec.signal === "SHORT") {
-                  executeTrade(sym, dec);
+                  await executeTrade(sym, dec);
                }
             }
          }
@@ -1856,7 +1912,7 @@ export async function runApexLoop() {
                if (!canOpenMore()) break;
                if (activeTrades.some(t => t.symbol === sym)) continue;
                if (dec.signal === "LONG" || dec.signal === "SHORT") {
-                  executeTrade(sym, dec);
+                  await executeTrade(sym, dec);
                }
             }
          }
@@ -1869,8 +1925,52 @@ export async function runApexLoop() {
 }
 
 export function startEngine() {
+   if (protectionInterval) clearInterval(protectionInterval);
+   protectionInterval = setInterval(() => { void runProtectionCycle(); }, 2000);
    if (watcherInterval) clearInterval(watcherInterval);
    watcherInterval = setInterval(runApexLoop, 15 * 1000); // Check every 15 seconds for ultra-responsive breakout inception
    runApexLoop();
-   addLog("Apex Predator Engine Started with Fast Momentum Scanner (15s Cadence) & Pullback Sniper", "success");
+   addLog(`${STRATEGY_REVISION}: paper wave entries, range observation, independent 2s price protection`, "success");
+}
+
+/** Continues managing existing paper positions even when new entries are paused. */
+export function protectTradeAtPrice(t: any, price: number, quoteTime = Date.now()) {
+   if (!Number.isFinite(quoteTime) || Date.now() - quoteTime > 5000 || quoteTime > Date.now() + 1000 || quoteTime < (t.lastQuoteTime || 0)) return;
+   if (!Number.isFinite(price) || price <= 0 || !(t.initialSlDist > 0)) return;
+   if (!activeTrades.includes(t) || t.exitTime || t.pos <= 0) return;
+   t.lastQuoteTime = quoteTime;
+   if (markTrade(t, price, feeRate, slippageRate)) {
+      closeTradeFull(t, t.be_done ? "Protected Stop Hit" : "SL Hit");
+      return;
+   }
+   if (!Number.isFinite(price) || price <= 0) return;
+   const sign = t.direction === "LONG" ? 1 : -1;
+   const floor = (r: number) => tightenStop(t, t.entry + sign * t.initialSlDist * r);
+   if (t.peak_r >= .45) { floor(-.25); t.micro_banked = true; }
+   if (t.peak_r >= .50) floor(-.15);
+   if (!t.a_closed && t.profitR >= TP1_R) {
+      closePart(t, "A", t.part_a); t.a_closed = true; t.be_done = true; floor(.30);
+   }
+   if (t.a_closed && t.peak_r >= 1.15) floor(.60);
+   if (!t.b_closed && t.a_closed && t.profitR >= TP2_R) {
+      closePart(t, "B", t.part_b); t.b_closed = true; floor(TP1_R);
+   }
+   if (t.b_closed && t.profitR >= TP3_R) {
+      closeTradeFull(t, "TP3 Full Target Hit"); return;
+   }
+   if (markTrade(t, price, feeRate, slippageRate)) closeTradeFull(t, "Protected Stop Hit");
+}
+export async function runProtectionCycle() {
+   if (protectionRunning || activeTrades.length === 0) return;
+   protectionRunning = true;
+   try {
+      await Promise.allSettled([...activeTrades].map(async t => {
+         try {
+            const q = await fetchExecutionQuote(t.symbol);
+            protectTradeAtPrice(t, t.direction === "LONG" ? q.bid : q.ask, q.time);
+         } catch { diagnostics.quoteErrors++; }
+      }));
+      diagnostics.protectionCycles++;
+      diagnostics.lastProtectionAt = Date.now();
+   } finally { protectionRunning = false; }
 }

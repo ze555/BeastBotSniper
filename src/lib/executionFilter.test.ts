@@ -6,7 +6,7 @@ import { evaluateExecutionFilter } from "./apexPredator.js";
 let passedCount = 0;
 let failedCount = 0;
 
-function assert(condition: boolean, testName: string, failureDetails?: string) {
+function assert(condition: boolean | undefined, testName: string, failureDetails?: string) {
   if (condition) {
      console.log(`✅ [PASS] ${testName}`);
      passedCount++;
