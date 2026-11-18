@@ -275,10 +275,10 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
   if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
-      input.previousDirection === "LONG" && longFlow && !longExhaustion) {
+      input.previousDirection === "LONG" && longFlow && !opposingLongMicroflow && !longExhaustion) {
     state = "CONTINUATION"; direction = "LONG"; reason = "Bullish Futures impulse remains active; manage the existing wave, do not chase a fresh entry.";
   } else if ((input.previousState === "BREAKOUT_CONFIRMED" || input.previousState === "CONTINUATION") &&
-      input.previousDirection === "SHORT" && shortFlow && !shortExhaustion) {
+      input.previousDirection === "SHORT" && shortFlow && !opposingShortMicroflow && !shortExhaustion) {
     state = "CONTINUATION"; direction = "SHORT"; reason = "Bearish Futures impulse remains active; manage the existing wave, do not chase a fresh entry.";
   } else if (longEarly && !longExhaustion) {
     state = longConfirmed ? "BREAKOUT_CONFIRMED" : "IGNITION";
@@ -298,10 +298,12 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
       : fastFlow
         ? "Early downside reversal ignition: the 1m price response and 30s executed selling turn against the prior 5m buying pressure."
         : "Early downside ignition: 5m/1m Futures selling and negative price response align; Spot is not consulted.";
-  } else if ((longFlow || shortFlow) && (volumeSurge || fastFlow || compressedBefore)) {
+  } else if ((longFlow && !opposingLongMicroflow || shortFlow && !opposingShortMicroflow) && (volumeSurge || fastFlow || compressedBefore)) {
     state = "PRE_IGNITION";
     direction = longFlow ? "LONG" : "SHORT";
     reason = "A directional Futures pressure build is forming; keep on the violent-wave watchlist, but entry trigger is not complete.";
+  } else if (opposingLongMicroflow && longFlow || opposingShortMicroflow && shortFlow) {
+    state = "CONFLICTED"; reason = "Fresh adverse 30s executed flow and price response invalidate the older directional signal; wait for renewed confirmation.";
   } else if (longExhaustion || shortExhaustion) {
     state = "EXHAUSTION_WARNING"; reason = "Funding crowding and weakening Futures aggression indicate exhaustion risk.";
   } else if (longFlow && shortFlow) {
