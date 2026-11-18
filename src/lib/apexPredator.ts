@@ -16,6 +16,7 @@ import {
 import { evaluateExecutionFilter } from "./executionFilter.js";
 import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
 import { evaluateEntryQuality } from "./entryQualityEngine.js";
+import { apexEntryTrapGate, apexReversalExit } from "./apexV2PolicyBridge.js";
 import { evaluateReverseWave } from "./reverseWaveEngine.js";
 import { evaluateMarketAlignment } from "./marketAlignmentEngine.js";
 import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus, getFuturesBookFlow } from "./futuresWaveFeed.js";
@@ -882,6 +883,19 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: institutional.reason, p, w, ctx, institutional };
    }
 
+   // ApexV2 structural trap policy: reject a confirmed sweep against executed 15m flow.
+   // This supplements, never replaces, the institutional evidence chain.
+   const apexTrap = apexEntryTrapGate({
+      side: institutional.direction,
+      price: wavePrice,
+      candles: (w.c15 || []).slice(-3),
+      cvd15m: Number.isFinite(w.slope15) ? w.slope15 : null
+   });
+   if (!apexTrap.allowed) {
+      addLog(`⛔ ${symbol}: ${apexTrap.reason} (ApexV2 trap policy)`, "warn");
+      recordEntryRejection(symbol, institutional.direction, apexTrap.reason, p, w, ctx, { institutional, apexTrap });
+      return { signal: "WAIT", reason: apexTrap.reason, p, w, ctx, institutional };
+   }
    const direction = institutional.direction;
    if (direction === "LONG") apexPredatorStats.totalLongScanned++;
    else apexPredatorStats.totalShortScanned++;
@@ -1207,6 +1221,24 @@ async function exitBrain(trade: any, ctx: any) {
       })()
    });
 
+   // ApexV2 confirmed reversal: two completed 15m closes beyond EMA21,
+   // opposite 5m+15m CVD and a position that previously reached +0.45R.
+   // Do not act on absent candles, unavailable flow or a single noisy wick.
+   const apexCloses = (w.c15 || []).slice(-3, -1).map((c: any) => Number(c.close));
+   const apexEmaCloses = (w.c15 || []).slice(0, -1).map((c: any) => Number(c.close));
+   const apexEma21 = apexEmaCloses.length >= 21
+      ? calcEMA(apexEmaCloses, 21).pop() || null : null;
+   const apexExit = apexReversalExit({
+      side: t.direction, profitR, peakR: t.peak_r || 0, price,
+      ema21: apexEma21, lastTwoCloses: apexCloses,
+      cvd5m: Number.isFinite(w.slope5) ? w.slope5 : null,
+      cvd15m: Number.isFinite(w.slope15) ? w.slope15 : null
+   });
+   if (apexExit.exit) {
+      addLog(`🚨 [APEXV2 CONFIRMED REVERSAL] ${t.symbol} ${t.direction}: ${apexExit.reason}`, "warn");
+      closeTradeFull(t, apexExit.reason);
+      return;
+   }
    if (exitEvidence.action === "EXIT") {
       addLog(`🚨 [INSTITUTIONAL REVERSAL CONFIRMED] ${t.symbol} ${t.direction} at ${profitR.toFixed(2)}R | ${exitEvidence.reasons.join(" | ")}`, "warn");
       closeTradeFull(t, "Institutional Structure + Futures Flow Reversal");
