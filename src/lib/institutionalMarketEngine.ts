@@ -207,6 +207,19 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     (long5m && long1m && priceChange1m >= 0.0002);
   const shortFlow = (short1m && short30 && priceChange1m <= -0.0003 && (!fiveMinuteOpposesShort || shortReversal)) ||
     (short5m && short1m && priceChange1m <= -0.0002);
+  // Reject a stale 5m/1m trend when the latest sufficiently sampled 30s tape
+  // has flipped and the immediate price response confirms that flip.
+  // Missing 30s coverage is not interpreted as opposing flow.
+  const recent30sValid = finite(flow.trades30s) && flow.trades30s >= 5 &&
+    finite(flow.buyQuote30s) && finite(flow.sellQuote30s) &&
+    flow.buyQuote30s + flow.sellQuote30s >= flowMinNotional * 0.35;
+  const recent30sBuyShare = recent30sValid
+    ? flow.buyQuote30s! / Math.max(flow.buyQuote30s! + flow.sellQuote30s!, 1e-12) : null;
+  const price30s = finite(flow.priceChange30sPct) ? flow.priceChange30sPct : null;
+  const opposingLongMicroflow = recent30sBuyShare !== null && recent30sBuyShare <= 0.43 &&
+    (price30s === null || price30s < -0.0001);
+  const opposingShortMicroflow = recent30sBuyShare !== null && recent30sBuyShare >= 0.57 &&
+    (price30s === null || price30s > 0.0001);
   const longAbsorption = long1m && long30 && priceChange1m <= 0.0001;
   const shortAbsorption = short1m && short30 && priceChange1m >= -0.0001;
   const fastFlow = longReversal || shortReversal;
@@ -239,6 +252,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   if (shortLiquidation) evidenceFor.push("Downward price/flow and Binance force-order events confirm long liquidations during OI contraction.");
   if (bookOk && bookImbalance !== null && bookImbalance > 0.12) evidenceFor.push("Displayed bid depth is heavier; this supports LONG liquidity context only, not executed buying.");
   if (bookOk && bookImbalance !== null && bookImbalance < -0.12) evidenceFor.push("Displayed ask depth is heavier; this supports SHORT liquidity context only, not executed selling.");
+  if (opposingLongMicroflow) evidenceAgainst.push("Fresh 30s executed selling and price response oppose the proposed LONG entry.");
+  if (opposingShortMicroflow) evidenceAgainst.push("Fresh 30s executed buying and price response oppose the proposed SHORT entry.");
   if (longAbsorption) evidenceAgainst.push("Buy aggressors dominate 1m/30s but price is not advancing; possible passive offer absorption, not a confirmed long entry.");
   if (shortAbsorption) evidenceAgainst.push("Sell aggressors dominate 1m/30s but price is not declining; possible passive bid absorption, not a confirmed short entry.");
   if (bookOk && finite(input.orderBook!.askDepthChangePct) && input.orderBook!.askDepthChangePct < -15 && longFlow) evidenceFor.push("Sampled ask depth fell sharply during aggressive buying; possible offer depletion, but cancellations cannot be distinguished from fills.");
@@ -254,8 +269,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
   const executable = bookOk && liquidityQualified; // A fresh executable Futures depth snapshot remains mandatory before order placement.
-  const longEarly = longFlow && executable && priceChange1m > 0 && (volumeSurge || longBreak || fastFlow || compressedBefore);
-  const shortEarly = shortFlow && executable && priceChange1m < 0 && (volumeSurge || shortBreak || fastFlow || compressedBefore);
+  const longEarly = longFlow && !opposingLongMicroflow && executable && priceChange1m > 0 && (volumeSurge || longBreak || fastFlow || compressedBefore);
+  const shortEarly = shortFlow && !opposingShortMicroflow && executable && priceChange1m < 0 && (volumeSurge || shortBreak || fastFlow || compressedBefore);
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
