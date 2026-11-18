@@ -10,7 +10,10 @@ import {
    extractEntryTiming,
    extractMarketRegimeContext,
    registerTradeForDirectionTracking,
-   updateDirectionTracking
+   updateDirectionTracking,
+   loadBotState,
+   saveBotState,
+   getResearchStorageStatus
 } from "./researchLogger.js";
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
@@ -20,6 +23,7 @@ import { evaluateReverseWave } from "./reverseWaveEngine.js";
 import { evaluateMarketAlignment } from "./marketAlignmentEngine.js";
 import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus, getFuturesBookFlow } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
+import { calculateWaveStop, estimateNetRiskAtStop, capPositionToRiskBudget } from "./waveRiskEngine.js";
 export { evaluateExecutionFilter, evaluateTriRegimeExecution, detectMacroRegime };
 
 const BINANCE_FAPI = "https://fapi.binance.com";
@@ -30,6 +34,8 @@ let statsDay = new Date().toISOString().slice(0, 10);
 let botActive = false;
 let isLoopRunning = false;
 let riskLockLoggedAt = 0;
+let lastRuntimeStateSavedAt = 0;
+let runtimeStateDirty = false;
 
 // Symbol-level cooldowns are disabled. Re-entry is governed by fresh wave evidence,
 // active-position checks, structural invalidation and execution feasibility.
@@ -52,18 +58,18 @@ let lastWatchlistUpdate = 0;
 let lastHotWatchlistUpdate = 0;
 
 
-const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 1.00;
 const TP2_R = 2.00;
 const TP3_R = 3.50;
-const MAX_OPEN_TRADES = 6;
+const MAX_OPEN_TRADES = 10;
 const MAX_DAILY_LOSS = 0.040;
+const MAX_PORTFOLIO_OPEN_RISK = 0.030;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
 const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
-let maxOpenTradesConfig = 6;
+let maxOpenTradesConfig = MAX_OPEN_TRADES;
 
 // New Config
 let haltProfitEnabled = false;
@@ -106,6 +112,76 @@ let apexPredatorStats: any = {
   }
 };
 
+// Restore the paper account after process restarts when the configured storage path is persistent.
+const restoredBotState = loadBotState();
+if (restoredBotState?.schema_version === 1) {
+   if (Number.isFinite(restoredBotState.virtualBalance) && restoredBotState.virtualBalance > 0) virtualBalance = restoredBotState.virtualBalance;
+   if (Number.isFinite(restoredBotState.initialVirtualBalance) && restoredBotState.initialVirtualBalance > 0) initialVirtualBalance = restoredBotState.initialVirtualBalance;
+   if (Array.isArray(restoredBotState.activeTrades)) {
+      activeTrades = restoredBotState.activeTrades.filter((trade: any) =>
+         trade && typeof trade.symbol === "string" &&
+         (trade.direction === "LONG" || trade.direction === "SHORT") &&
+         Number.isFinite(Number(trade.entry)) && Number(trade.entry) > 0 &&
+         Number.isFinite(Number(trade.pos)) && Number(trade.pos) > 0 &&
+         Number.isFinite(Number(trade.sl)) && Number(trade.sl) > 0
+      );
+   }
+   if (Array.isArray(restoredBotState.closedTrades)) closedTrades = restoredBotState.closedTrades.slice(0, 150);
+   if (restoredBotState.todaysStats && typeof restoredBotState.todaysStats === "object") {
+      todaysStats = {
+         count: Number(restoredBotState.todaysStats.count) || 0,
+         wins: Number(restoredBotState.todaysStats.wins) || 0,
+         losses: Number(restoredBotState.todaysStats.losses) || 0,
+         pnl: Number(restoredBotState.todaysStats.pnl) || 0,
+         sumR: Number(restoredBotState.todaysStats.sumR) || 0
+      };
+   }
+   if (typeof restoredBotState.statsDay === "string") statsDay = restoredBotState.statsDay;
+   lastRuntimeStateSavedAt = Number.isFinite(Date.parse(restoredBotState.saved_at)) ? Date.parse(restoredBotState.saved_at) : 0;
+   if (typeof restoredBotState.botActive === "boolean") botActive = restoredBotState.botActive;
+   if (restoredBotState.config && typeof restoredBotState.config === "object") {
+      const c = restoredBotState.config;
+      if (Number.isFinite(c.maxOpenTradesConfig) && c.maxOpenTradesConfig >= 1) maxOpenTradesConfig = c.maxOpenTradesConfig;
+      if (typeof c.haltProfitEnabled === "boolean") haltProfitEnabled = c.haltProfitEnabled;
+      if (Number.isFinite(c.haltProfitTarget)) haltProfitTarget = c.haltProfitTarget;
+      if (typeof c.haltLossEnabled === "boolean") haltLossEnabled = c.haltLossEnabled;
+      if (Number.isFinite(c.haltLossTarget)) haltLossTarget = c.haltLossTarget;
+      if (typeof c.smartBtcHoldEnabled === "boolean") smartBtcHoldEnabled = c.smartBtcHoldEnabled;
+      if (typeof c.btcVolThresholdStr === "string") btcVolThresholdStr = c.btcVolThresholdStr;
+      if (Number.isFinite(c.slAtrMultiplier)) slAtrMultiplier = c.slAtrMultiplier;
+      if (typeof c.geniusMode === "boolean") geniusMode = c.geniusMode;
+      if (typeof c.pullbackSniperEnabled === "boolean") pullbackSniperEnabled = c.pullbackSniperEnabled;
+      if (typeof c.freeTradeSlotEnabled === "boolean") freeTradeSlotEnabled = c.freeTradeSlotEnabled;
+      if (Number.isFinite(c.scanBatchSize) && c.scanBatchSize >= 1) scanBatchSize = c.scanBatchSize;
+      if (Number.isFinite(c.feeRate) && c.feeRate >= 0) feeRate = c.feeRate;
+      if (Number.isFinite(c.slippageRate) && c.slippageRate >= 0) slippageRate = c.slippageRate;
+      if (typeof c.scheduleEnabled === "boolean") scheduleEnabled = c.scheduleEnabled;
+      if (Number.isFinite(c.libyaOpen1)) libyaOpen1 = c.libyaOpen1;
+      if (Number.isFinite(c.libyaClose1)) libyaClose1 = c.libyaClose1;
+      if (Number.isFinite(c.libyaOpen2)) libyaOpen2 = c.libyaOpen2;
+      if (Number.isFinite(c.libyaClose2)) libyaClose2 = c.libyaClose2;
+   }
+   if (restoredBotState.apexPredatorStats && typeof restoredBotState.apexPredatorStats === "object") {
+      apexPredatorStats = { ...apexPredatorStats, ...restoredBotState.apexPredatorStats };
+   }
+}
+
+export function persistRuntimeState(force = false) {
+   const now = Date.now();
+   if (!force && now - lastRuntimeStateSavedAt < 30_000) return;
+   const saved = saveBotState({
+      virtualBalance, initialVirtualBalance, activeTrades, botActive,
+      closedTrades: closedTrades.slice(0, 30), todaysStats, statsDay, apexPredatorStats,
+      config: {
+         maxOpenTradesConfig, haltProfitEnabled, haltProfitTarget, haltLossEnabled, haltLossTarget,
+         smartBtcHoldEnabled, btcVolThresholdStr, slAtrMultiplier, geniusMode, pullbackSniperEnabled,
+         freeTradeSlotEnabled, scanBatchSize, feeRate, slippageRate, scheduleEnabled,
+         libyaOpen1, libyaClose1, libyaOpen2, libyaClose2
+      }
+   });
+   if (saved) lastRuntimeStateSavedAt = now;
+}
+
 const institutionalStateBySymbol = new Map<string, { state: string; direction: string }>();
 
 export function resetAccountState() {
@@ -116,6 +192,7 @@ export function resetAccountState() {
   closedTrades = closedTrades.filter(t => t.symbol !== 'AMZNUSDT' && !((t.pos || t.initialPos) > 100));
   activeTrades = activeTrades.filter(t => t.symbol !== 'AMZNUSDT');
   addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
+  persistRuntimeState(true);
 }
 
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
@@ -145,6 +222,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.libyaOpen2 !== undefined) libyaOpen2 = opts.libyaOpen2;
       if (opts.libyaClose2 !== undefined) libyaClose2 = opts.libyaClose2;
   }
+  persistRuntimeState(true);
 }
 
 export function isLibyaTradingAllowed(): boolean {
@@ -189,6 +267,9 @@ export function getStats() {
   const riskedTradesCount = activeTrades.filter(t => !t.be_done).length;
   const todayFloatingPnl = activeTrades.reduce((sum, trade) => sum + (Number(trade.pnl) || 0), 0);
   const todayNetPnl = todaysStats.pnl + todayFloatingPnl;
+  const remainingUnrealizedPnl = activeTrades.reduce((sum, trade) =>
+    sum + ((Number(trade.pnl) || 0) - (Number(trade.realizedPnl) || 0)), 0);
+  const totalAccountNetPnl = (virtualBalance - initialVirtualBalance) + remainingUnrealizedPnl;
 
   return { 
     ...apexPredatorStats,
@@ -220,7 +301,7 @@ export function getStats() {
     libyaOpen2,
     libyaClose2,
     isSleeping: false,
-    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && (virtualBalance - initialVirtualBalance) <= -haltLossTarget) || (haltProfitEnabled && (virtualBalance - initialVirtualBalance) >= haltProfitTarget),
+    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && totalAccountNetPnl <= -haltLossTarget) || (haltProfitEnabled && totalAccountNetPnl >= haltProfitTarget),
     scannerMode: "CONTINUOUS_DISCOVERY_WITH_EXECUTION_GUARDS",
     today: { ...todaysStats, floatingPnl: todayFloatingPnl, netPnl: todayNetPnl } 
   }; 
@@ -272,7 +353,7 @@ export function setConfig(config: any) {
   if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
   if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
-export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); addLog(`BOT ACTIVE: ${val}`); }
+export function setActive(val: boolean) { botActive = val; if (!val) stopFuturesWaveFeed(); persistRuntimeState(true); addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
 
 // --- DATA FETCHING ---
@@ -291,7 +372,7 @@ async function updateDynamicWatchlist() {
          axios.get(`${BINANCE_FAPI}/fapi/v1/exchangeInfo`, { timeout: 8000 })
       ]);
       if (!Array.isArray(res.data) || res.data.length === 0 || !Array.isArray(exchangeInfo.data?.symbols)) return;
-      const activeUsdtPerpetuals = new Set(
+      const activeUsdtPerpetuals = new Set<string>(
          exchangeInfo.data.symbols
             .filter((item: any) => item.contractType === "PERPETUAL" && item.quoteAsset === "USDT" && item.status === "TRADING")
             .map((item: any) => item.symbol)
@@ -497,8 +578,9 @@ async function fetchOrderBookEvidence(symbol: string) {
    const bids = Array.isArray(res.data?.bids) ? res.data.bids : [];
    const asks = Array.isArray(res.data?.asks) ? res.data.asks : [];
    if (!bids.length || !asks.length) throw new Error("Order book unavailable");
-   const bidNotional = bids.reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
-   const askNotional = asks.reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
+   // Match the live depth5 WebSocket source: qualify only the executable top five levels.
+   const bidNotional = bids.slice(0, 5).reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
+   const askNotional = asks.slice(0, 5).reduce((sum: number, level: any[]) => sum + Number(level[0]) * Number(level[1]), 0);
    const bestBid = Number(bids[0][0]);
    const bestAsk = Number(asks[0][0]);
    if (![bidNotional, askNotional, bestBid, bestAsk].every(Number.isFinite) || bestBid <= 0 || bestAsk < bestBid) {
@@ -651,16 +733,17 @@ async function readWhale(symbol: string, btc_chg: number) {
    // Mixed ONLY when 15m and 5m directly oppose each other without clear directional pressure:
    const cvd_mixed = !directional_bull && !directional_bear;
 
-   const oiData = await fetchOI(symbol, "15m", 4);
+   const oiData = await fetchOI(symbol, "5m", 6);
    let oi_chg = 0;
-   if (oiData && oiData.length >= 4) {
+   if (oiData && oiData.length >= 3) {
       const oi0 = parseFloat(oiData[oiData.length-1].sumOpenInterest);
-      const oi3 = parseFloat(oiData[0].sumOpenInterest);
-      oi_chg = (oi0 - oi3) / oi3;
+      const oi3 = parseFloat(oiData[oiData.length-3].sumOpenInterest);
+      if (Number.isFinite(oi0) && Number.isFinite(oi3) && oi3 > 0) oi_chg = (oi0 - oi3) / oi3;
    }
 
-   const p0 = c15[c15.length-1].close;
-   const p3 = c15[c15.length-4].close;
+   // Align price change with the same ~10m window used by the 5m OI samples.
+   const p0 = c5[c5.length-1].close;
+   const p3 = c5[c5.length-3].close;
    const p_chg = (p0 - p3)/p3;
 
    let scenario = "UNCLEAR";
@@ -674,9 +757,9 @@ async function readWhale(symbol: string, btc_chg: number) {
    const fund = await fetchFunding(symbol);
    const oiLatest = oiData?.[oiData.length - 1];
    const oiTimestamp = Number(oiLatest?.timestamp);
-   const oi_available = Boolean(oiData && oiData.length >= 4 &&
+   const oi_available = Boolean(oiData && oiData.length >= 3 &&
       Number.isFinite(oi_chg) && Number.isFinite(oi0Safe(oiData)) &&
-      (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 20 * 60 * 1000));
+      (Number.isFinite(oiTimestamp) && Date.now() - oiTimestamp >= 0 && Date.now() - oiTimestamp <= 10 * 60 * 1000));
    // Futures-only evidence collection. Spot is intentionally not queried.
    const [futuresFlowResult, orderBookResult] = await Promise.allSettled([
       fetchFuturesAggressorFlow(symbol),
@@ -885,7 +968,12 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    const direction = institutional.direction;
    if (direction === "LONG") apexPredatorStats.totalLongScanned++;
    else apexPredatorStats.totalShortScanned++;
-   const waveAtr = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop() || p.atr14;
+   const waveAtrCandidate = calcATR(waveCandles.map((c: any) => c.high), waveCandles.map((c: any) => c.low), waveCandles.map((c: any) => c.close), 14).pop();
+   if (typeof waveAtrCandidate !== "number" || !Number.isFinite(waveAtrCandidate) || waveAtrCandidate <= 0) {
+      recordEntryRejection(symbol, direction, "INVALID_1M_WAVE_ATR", p, w, ctx, { institutional });
+      return { signal: "WAIT", reason: "INVALID_1M_WAVE_ATR", p, w, ctx, institutional };
+   }
+   const waveAtr = waveAtrCandidate;
    p.waveAtr = waveAtr;
    const flow = w.futuresFlow;
    const flowImbalance = (buy: number, sell: number) => (buy - sell) / Math.max(buy + sell, 1e-9);
@@ -925,7 +1013,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
       return { signal: "WAIT", reason: entryQuality.reasons.join(" | "), p, w, ctx, institutional, entryQuality, marketAlignment };
    }
    const invalidation = institutional.metrics.invalidationLevel;
-   if (!Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(p.atr14 > 0)) {
+   if (typeof invalidation !== "number" || !Number.isFinite(invalidation) || (direction === "LONG" ? invalidation >= p.price : invalidation <= p.price) || !(waveAtr > 0)) {
       addLog(`⛔ ${symbol}: Structural invalidation level is invalid; trade rejected.`, "warn");
       recordEntryRejection(symbol, direction, "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, { institutional, marketAlignment, entryQuality });
       return { signal: "WAIT", reason: "INVALID_STRUCTURAL_INVALIDATION", p, w, ctx, institutional, marketAlignment, entryQuality };
@@ -979,13 +1067,31 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
 function executeTrade(symbol: string, decision: any) {
    const { p, w, grade, setupType, ctx, reasoning, institutional } = decision;
    const isPullback = setupType === "PULLBACK_SNIPER";
-   // Dynamic Risk Sizing based on Market Regime:
-   // If market regime is RANGE or TRANSITION, reduce risk by 50% to shield capital from choppy churn!
+   // Preserve configured trade capacity while distributing a hard portfolio-risk budget across remaining risk-bearing slots.
    const isChoppyRegime = reasoning?.regime === "RANGE" || reasoning?.regime === "TRANSITION" || ctx?.regime === "RANGING";
    const regimeRiskMult = isChoppyRegime ? 0.50 : 1.0;
-   const riskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   const currentOpenRisk = activeTrades.reduce((sum, trade) => sum + estimateNetRiskAtStop({
+      direction: trade.direction, entry: Number(trade.entry), stop: Number(trade.sl),
+      position: Number(trade.pos), realizedPnl: Number(trade.realizedPnl) || 0,
+      feeRate, slippageRate
+   }), 0);
+   const dailyRiskHeadroom = Math.max(0, initialVirtualBalance * MAX_DAILY_LOSS + Math.min(0, todaysStats.pnl));
+   const riskBaseBalance = Math.max(0, Math.min(initialVirtualBalance, virtualBalance));
+   const portfolioRiskLimit = Math.min(riskBaseBalance * MAX_PORTFOLIO_OPEN_RISK, dailyRiskHeadroom);
+   const portfolioRiskHeadroom = Math.max(0, portfolioRiskLimit - currentOpenRisk);
+   const remainingRiskSlots = Math.max(1, maxOpenTradesConfig - activeTrades.filter(trade => !trade.be_done).length);
+   const targetRiskAmt = virtualBalance * grade.risk * grade.mult * regimeRiskMult;
+   const riskAmt = Math.min(targetRiskAmt, portfolioRiskHeadroom / remainingRiskSlots);
+   if (riskAmt <= 0) {
+      addLog("[PORTFOLIO RISK CAP] " + symbol + " skipped: no remaining portfolio risk budget.", "warn");
+      return;
+   }
+   if (riskAmt < targetRiskAmt) {
+      addLog("[PORTFOLIO RISK CAP] " + symbol + ": per-trade risk reduced to $" + riskAmt.toFixed(2) +
+         "; open stop risk $" + currentOpenRisk.toFixed(2) + " / $" + portfolioRiskLimit.toFixed(2) + ".", "info");
+   }
    if (regimeRiskMult < 1.0) {
-      addLog(`🛡️ [DYNAMIC RISK] تم تخفيض حجم المخاطرة بنسبة 50% لصفقة ${symbol} لوجود السوق في ريجيم متذبذب (${reasoning?.regime || ctx?.regime}).`, 'info');
+      addLog("[DYNAMIC RISK] " + symbol + " risk halved for choppy regime.", "info");
    }
 
    const entryTiming = extractEntryTiming();
@@ -993,30 +1099,23 @@ function executeTrade(symbol: string, decision: any) {
 
    if (decision.signal === "LONG") {
       const entry = p.price;
-      const c = p.klines;
-      const realLow = Math.min(c[c.length-1].low, c[c.length-2].low, c[c.length-3].low);
       const isBounce = setupType === "BOUNCE_SNIPER";
-      // Pillar 5: Tight Structural Stop Loss with compressed buffer
-      const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const evidenceInvalidation = Number.isFinite(p.institutionalInvalidation) ? p.institutionalInvalidation : realLow;
-      const rawSl = Math.min(realLow, evidenceInvalidation) - structuralSlPad;
-
-      // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
-      const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
-      const sl = Math.min(rawSl, entry - minSlDistance);
-      const realSlDist = entry - sl;
-      if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
-      const initialSlDist = Math.abs(entry - sl);
+      const stopPlan = calculateWaveStop({
+         side: "LONG", entry, atr1m: p.waveAtr,
+         candles: p.institutionalEntryCandles || [],
+         invalidationLevel: p.institutionalInvalidation
+      });
+      if (!stopPlan) {
+         addLog("LONG " + symbol + " rejected: invalid or excessively distant 1m structural stop.", "warn");
+         return;
+      }
+      const sl = stopPlan.stop;
+      const realSlDist = stopPlan.distance;
+      const initialSlDist = realSlDist;
 
       const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
       const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
       const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
-
-      const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
-         return;
-      }
 
       // IRON NOTIONAL & MARGIN CEILING:
       // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
@@ -1025,11 +1124,9 @@ function executeTrade(symbol: string, decision: any) {
       const maxMarginCap = virtualBalance * 0.15;
       const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
 
-      let pos = riskAmt / realSlDist;
-      if (pos > maxPosCap) {
-         addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
-         pos = maxPosCap;
-      }
+      let pos = Math.min(riskAmt / realSlDist, maxPosCap);
+      pos = capPositionToRiskBudget({ proposedPosition: pos, entry, stop: sl, availableRisk: riskAmt, feeRate, slippageRate });
+      if (pos <= 0) return;
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
@@ -1041,7 +1138,7 @@ function executeTrade(symbol: string, decision: any) {
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
-         atr: p.atr14, peak_r: 0,
+         atr: p.waveAtr, entryAtr1m: p.waveAtr, stopBasisTimeframe: "1m", peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
@@ -1060,34 +1157,28 @@ function executeTrade(symbol: string, decision: any) {
          }
       };
       activeTrades.push(newTrade);
+      persistRuntimeState(true);
       registerTradeForDirectionTracking(newTrade);
       addLog(`✅ LONG ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    } else {
       const entry = p.price;
-      const c = p.klines;
-      const realHigh = Math.max(c[c.length-1].high, c[c.length-2].high, c[c.length-3].high);
       const isBounce = setupType === "BOUNCE_SNIPER";
-      // Pillar 5: Tight Structural Stop Loss with compressed buffer
-      const structuralSlPad = p.atr14 * (isBounce ? 0.25 : (isPullback ? 0.35 : 0.45));
-      const evidenceInvalidation = Number.isFinite(p.institutionalInvalidation) ? p.institutionalInvalidation : realHigh;
-      const rawSl = Math.max(realHigh, evidenceInvalidation) + structuralSlPad;
-
-      // MANDATORY SL FLOOR: Stop-loss must never be closer than 0.8 * ATR or 0.6% of entry
-      const minSlDistance = Math.max(p.atr14 * 0.8, entry * 0.006);
-      const sl = Math.max(rawSl, entry + minSlDistance);
-      const realSlDist = sl - entry;
-      if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
-      const initialSlDist = Math.abs(entry - sl);
+      const stopPlan = calculateWaveStop({
+         side: "SHORT", entry, atr1m: p.waveAtr,
+         candles: p.institutionalEntryCandles || [],
+         invalidationLevel: p.institutionalInvalidation
+      });
+      if (!stopPlan) {
+         addLog("SHORT " + symbol + " rejected: invalid or excessively distant 1m structural stop.", "warn");
+         return;
+      }
+      const sl = stopPlan.stop;
+      const realSlDist = stopPlan.distance;
+      const initialSlDist = realSlDist;
 
       const tp1 = entry - (initialSlDist * TP1_R);
       const tp2 = entry - (initialSlDist * TP2_R);
       const tp3 = entry - (initialSlDist * TP3_R);
-
-      const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
-         return;
-      }
 
       // IRON NOTIONAL & MARGIN CEILING:
       // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
@@ -1096,11 +1187,9 @@ function executeTrade(symbol: string, decision: any) {
       const maxMarginCap = virtualBalance * 0.15;
       const maxPosCap = Math.min(maxAllowedNotional / entry, (maxMarginCap * 10) / entry);
 
-      let pos = riskAmt / realSlDist;
-      if (pos > maxPosCap) {
-         addLog(`🛡️ [NOTIONAL CAP] تم تقليص كمية العقد لـ ${symbol} من ${pos.toFixed(2)} إلى ${maxPosCap.toFixed(2)} للحفاظ على سقف الرافعة (القيمة القصوى: $${(maxPosCap * entry).toFixed(2)}).`, "info");
-         pos = maxPosCap;
-      }
+      let pos = Math.min(riskAmt / realSlDist, maxPosCap);
+      pos = capPositionToRiskBudget({ proposedPosition: pos, entry, stop: sl, availableRisk: riskAmt, feeRate, slippageRate });
+      if (pos <= 0) return;
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
          symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
@@ -1112,11 +1201,11 @@ function executeTrade(symbol: string, decision: any) {
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
-         atr: p.atr14, peak_r: 0,
+         atr: p.waveAtr, entryAtr1m: p.waveAtr, stopBasisTimeframe: "1m", peak_r: 0,
          reasoning: decision.reasoning,
          highestPrice: entry,
          lowestPrice: entry,
-         candlesBeforeEntry: formatCandles(p.klines || [], 40),
+         candlesBeforeEntry: formatCandles(p.institutionalEntryCandles || p.klines || [], 40),
          whaleData: {
             scenario: w.scenario,
             hiddenBuy: w.hidden_sell ? "مخفي (بيع)" : "لا يوجد",
@@ -1131,6 +1220,7 @@ function executeTrade(symbol: string, decision: any) {
          }
       };
       activeTrades.push(newTrade);
+      persistRuntimeState(true);
       registerTradeForDirectionTracking(newTrade);
       addLog(`✅ SHORT ${symbol} [${setupLabel}] | دخول: ${entry.toFixed(4)} | SL: ${sl.toFixed(4)} | Institutional evidence chain confirmed`, "success");
    }
@@ -1139,6 +1229,9 @@ function executeTrade(symbol: string, decision: any) {
 // --- SEC 6: EXIT BRAIN ---
 async function exitBrain(trade: any, ctx: any) {
    const t = trade;
+   const stopAtStart = Number(t.sl);
+   const peakRAtStart = Number(t.peak_r) || 0;
+   const peakPriceAtStart = Number(t.peakPrice) || 0;
    const w = await readWhale(t.symbol, 0); // Fast check
    const p = await readPrice(t.symbol, w.c15);
    
@@ -1188,6 +1281,11 @@ async function exitBrain(trade: any, ctx: any) {
       consecutiveAdverseObservations: (() => {
          const flow = w.futuresFlow;
          if (!flow) { t.institutionalAdverseCount = 0; return 0; }
+         const observationAt = Number(flow.observedAt);
+         if (!Number.isFinite(observationAt) || observationAt <= (Number(t.lastAdverseFlowObservedAt) || 0)) {
+            return Number(t.institutionalAdverseCount) || 0;
+         }
+         t.lastAdverseFlowObservedAt = observationAt;
          const sign = t.direction === "LONG" ? 1 : -1;
          const b30 = Number.isFinite(flow.buyQuote30s) ? flow.buyQuote30s : flow.buyQuote;
          const s30 = Number.isFinite(flow.sellQuote30s) ? flow.sellQuote30s : flow.sellQuote;
@@ -1265,7 +1363,12 @@ async function exitBrain(trade: any, ctx: any) {
    const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
    const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
 
-   let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7);
+   const trailAtr = Array.isArray(w.c5) && w.c5.length >= 15
+      ? calcATR(w.c5.map((c: any) => c.high), w.c5.map((c: any) => c.low), w.c5.map((c: any) => c.close), 14).pop()
+      : null;
+   const usableTrailAtr = Number.isFinite(trailAtr) && trailAtr! > 0
+      ? trailAtr! : (Number.isFinite(t.atr) && t.atr > 0 ? t.atr : slDist);
+   let trailDist = usableTrailAtr * (p.rvol > 1.5 ? 1.0 : 0.7);
 
    // Early risk reduction: reduce the original risk without choking normal pullbacks.
    if (!t.micro_banked && profitR >= 0.45) {
@@ -1326,9 +1429,7 @@ async function exitBrain(trade: any, ctx: any) {
    // 3. Adaptive peak-based trailing begins after the first bank, not after TP2/TP3.
    // Supportive flow gets room; weakening flow tightens the leash. The stop can only tighten.
    if (t.a_closed) {
-      const atrValue = Number.isFinite(p.atr14) && p.atr14 > 0
-         ? p.atr14
-         : (Number.isFinite(t.atr) && t.atr > 0 ? t.atr : slDist);
+      const atrValue = usableTrailAtr;
       const trailMultiplier = exitEvidence.action === "PROTECT"
          ? 0.90
          : (supportiveFlow && exitEvidence.action === "HOLD" ? 1.80 : 1.35);
@@ -1368,6 +1469,9 @@ async function exitBrain(trade: any, ctx: any) {
    // Hard SL Hit
    if (t.direction === "LONG" && price <= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
    if (t.direction === "SHORT" && price >= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
+   if (activeTrades.includes(t) &&
+       (Number(t.sl) !== stopAtStart || (Number(t.peak_r) || 0) !== peakRAtStart ||
+        (Number(t.peakPrice) || 0) !== peakPriceAtStart)) runtimeStateDirty = true;
 }
 
 function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close - klines[klines.length-1].open); }
@@ -1388,6 +1492,7 @@ function closePart(t: any, part: string, pct: number) {
    t.realizedPnl = (t.realizedPnl || 0) + realizedPnl;
    t.totalFees = (t.totalFees || 0) + tradeFees;
    virtualBalance += realizedPnl;
+   persistRuntimeState(true);
 }
 
 function closeTradeFull(t: any, reason: string = "") {
@@ -1434,6 +1539,7 @@ function closeTradeFull(t: any, reason: string = "") {
       finalPnl: t.finalPnl,
       fees: t.totalFees || 0
    });
+   persistRuntimeState(true);
 }
 
 // --- SEC 9: MAIN LOOP ---
@@ -1452,13 +1558,11 @@ export async function runApexLoop() {
          await exitBrain(t, ctx);
       }
 
-      // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
-      let totalFloatingPnl = 0;
-      let totalRealizedPnl = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
-      for (const t of activeTrades) {
-         if (t.pnl) totalFloatingPnl += t.pnl; 
-      }
-      let currentNetPnl = totalRealizedPnl + totalFloatingPnl;
+      // Account-wide net PnL uses cumulative realized balance plus only the remaining unrealized portion.
+      // This avoids truncation after the 150-trade dashboard history cap and avoids double-counting partial closes.
+      const remainingUnrealizedPnl = activeTrades.reduce((sum, trade) =>
+         sum + ((Number(trade.pnl) || 0) - (Number(trade.realizedPnl) || 0)), 0);
+      const currentNetPnl = (virtualBalance - initialVirtualBalance) + remainingUnrealizedPnl;
       
       const profitExecutionLocked = haltProfitEnabled && currentNetPnl >= haltProfitTarget;
       const configuredLossExecutionLocked = haltLossEnabled && currentNetPnl <= -haltLossTarget;
@@ -1570,11 +1674,20 @@ export async function runApexLoop() {
    } catch (e: any) {
       addLog(`Loop Error: ${e.message}`, "error");
    } finally {
+      persistRuntimeState(runtimeStateDirty);
+      runtimeStateDirty = false;
       isLoopRunning = false;
    }
 }
 
 export function startEngine() {
+   const storage = getResearchStorageStatus();
+   if (storage.uses_temporary_storage) {
+      addLog("⚠️ State/research storage is under temporary storage (" + storage.directory + "). Set BEASTBOT_RESEARCH_DIR to a persistent Hostless volume or database-backed mount to survive restarts.", "warn");
+   } else {
+      addLog("💾 Bot state snapshots write to " + storage.directory + "; verify that this Hostless mount is persistent across restarts.", "info");
+   }
+   persistRuntimeState(true);
    if (watcherInterval) clearInterval(watcherInterval);
    watcherInterval = setInterval(runApexLoop, 15 * 1000); // Check every 15 seconds for ultra-responsive breakout inception
    runApexLoop();

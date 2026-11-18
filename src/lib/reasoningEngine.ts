@@ -778,7 +778,7 @@ export function generateScenarios(
       };
    }
 
-   if (regime === "TREND_DOWN" || (flow.state === "SHORT_BUILDUP" && regime !== "TREND_UP")) {
+   if (regime === "TREND_DOWN" || flow.state === "SHORT_BUILDUP") {
       if (loc.nearSupport) {
          missingConfirmation.push("Clean 15m candle close clearly below " + loc.nearestSupport.toFixed(4));
          missingConfirmation.push("RVOL > 1.2 confirming breakdown volume");

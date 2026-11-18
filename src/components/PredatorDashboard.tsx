@@ -13,7 +13,7 @@ export const PredatorDashboard: React.FC = () => {
   
   // Settings state
   const [balanceInput, setBalanceInput] = useState('1000');
-  const [maxTradesInput, setMaxTradesInput] = useState('3');
+  const [maxTradesInput, setMaxTradesInput] = useState('10');
   const [haltProfitEnabled, setHaltProfitEnabled] = useState(false);
   const [haltProfitTarget, setHaltProfitTarget] = useState('150');
   const [haltLossEnabled, setHaltLossEnabled] = useState(false);
@@ -57,7 +57,7 @@ export const PredatorDashboard: React.FC = () => {
         setStats(data);
         if (document.activeElement?.tagName !== 'INPUT') {
             setBalanceInput(data.initialBalance?.toString() || '1000');
-            setMaxTradesInput(data.maxOpenTrades?.toString() || '3');
+            setMaxTradesInput(data.maxOpenTrades?.toString() || '10');
             if (data.haltProfitTarget !== undefined) setHaltProfitTarget(data.haltProfitTarget.toString());
             if (data.haltProfitEnabled !== undefined) setHaltProfitEnabled(data.haltProfitEnabled);
             if (data.haltLossTarget !== undefined) setHaltLossTarget(data.haltLossTarget.toString());
@@ -782,7 +782,7 @@ export const PredatorDashboard: React.FC = () => {
                  </div>
                  <div className="col-span-2 lg:col-span-1 bg-slate-900/50 border border-slate-800 p-4 rounded-xl shadow">
                     <p className="text-[10px] sm:text-xs text-slate-400 mb-1">الصفقات النشطة</p>
-                    <p className="text-lg sm:text-xl font-bold text-slate-300">{sovTrades.length} / {stats?.maxOpenTrades || 3}</p>
+                    <p className="text-lg sm:text-xl font-bold text-slate-300">{sovTrades.length} / {stats?.maxOpenTrades || 10}</p>
                  </div>
              </div>
 
