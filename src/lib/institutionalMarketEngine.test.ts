@@ -65,6 +65,17 @@ const adverseLong = evaluateInstitutionalMarket(snapshot({
 }));
 assert.equal(adverseLong.canEnter, false, "confirmed adverse 30s selling must veto stale bullish entries");
 assert.ok(adverseLong.evidenceAgainst.some(x => x.includes("30s executed selling")));
+assert.equal(adverseLong.state, "CONFLICTED", "fresh opposing microflow must not be labelled as a healthy ignition");
+const staleContinuationLong = evaluateInstitutionalMarket(snapshot({
+  previousState: "BREAKOUT_CONFIRMED", previousDirection: "LONG",
+  futuresFlow: flow(75_000, 25_000, {
+    buyQuote30s: 15_000, sellQuote30s: 45_000, trades30s: 30,
+    buyQuote1m: 100_000, sellQuote1m: 30_000, trades1m: 60,
+    priceChange30sPct: -0.002, priceChange1mPct: 0.004
+  })
+}));
+assert.notEqual(staleContinuationLong.state, "CONTINUATION", "adverse microflow must invalidate stale continuation classification");
+
 
 const adverseShort = evaluateInstitutionalMarket(snapshot({
   price: 96.5, candles: shortCandles,
