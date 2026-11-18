@@ -309,7 +309,7 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
     elif mode=="breakout_confirmed":
         long=(c>prev_hi)&bullish&(trend15>0)&(trend60>0)&stretch
         short=(c<prev_lo)&bearish&(trend15<0)&(trend60<0)&stretch
-    elif mode in ("pullback_flow_accel","pullback_strong_close","pullback_trend_align"):
+    elif mode in ("pullback_flow_accel","pullback_strong_close","pullback_trend_align","pullback_early_flow","pullback_flow_persistence"):
         # Same baseline pullback setup, with alternative independent confirmation.
         # Only already CLOSED signal/previous candles are consulted.
         base_long=(trend60>0.003)&(trend15>0)&(ret5<0.002)&(c>hi5)&bullish&stretch
@@ -317,6 +317,14 @@ def make_signal_masks(d,mode,lookback,vol_mult,delta_th):
         if mode=="pullback_flow_accel":
             long=base_long&(flow5-flow_lag3>=0.04)&(flow5>=flow_prev+0.01)
             short=base_short&(flow5-flow_lag3<=-0.04)&(flow5<=flow_prev-0.01)
+        elif mode=="pullback_early_flow":
+            # Early impulse: pressure is improving but not yet at extreme flow.
+            long=base_long&(flow5-flow_lag3>=0.025)&(flow5<=0.22)&(close_loc>=0.72)
+            short=base_short&(flow5-flow_lag3<=-0.025)&(flow5>=-0.22)&(close_loc<=0.28)
+        elif mode=="pullback_flow_persistence":
+            # Two completed windows confirm persistent pressure without a spike.
+            long=base_long&(flow5>=flow_prev+0.005)&(flow15>=0.06)&(qv<=avg*3.0)
+            short=base_short&(flow5<=flow_prev-0.005)&(flow15<=-0.06)&(qv<=avg*3.0)
         elif mode=="pullback_strong_close":
             long=base_long&(close_loc>=0.85)&(delta>=0.30)&(qv>=avg*1.6)
             short=base_short&(close_loc<=0.15)&(delta<=-0.30)&(qv>=avg*1.6)
@@ -683,7 +691,8 @@ def main():
     # concurrency, not fixed-entry counterfactuals. Select on development ONLY.
     entry_variants=[]
     for entry_mode in ("pullback_resume","pullback_flow_accel",
-                       "pullback_strong_close","pullback_trend_align"):
+                       "pullback_strong_close","pullback_trend_align",
+                       "pullback_early_flow","pullback_flow_persistence"):
         for exit_style in ("staged","atr_guard"):
             entry={"mode":entry_mode,"lookback":10,"vol_mult":1.3,"delta":0.2}
             rows=[]
