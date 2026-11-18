@@ -55,6 +55,28 @@ assert.equal(short.state, "BREAKOUT_CONFIRMED");
 assert.equal(short.direction, "SHORT");
 assert.equal(short.canEnter, true, "Futures-only short must be eligible");
 
+// A previously bullish 1m/5m setup must not enter into fresh 30s sell pressure.
+const adverseLong = evaluateInstitutionalMarket(snapshot({
+  futuresFlow: flow(75_000, 25_000, {
+    buyQuote30s: 15_000, sellQuote30s: 45_000, trades30s: 30,
+    buyQuote1m: 100_000, sellQuote1m: 30_000, trades1m: 60,
+    priceChange30sPct: -0.002, priceChange1mPct: 0.004
+  })
+}));
+assert.equal(adverseLong.canEnter, false, "confirmed adverse 30s selling must veto stale bullish entries");
+assert.ok(adverseLong.evidenceAgainst.some(x => x.includes("30s executed selling")));
+
+const adverseShort = evaluateInstitutionalMarket(snapshot({
+  price: 96.5, candles: shortCandles,
+  futuresFlow: flow(20_000, 80_000, {
+    buyQuote30s: 45_000, sellQuote30s: 15_000, trades30s: 30,
+    buyQuote1m: 30_000, sellQuote1m: 100_000, trades1m: 60,
+    priceChange30sPct: 0.002, priceChange1mPct: -0.004
+  }),
+  orderBook: { bidNotional: 200_000, askNotional: 500_000, spreadBps: 2, observedAt: now, source: "BINANCE_DEPTH" }
+}));
+assert.equal(adverseShort.canEnter, false, "confirmed adverse 30s buying must veto stale bearish entries");
+
 const earlyLong = evaluateInstitutionalMarket(snapshot({
   futuresFlow: flow(72_000, 28_000, { buyQuote5s: 20_000, sellQuote5s: 1_000, trades5s: 7 }),
   oiChange: -0.01
