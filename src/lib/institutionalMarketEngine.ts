@@ -220,6 +220,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
     (price30s === null || price30s < -0.0001);
   const opposingShortMicroflow = recent30sBuyShare !== null && recent30sBuyShare >= 0.57 &&
     (price30s === null || price30s > 0.0001);
+  // A directional tape without matching price displacement is potential passive absorption.
+  // Demand actual directional response; 30s is only used when it is sampled and available.
   const longAbsorption = long1m && long30 && priceChange1m <= 0.0001;
   const shortAbsorption = short1m && short30 && priceChange1m >= -0.0001;
   const fastFlow = longReversal || shortReversal;
@@ -269,8 +271,8 @@ export function evaluateInstitutionalMarket(input: InstitutionalSnapshot): Evide
   let canEnter = false, entryType: EvidenceDecision["entryType"] = "NONE";
   let reason = "No violent Futures impulse is developing; quiet symbols remain dormant.";
   const executable = bookOk && liquidityQualified; // A fresh executable Futures depth snapshot remains mandatory before order placement.
-  const longEarly = longFlow && !opposingLongMicroflow && executable && priceChange1m > 0 && (volumeSurge || longBreak || fastFlow || compressedBefore);
-  const shortEarly = shortFlow && !opposingShortMicroflow && executable && priceChange1m < 0 && (volumeSurge || shortBreak || fastFlow || compressedBefore);
+  const longEarly = longFlow && !longAbsorption && !opposingLongMicroflow && executable && priceChange1m > 0 && (volumeSurge || longBreak || fastFlow || compressedBefore);
+  const shortEarly = shortFlow && !shortAbsorption && !opposingShortMicroflow && executable && priceChange1m < 0 && (volumeSurge || shortBreak || fastFlow || compressedBefore);
   const longConfirmed = longEarly && (recent.close > priorHigh || priceReturn > 0.006);
   const shortConfirmed = shortEarly && (recent.close < priorLow || priceReturn < -0.006);
 
