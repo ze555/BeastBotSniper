@@ -888,7 +888,7 @@ async function evaluateInstitutionalEntry(symbol: string, ctx: any) {
    const apexTrap = apexEntryTrapGate({
       side: institutional.direction,
       price: wavePrice,
-      candles: (w.c15 || []).slice(-3),
+      candles: (w.c15 || []).slice(-4, -1),
       cvd15m: Number.isFinite(w.slope15) ? w.slope15 : null
    });
    if (!apexTrap.allowed) {
