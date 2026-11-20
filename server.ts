@@ -3,6 +3,7 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 import { startEngine, getCandidateAudit, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState } from "./src/lib/apexPredator.js";
+import { isValidStrongFlowTradingSchedule } from "./src/lib/strongFlowStrategy.js";
 import { 
   getTradingDecisionsData, 
   getRejectedSignalsData, 
@@ -33,6 +34,10 @@ async function startServer() {
   app.get("/api/research/candidate-audit", (req, res) => res.json(getCandidateAudit()));
   app.get("/api/predator/stats", (req, res) => res.json(getStats()));
   app.post("/api/predator/config", (req, res) => {
+    if (req.body?.tradingSchedule !== undefined && !isValidStrongFlowTradingSchedule(req.body.tradingSchedule)) {
+      res.status(400).json({success:false,message:"Invalid trading schedule: use ALWAYS or SCHEDULED with HH:mm Libya times and different start/end."});
+      return;
+    }
     updateConfig(req.body.balance, req.body.maxTrades, {
       haltProfitEnabled: req.body.haltProfitEnabled,
       haltProfitTarget: req.body.haltProfitTarget,
@@ -41,6 +46,7 @@ async function startServer() {
       scanBatchSize: req.body.scanBatchSize,
       feeRate: req.body.feeRate,
       slippageRate: req.body.slippageRate,
+      tradingSchedule: req.body.tradingSchedule,
     });
     res.json({success:true,strategy:"PB_STRONG_FLOW_FIXED2_1M_V1"});
   });
