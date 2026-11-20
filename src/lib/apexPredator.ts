@@ -1286,6 +1286,13 @@ async function scanStrongFlowEntries(ctx: any, canOpenMore: () => boolean) {
 
 // --- SEC 5: EXECUTION ---
 async function executeTrade(symbol: string, decision: any) {
+   // Retirement guard: the legacy 15m scoring engine must never open NEW trades
+   // once PB_STRONG_FLOW_FIXED2_1M_V1 is the sole new-entry strategy.
+   // Historical positions retain their original exit management until closed.
+   if (STRONG_FLOW_MAIN_ENABLED) {
+      addLog(`Legacy entry rejected for ${symbol}: strong-flow strategy exclusively enabled`, "warn");
+      return;
+   }
    if (isSymbolInCooldown(symbol)) {
       addLog(`⏳ [تبريد رمزي] تم تخطي تنفيذ صفقة على ${symbol} لأن الرمز يخضع لفترة تهدئة بعد إغلاق سابق لمنع التكرار وحرق الرسوم.`, 'info');
       return;
