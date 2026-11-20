@@ -74,22 +74,11 @@ let haltProfitEnabled = false;
 let haltProfitTarget = 150;
 let haltLossEnabled = false;
 let haltLossTarget = 50;
-let smartBtcHoldEnabled = true;
-let btcVolThresholdStr = "0.80";
-let slAtrMultiplier = 1.3;
-let geniusMode = true;
-let pullbackSniperEnabled = true;
-let freeTradeSlotEnabled = true;
 let scanBatchSize = 25;
 let feeRate = 0.0004; // 0.04% default Binance VIP0 taker fee
 let slippageRate = 0.0002; // 0.02% estimated market slippage
 
 // Libya Trading Schedule Config (GMT+2)
-let scheduleEnabled = false; // Default false to allow 24/7 continuous crypto futures scanning across all market sessions
-let libyaOpen1 = 10;
-let libyaClose1 = 14;
-let libyaOpen2 = 15.5;
-let libyaClose2 = 18;
 
 const logs: any[] = [];
 let closedTrades: any[] = [];
@@ -132,34 +121,10 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
       if (opts.haltProfitTarget !== undefined) haltProfitTarget = opts.haltProfitTarget;
       if (opts.haltLossEnabled !== undefined) haltLossEnabled = opts.haltLossEnabled;
       if (opts.haltLossTarget !== undefined) haltLossTarget = opts.haltLossTarget;
-      if (opts.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = opts.smartBtcHoldEnabled;
-      if (opts.btcVolThresholdStr !== undefined) btcVolThresholdStr = opts.btcVolThresholdStr;
-      if (opts.slAtrMultiplier !== undefined) slAtrMultiplier = opts.slAtrMultiplier;
-      if (opts.geniusMode !== undefined) geniusMode = opts.geniusMode;
-      if (opts.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = opts.pullbackSniperEnabled;
-      if (opts.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = opts.freeTradeSlotEnabled;
       if (opts.scanBatchSize !== undefined) scanBatchSize = Number(opts.scanBatchSize) || 25;
       if (opts.feeRate !== undefined) feeRate = Number(opts.feeRate);
       if (opts.slippageRate !== undefined) slippageRate = Number(opts.slippageRate);
-      if (opts.scheduleEnabled !== undefined) scheduleEnabled = opts.scheduleEnabled;
-      if (opts.libyaOpen1 !== undefined) libyaOpen1 = opts.libyaOpen1;
-      if (opts.libyaClose1 !== undefined) libyaClose1 = opts.libyaClose1;
-      if (opts.libyaOpen2 !== undefined) libyaOpen2 = opts.libyaOpen2;
-      if (opts.libyaClose2 !== undefined) libyaClose2 = opts.libyaClose2;
   }
-}
-
-export function isLibyaTradingAllowed(): boolean {
-   if (!scheduleEnabled) return true;
-   const now = new Date();
-   const utcHour = now.getUTCHours();
-   const utcMin = now.getUTCMinutes();
-   const libyaHour = (utcHour + 2) % 24 + (utcMin / 60);
-
-   const inPeriod1 = (libyaHour >= libyaOpen1 && libyaHour < libyaClose1);
-   const inPeriod2 = (libyaHour >= libyaOpen2 && libyaHour < libyaClose2);
-
-   return inPeriod1 || inPeriod2;
 }
 
 export function addLog(msg: string, type: 'info'|'warn'|'success'|'error' = 'info') {
@@ -203,12 +168,6 @@ export function getStats() {
     haltProfitTarget,
     haltLossEnabled,
     haltLossTarget,
-    smartBtcHoldEnabled,
-    btcVolThresholdStr,
-    slAtrMultiplier,
-    geniusMode,
-    pullbackSniperEnabled,
-    freeTradeSlotEnabled,
     scanBatchSize,
     feeRate,
     slippageRate,
@@ -218,11 +177,6 @@ export function getStats() {
     hotWatchlistLength: HOT_WATCHLIST.length,
     hotWatchlist: HOT_WATCHLIST.slice(0, 8),
     currentBatchProgress: `${Math.min(currentBatchIndex, WATCHLIST.length)} / ${WATCHLIST.length}`,
-    scheduleEnabled,
-    libyaOpen1,
-    libyaClose1,
-    libyaOpen2,
-    libyaClose2,
     isSleeping: !isLibyaTradingAllowed(),
     today: todaysStats 
   }; 
@@ -236,19 +190,9 @@ export function getConfig() {
     haltProfitTarget, 
     haltLossEnabled, 
     haltLossTarget, 
-    smartBtcHoldEnabled, 
-    slAtrMultiplier, 
-    geniusMode, 
-    pullbackSniperEnabled,
-    freeTradeSlotEnabled,
     scanBatchSize,
     feeRate,
     slippageRate,
-    scheduleEnabled, 
-    libyaOpen1, 
-    libyaClose1, 
-    libyaOpen2, 
-    libyaClose2 
   };
 }
 export function setConfig(config: any) {
@@ -259,20 +203,9 @@ export function setConfig(config: any) {
   if (config.haltProfitTarget !== undefined) haltProfitTarget = config.haltProfitTarget;
   if (config.haltLossEnabled !== undefined) haltLossEnabled = config.haltLossEnabled;
   if (config.haltLossTarget !== undefined) haltLossTarget = config.haltLossTarget;
-  if (config.smartBtcHoldEnabled !== undefined) smartBtcHoldEnabled = config.smartBtcHoldEnabled;
-  if (config.btcVolThresholdStr !== undefined) btcVolThresholdStr = config.btcVolThresholdStr;
-  if (config.slAtrMultiplier !== undefined) slAtrMultiplier = config.slAtrMultiplier;
-  if (config.geniusMode !== undefined) geniusMode = config.geniusMode;
-  if (config.pullbackSniperEnabled !== undefined) pullbackSniperEnabled = config.pullbackSniperEnabled;
-  if (config.freeTradeSlotEnabled !== undefined) freeTradeSlotEnabled = config.freeTradeSlotEnabled;
   if (config.scanBatchSize !== undefined) scanBatchSize = Number(config.scanBatchSize) || 25;
   if (config.feeRate !== undefined) feeRate = Number(config.feeRate);
   if (config.slippageRate !== undefined) slippageRate = Number(config.slippageRate);
-  if (config.scheduleEnabled !== undefined) scheduleEnabled = config.scheduleEnabled;
-  if (config.libyaOpen1 !== undefined) libyaOpen1 = config.libyaOpen1;
-  if (config.libyaClose1 !== undefined) libyaClose1 = config.libyaClose1;
-  if (config.libyaOpen2 !== undefined) libyaOpen2 = config.libyaOpen2;
-  if (config.libyaClose2 !== undefined) libyaClose2 = config.libyaClose2;
 }
 export function setActive(val: boolean) { botActive = val; addLog(`BOT ACTIVE: ${val}`); }
 export function isActive() { return botActive; }
