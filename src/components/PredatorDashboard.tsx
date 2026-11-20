@@ -18,7 +18,7 @@ export const PredatorDashboard: React.FC = () => {
   const [haltProfitTarget, setHaltProfitTarget] = useState('150');
   const [haltLossEnabled, setHaltLossEnabled] = useState(false);
   const [haltLossTarget, setHaltLossTarget] = useState('50');
-  const [scanBatchSize, setScanBatchSize] = useState('25');
+  const [scanBatchSize, setScanBatchSize] = useState('0');
   const [feeRateInput, setFeeRateInput] = useState('0.0004');
   const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
@@ -393,9 +393,10 @@ export const PredatorDashboard: React.FC = () => {
                       <input type="number" min="1" max="10" value={maxTradesInput} onChange={e=>setMaxTradesInput(e.target.value)}
                         className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
                    </label>
-                   <label className="text-sm text-slate-300">عدد العملات في دورة المسح (5–60)
-                      <input type="number" min="5" max="60" value={scanBatchSize} onChange={e=>setScanBatchSize(e.target.value)}
+                   <label className="text-sm text-slate-300">حجم دفعة الفحص (0 = تلقائي لفحص جميع العملات)
+                      <input type="number" min="0" max="200" value={scanBatchSize} onChange={e=>setScanBatchSize(e.target.value)}
                         className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                      <span className="block mt-1 text-xs text-slate-400">الافتراضي 0: تقسيم كل العقود المتاحة على نحو 4 دورات. أي رقم من 5–200 يغيّر سرعة التغطية فقط، ولا يستبعد عملة.</span>
                    </label>
                    <label className="text-sm text-slate-300">رسوم التداول
                       <input type="number" step="0.0001" min="0" value={feeRateInput} onChange={e=>setFeeRateInput(e.target.value)}
@@ -574,6 +575,23 @@ export const PredatorDashboard: React.FC = () => {
                    </div>
                 </div>
              </div>
+
+             {stats?.scanCoverage && (
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-200">
+                   <h3 className="font-bold text-white mb-2">تغطية سوق Binance Futures — جميع العقود الدائمة USDT / USDC</h3>
+                   <div className="flex flex-wrap gap-x-5 gap-y-2">
+                      <span>العقود المؤهلة: <strong>{stats.scanCoverage.eligibleSymbols}</strong></span>
+                      <span>حجم الدفعة: <strong>{stats.scanCoverage.effectiveBatchSize}</strong></span>
+                      <span>مفحوصة في الجولة الحالية: <strong>{stats.scanCoverage.currentPassAttempted}</strong></span>
+                      <span>جولات مكتملة: <strong>{stats.scanCoverage.completedPasses}</strong></span>
+                   </div>
+                   {stats.scanCoverage.lastCompletedPass && <p className="mt-2 text-xs text-slate-400">
+                      آخر جولة: {stats.scanCoverage.lastCompletedPass.succeeded} فحص ناجح من {stats.scanCoverage.lastCompletedPass.universeSize} عقد
+                      ، في {(stats.scanCoverage.lastCompletedPass.durationMs/1000).toFixed(0)} ثانية
+                   </p>}
+                   {stats.scanCoverage.rateLimitBackoffUntil && <p className="mt-2 text-xs text-amber-400">توقف مؤقت لحماية اتصال Binance من تجاوز حد الطلبات.</p>}
+                </div>
+             )}
 
              {/* Financial Summary */}
              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
