@@ -10,6 +10,34 @@ export const STRONG_FLOW_MAX_HOLD_MS = 180 * 60_000;
 export const STRONG_FLOW_RISK_FRACTION = 0.01;
 export const STRONG_FLOW_MAX_CONCURRENT = 10;
 
+/** All schedule times are Africa/Tripoli local clock times. The default
+ * 18:00–02:00 Libya matches the researched 16:00–00:00 UTC window.
+ * A schedule restricts NEW entries only, never position protection/exits.
+ */
+export interface StrongFlowTradingSchedule {
+  mode: "SCHEDULED" | "ALWAYS";
+  startLocal: string;
+  endLocal: string;
+}
+export const STRONG_FLOW_DEFAULT_TRADING_SCHEDULE: StrongFlowTradingSchedule = {
+  mode: "SCHEDULED", startLocal: "18:00", endLocal: "02:00"
+};
+const tripoliClock = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Africa/Tripoli", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+});
+function minuteOfDay(value: string): number | null {
+  if (typeof value !== "string" || !/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return null;
+  const [h,m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
+export function isValidStrongFlowTradingSchedule(value: unknown): value is StrongFlowTradingSchedule {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (v.mode !== "SCHEDULED" && v.mode !== "ALWAYS") return false;
+  const start = minuteOfDay(v.startLocal as string), end = minuteOfDay(v.endLocal as string);
+  return start !== null && end !== null && (v.mode === "ALWAYS" || start !== end);
+}
+
 export interface StrongFlowBar {
   openTime: number;
   closeTime: number;
@@ -34,9 +62,20 @@ export interface StrongFlowSignal {
   signalClose: number;
 }
 
-export function isStrongFlowTradingHour(d: Date = new Date()): boolean {
-  const h = d.getUTCHours();
-  return h >= STRONG_FLOW_ENTRY_HOUR_UTC && h < STRONG_FLOW_EXIT_HOUR_UTC;
+export function isStrongFlowTradingHour(
+  d: Date = new Date(), schedule: StrongFlowTradingSchedule = STRONG_FLOW_DEFAULT_TRADING_SCHEDULE
+): boolean {
+  if (!isValidStrongFlowTradingSchedule(schedule)) return false; // fail closed on bad settings
+  if (schedule.mode === "ALWAYS") return true;
+  const parts = tripoliClock.formatToParts(d);
+  const h = Number(parts.find(p => p.type === "hour")?.value);
+  const m = Number(parts.find(p => p.type === "minute")?.value);
+  const minute = h * 60 + m;
+  if (!Number.isFinite(minute)) return false;
+  const start = minuteOfDay(schedule.startLocal)!;
+  const end = minuteOfDay(schedule.endLocal)!;
+  // Supports overnight windows, e.g. 18:00–02:00 (end is exclusive).
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end;
 }
 export function isStrongFlowTrade(t: { strategyRevision?: string }): boolean {
   return t.strategyRevision === STRONG_FLOW_STRATEGY_ID;
