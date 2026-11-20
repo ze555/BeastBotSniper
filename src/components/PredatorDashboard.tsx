@@ -580,13 +580,13 @@ export const PredatorDashboard: React.FC = () => {
                 <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-200">
                    <h3 className="font-bold text-white mb-2">تغطية سوق Binance Futures — جميع العقود الدائمة USDT / USDC</h3>
                    <div className="flex flex-wrap gap-x-5 gap-y-2">
-                      <span>العقود المؤهلة: <strong>{stats.scanCoverage.eligibleSymbols}</strong></span>
+                      <span>العقود المؤهلة: <strong>{stats.scanCoverage.universeLastUpdatedAt ? stats.scanCoverage.eligibleSymbols : 'جارٍ تحميل القائمة'}</strong></span>
                       <span>حجم الدفعة: <strong>{stats.scanCoverage.effectiveBatchSize}</strong></span>
                       <span>مفحوصة في الجولة الحالية: <strong>{stats.scanCoverage.currentPassAttempted}</strong></span>
                       <span>جولات مكتملة: <strong>{stats.scanCoverage.completedPasses}</strong></span>
                    </div>
                    {stats.scanCoverage.lastCompletedPass && <p className="mt-2 text-xs text-slate-400">
-                      آخر جولة: {stats.scanCoverage.lastCompletedPass.succeeded} فحص ناجح من {stats.scanCoverage.lastCompletedPass.universeSize} عقد
+                      آخر جولة: {stats.scanCoverage.lastCompletedPass.succeeded} عقد ببيانات شموع كافية من {stats.scanCoverage.lastCompletedPass.universeSize} عقد
                       ، في {(stats.scanCoverage.lastCompletedPass.durationMs/1000).toFixed(0)} ثانية
                    </p>}
                    {stats.scanCoverage.rateLimitBackoffUntil && <p className="mt-2 text-xs text-amber-400">توقف مؤقت لحماية اتصال Binance من تجاوز حد الطلبات.</p>}
