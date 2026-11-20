@@ -198,13 +198,12 @@ async function updateUniverse(){
     if(!Array.isArray(info.data?.symbols))return;
     const eligible=listAllUsdmPerpetuals(info.data.symbols);
     if(!eligible.length)return;
-    const nextSymbol=watchlist[currentBatchIndex];
     const universeChanged=watchlist.length!==eligible.length || watchlist.some((s,i)=>s!==eligible[i]);
     watchlist=eligible;
     if(universeChanged) {
-      // Preserve round-robin position for existing symbols; do not repeatedly restart at 0.
-      const cursor=nextSymbol?watchlist.indexOf(nextSymbol):-1;
-      currentBatchIndex=cursor>=0?cursor:0;
+      // A genuinely changed universe starts a new measurable full round.
+      // Identical refreshes leave the cursor untouched (no repeated head scans).
+      currentBatchIndex=0;
       scanPassStartedAt=0;scanPassAttempted.clear();scanPassSucceeded.clear();
       addLog("All Binance USD-M USDT/USDC perpetual contracts eligible: "+watchlist.length,"success");
     }
