@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { evaluateStrongFlowSignal, isStrongFlowTradingHour, isStrongFlowTrade, STRONG_FLOW_STRATEGY_ID } from "./strongFlowStrategy.js";
+import { evaluateStrongFlowSignal, isStrongFlowTradingHour, isStrongFlowTrade, isValidStrongFlowTradingSchedule, STRONG_FLOW_STRATEGY_ID } from "./strongFlowStrategy.js";
 assert.equal(isStrongFlowTradingHour(new Date("2026-11-20T15:59:59Z")),false);
 assert.equal(isStrongFlowTradingHour(new Date("2026-11-20T16:00:00Z")),true);
 assert.equal(isStrongFlowTradingHour(new Date("2026-11-20T23:59:00Z")),true);
 assert.equal(isStrongFlowTradingHour(new Date("2026-11-21T00:00:00Z")),false);
+assert.equal(isStrongFlowTradingHour(new Date("2026-11-20T12:00:00Z"),{mode:"ALWAYS",startLocal:"18:00",endLocal:"02:00"}),true);
+assert.equal(isStrongFlowTradingHour(new Date("2026-11-21T00:00:00Z"),{mode:"ALWAYS",startLocal:"18:00",endLocal:"02:00"}),true);
+assert.equal(isStrongFlowTradingHour(new Date("2026-11-20T12:00:00Z"),{mode:"SCHEDULED",startLocal:"13:00",endLocal:"16:00"}),true); // 14:00 Libya
+assert.equal(isStrongFlowTradingHour(new Date("2026-11-20T14:00:00Z"),{mode:"SCHEDULED",startLocal:"13:00",endLocal:"16:00"}),false);
+assert.equal(isValidStrongFlowTradingSchedule({mode:"SCHEDULED",startLocal:"18:00",endLocal:"18:00"}),false);
+assert.equal(isValidStrongFlowTradingSchedule({mode:"SCHEDULED",startLocal:"99:00",endLocal:"02:00"}),false);
 assert.equal(isStrongFlowTrade({strategyRevision:STRONG_FLOW_STRATEGY_ID}),true);
 assert.equal(isStrongFlowTrade({strategyRevision:"main-wave-integrity-v1"}),false);
 function bars(side: "LONG"|"SHORT") {
