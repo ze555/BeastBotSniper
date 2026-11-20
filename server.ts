@@ -22,7 +22,7 @@ async function startServer() {
   startEngine();
 
   // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok", mode: "Apex Predator Only" }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "PB_STRONG_FLOW_FIXED2_1M_V1", mode: "PAPER", legacyEnginesEnabled: false }));
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
@@ -33,31 +33,21 @@ async function startServer() {
   app.get("/api/research/candidate-audit", (req, res) => res.json(getCandidateAudit()));
   app.get("/api/predator/stats", (req, res) => res.json(getStats()));
   app.post("/api/predator/config", (req, res) => {
-     updateConfig(req.body.balance, req.body.maxTrades, {
-        haltProfitEnabled: req.body.haltProfitEnabled,
-        haltProfitTarget: req.body.haltProfitTarget,
-        haltLossEnabled: req.body.haltLossEnabled,
-        haltLossTarget: req.body.haltLossTarget,
-        smartBtcHoldEnabled: req.body.smartBtcHoldEnabled,
-        btcVolThresholdStr: req.body.btcVolThresholdStr,
-        slAtrMultiplier: req.body.slAtrMultiplier,
-        geniusMode: req.body.geniusMode,
-        pullbackSniperEnabled: req.body.pullbackSniperEnabled,
-        freeTradeSlotEnabled: req.body.freeTradeSlotEnabled,
-        scanBatchSize: req.body.scanBatchSize,
-        feeRate: req.body.feeRate,
-        slippageRate: req.body.slippageRate,
-        scheduleEnabled: req.body.scheduleEnabled,
-        libyaOpen1: req.body.libyaOpen1,
-        libyaClose1: req.body.libyaClose1,
-        libyaOpen2: req.body.libyaOpen2,
-        libyaClose2: req.body.libyaClose2,
-     });
-     res.json({ success: true });
+    updateConfig(req.body.balance, req.body.maxTrades, {
+      haltProfitEnabled: req.body.haltProfitEnabled,
+      haltProfitTarget: req.body.haltProfitTarget,
+      haltLossEnabled: req.body.haltLossEnabled,
+      haltLossTarget: req.body.haltLossTarget,
+      scanBatchSize: req.body.scanBatchSize,
+      feeRate: req.body.feeRate,
+      slippageRate: req.body.slippageRate,
+    });
+    res.json({success:true,strategy:"PB_STRONG_FLOW_FIXED2_1M_V1"});
   });
   app.post("/api/predator/reset", (req, res) => {
-     resetAccountState();
-     res.json({ success: true, balance: 1000 });
+    const ok = resetAccountState();
+    if(!ok) return res.status(409).json({success:false,message:"Open paper positions must close before account reset"});
+    res.json({success:true,balance:1000});
   });
   app.get("/api/trades/active", (req, res) => res.json(getTrades()));
   app.get("/api/trades/closed", (req, res) => res.json(getClosedTrades()));
