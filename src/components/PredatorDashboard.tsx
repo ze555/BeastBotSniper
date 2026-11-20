@@ -18,20 +18,9 @@ export const PredatorDashboard: React.FC = () => {
   const [haltProfitTarget, setHaltProfitTarget] = useState('150');
   const [haltLossEnabled, setHaltLossEnabled] = useState(false);
   const [haltLossTarget, setHaltLossTarget] = useState('50');
-  const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
-  const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
-  const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.3');
-  const [geniusMode, setGeniusMode] = useState(true);
-  const [pullbackSniperEnabled, setPullbackSniperEnabled] = useState(true);
-  const [freeTradeSlotEnabled, setFreeTradeSlotEnabled] = useState(true);
   const [scanBatchSize, setScanBatchSize] = useState('25');
   const [feeRateInput, setFeeRateInput] = useState('0.0004');
   const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
-  const [scheduleEnabled, setScheduleEnabled] = useState(true);
-  const [libyaOpen1, setLibyaOpen1] = useState('10');
-  const [libyaClose1, setLibyaClose1] = useState('14');
-  const [libyaOpen2, setLibyaOpen2] = useState('15.5');
-  const [libyaClose2, setLibyaClose2] = useState('18');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
@@ -62,20 +51,9 @@ export const PredatorDashboard: React.FC = () => {
             if (data.haltProfitEnabled !== undefined) setHaltProfitEnabled(data.haltProfitEnabled);
             if (data.haltLossTarget !== undefined) setHaltLossTarget(data.haltLossTarget.toString());
             if (data.haltLossEnabled !== undefined) setHaltLossEnabled(data.haltLossEnabled);
-            if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
-            if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
-            if (data.slAtrMultiplier !== undefined) setSlAtrMultiplier(data.slAtrMultiplier.toString());
-            if (data.geniusMode !== undefined) setGeniusMode(data.geniusMode);
-            if (data.pullbackSniperEnabled !== undefined) setPullbackSniperEnabled(data.pullbackSniperEnabled);
-            if (data.freeTradeSlotEnabled !== undefined) setFreeTradeSlotEnabled(data.freeTradeSlotEnabled);
             if (data.scanBatchSize !== undefined) setScanBatchSize(data.scanBatchSize.toString());
             if (data.feeRate !== undefined) setFeeRateInput(data.feeRate.toString());
             if (data.slippageRate !== undefined) setSlippageRateInput(data.slippageRate.toString());
-            if (data.scheduleEnabled !== undefined) setScheduleEnabled(data.scheduleEnabled);
-            if (data.libyaOpen1 !== undefined) setLibyaOpen1(data.libyaOpen1.toString());
-            if (data.libyaClose1 !== undefined) setLibyaClose1(data.libyaClose1.toString());
-            if (data.libyaOpen2 !== undefined) setLibyaOpen2(data.libyaOpen2.toString());
-            if (data.libyaClose2 !== undefined) setLibyaClose2(data.libyaClose2.toString());
         }
       }
       const tradesRes = await fetch('/api/trades/active');
@@ -124,20 +102,9 @@ export const PredatorDashboard: React.FC = () => {
                   haltProfitTarget: Number(haltProfitTarget),
                   haltLossEnabled,
                   haltLossTarget: Number(haltLossTarget),
-                  smartBtcHoldEnabled,
-                  btcVolThresholdStr,
-                  slAtrMultiplier: Number(slAtrMultiplier),
-                  geniusMode,
-                  pullbackSniperEnabled,
-                  freeTradeSlotEnabled,
                   scanBatchSize: Number(scanBatchSize),
                   feeRate: Number(feeRateInput),
                   slippageRate: Number(slippageRateInput),
-                  scheduleEnabled,
-                  libyaOpen1: Number(libyaOpen1),
-                  libyaClose1: Number(libyaClose1),
-                  libyaOpen2: Number(libyaOpen2),
-                  libyaClose2: Number(libyaClose2),
               })
           });
           await fetchData();
@@ -367,246 +334,57 @@ export const PredatorDashboard: React.FC = () => {
        {/* Settings Tab */}
        {activeTab === 'SETTINGS' && (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
-             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-[0_0_15px_rgba(59,130,246,0.05)]">
-                <h2 className="text-lg text-white font-bold mb-6 flex gap-2 items-center">
-                   <SettingsIcon className="w-5 h-5 text-blue-400"/> إعدادات رأس المال والمخاطر
+             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5">
+                <h2 className="text-lg text-white font-bold flex gap-2 items-center">
+                   <SettingsIcon className="w-5 h-5 text-blue-400"/> إعدادات المحرك الجديد فقط
                 </h2>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
-                   <div className="space-y-2">
-                       <label className="text-sm text-slate-300 font-semibold block">الرصيد الافتراضي الأولي ($)</label>
-                       <p className="text-xs text-slate-500 mb-2">إعادة تعيين الرصيد التجريبي (سيتم تطبيقه إذا لم يكن هناك صفقات مغلقة بعد)</p>
-                       <input 
-                         type="number" 
-                         value={balanceInput}
-                         onChange={(e) => setBalanceInput(e.target.value)}
-                         className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white font-mono focus:border-blue-500 focus:outline-none transition-colors"
-                       />
-                   </div>
-                   <div className="space-y-2">
-                       <label className="text-sm text-slate-300 font-semibold block">الحد الأقصى للصفقات المفتوحة</label>
-                       <p className="text-xs text-slate-500 mb-2">كم عدد الصفقات التي يمكن أن يفتحها الروبوت في نفس الوقت</p>
-                       <input 
-                         type="number" 
-                         value={maxTradesInput}
-                         onChange={(e) => setMaxTradesInput(e.target.value)}
-                         className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white font-mono focus:border-blue-500 focus:outline-none transition-colors"
-                       />
-                   </div>
+                <p className="text-sm text-slate-300 leading-relaxed">
+                   الاستراتيجية الوحيدة: PB_STRONG_FLOW على شموع دقيقة مغلقة. وقف أولي 2×ATR،
+                   هدف كامل 2R، وخروج زمني بعد 180 دقيقة. المخاطرة المستهدفة 1% للصفقة،
+                   التداول من 16:00 إلى 24:00 UTC. جميع محركات الدخول والخروج القديمة معطّلة.
+                </p>
+                <p className="text-xs text-amber-400">التداول ورقي (Paper) فقط. هذه الإعدادات لا تغير قواعد الإشارة أو الخروج الثابت.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                   <label className="text-sm text-slate-300">الرصيد الافتراضي الأولي ($)
+                      <input type="number" min="100" value={balanceInput} onChange={e=>setBalanceInput(e.target.value)}
+                        className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                   </label>
+                   <label className="text-sm text-slate-300">أقصى عدد صفقات مفتوحة (1–10)
+                      <input type="number" min="1" max="10" value={maxTradesInput} onChange={e=>setMaxTradesInput(e.target.value)}
+                        className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                   </label>
+                   <label className="text-sm text-slate-300">عدد العملات في دورة المسح (5–60)
+                      <input type="number" min="5" max="60" value={scanBatchSize} onChange={e=>setScanBatchSize(e.target.value)}
+                        className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                   </label>
+                   <label className="text-sm text-slate-300">رسوم التداول
+                      <input type="number" step="0.0001" min="0" value={feeRateInput} onChange={e=>setFeeRateInput(e.target.value)}
+                        className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                   </label>
+                   <label className="text-sm text-slate-300">الانزلاق السعري التقديري
+                      <input type="number" step="0.0001" min="0" value={slippageRateInput} onChange={e=>setSlippageRateInput(e.target.value)}
+                        className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                   </label>
                 </div>
-
-                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-[0_0_15px_rgba(59,130,246,0.05)] mb-6">
-                 <h2 className="text-lg text-white font-bold mb-6 flex gap-2 items-center">
-                    <Target className="w-5 h-5 text-emerald-400"/> إعدادات إيقاف الروبوت الذاتي والذكاء الاصطناعي
-                 </h2>
-                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6 pt-4 border-t border-slate-800/50">
-                    <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <input 
-                               type="checkbox" 
-                               checked={haltProfitEnabled}
-                               onChange={(e) => setHaltProfitEnabled(e.target.checked)}
-                               className="w-5 h-5 accent-emerald-500 bg-slate-800 border-slate-700 rounded focus:ring-emerald-500 focus:ring-offset-slate-900" 
-                            />
-                            <span className="text-sm text-slate-200 font-bold">إيقاف الروبوت عند تحقيق ربح محدد</span>
-                        </label>
-                        <div className={`transition-opacity duration-300 ${haltProfitEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                            <p className="text-[11px] text-slate-500 mb-2">سيتم إيقاف تشغيل الروبوت تلقائياً إذا وصل صافي الربح التراكمي إلى هذا الرقم ($)</p>
-                            <input 
-                              type="number" 
-                              value={haltProfitTarget}
-                              onChange={(e) => setHaltProfitTarget(e.target.value)}
-                              disabled={!haltProfitEnabled}
-                              className="w-full bg-slate-900 border border-emerald-900/50 focus:border-emerald-500 rounded-lg p-2 text-emerald-100 font-mono focus:outline-none"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <input 
-                               type="checkbox" 
-                               checked={haltLossEnabled}
-                               onChange={(e) => setHaltLossEnabled(e.target.checked)}
-                               className="w-5 h-5 accent-rose-500 bg-slate-800 border-slate-700 rounded focus:ring-rose-500 focus:ring-offset-slate-900" 
-                            />
-                            <span className="text-sm text-slate-200 font-bold">إيقاف الروبوت عند الوصول لخسارة محددة</span>
-                        </label>
-                        <div className={`transition-opacity duration-300 ${haltLossEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                            <p className="text-[11px] text-slate-500 mb-2">سيتم إيقاف التشغيل كإجراء وقائي إذا وصل صافي الخسارة التراكمي لهذا الرقم ($)</p>
-                            <input 
-                              type="number" 
-                              value={haltLossTarget}
-                              onChange={(e) => setHaltLossTarget(e.target.value)}
-                              disabled={!haltLossEnabled}
-                              className="w-full bg-slate-900 border border-rose-900/50 focus:border-rose-500 rounded-lg p-2 text-rose-100 font-mono focus:outline-none"
-                            />
-                        </div>
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <label className="flex items-start sm:items-center gap-3 cursor-pointer">
-                        <input 
-                           type="checkbox" 
-                           checked={smartBtcHoldEnabled}
-                           onChange={(e) => setSmartBtcHoldEnabled(e.target.checked)}
-                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500 focus:ring-offset-slate-900" 
-                        />
-                        <div>
-                           <span className="text-sm text-slate-200 font-bold block mb-1">الاحتفاظ الذكي مع اتجاه البيتكوين (Smart Hold)</span>
-                           <span className="text-[11px] text-slate-400 block leading-relaxed">
-                              عند تفعيل هذا الخيار، سيقوم الروبوت بتجاهل إشارات الخروج الطارئة (Emergency Exits) الناجمة عن تخبط السوق إذا كانت اتجاهات الصفقات المفتوحة موازية لحركة البيتكوين، لتجنب الخروج المبكر من الصفقات الرابحة فقط بسبب تذبذب البيتكوين المؤقت.
-                           </span>
-                        </div>
-                    </label>
-                 </div>
-
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <div>
-                        <span className="text-sm text-slate-200 font-bold block mb-1">نسبة التذبذب العنيف للبيتكوين (%)</span>
-                        <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
-                            إذا تحرك البيتكوين بنسبة فجائية (خلال ربع ساعة) تفوق هذه النسبة المئوية المحددة، سيعتبره الروبوت تذبذب طارئ (BTC Chaos) وقد يقوم بإيقاف الصفقات وإلغاء عمليات الفحص لضمان الأمان.
-                        </span>
-                        <input 
-                            type="number" 
-                            step="0.05"
-                            min="0.10"
-                            value={btcVolThresholdStr}
-                            onChange={(e) => setBtcVolThresholdStr(e.target.value)}
-                            className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
-                        />
-                    </div>
-                 </div>
-
-                 
-                 <div className="bg-slate-950 p-4 rounded-xl border border-blue-500/50 mt-2 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-                    <label className="flex items-start sm:items-center gap-3 cursor-pointer">
-                        <input 
-                           type="checkbox" 
-                           checked={geniusMode}
-                           onChange={(e) => setGeniusMode(e.target.checked)}
-                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500" 
-                        />
-                        <div>
-                           <span className="text-sm text-blue-400 font-bold block mb-1">🤖 وضع العبقرية (Genius Mode)</span>
-                           <span className="text-[11px] text-slate-400 block leading-relaxed">
-                               يحد من الصفقات الخاسرة برفع معايير الدخول (فقط 🥈 أو 💎)، مع تأمين الصفقة وقاع الأرباح عند +0.30R بعد تحقيق الهدف الأول (+0.75R)، وفلترة الأسواق المتقلبة.
-                           </span>
-                        </div>
-                    </label>
-                 </div>
-<div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <label className="text-sm text-slate-200 font-bold block mb-1">مضاعف الـ ATR لوقف الخسارة (SL ATR Multiplier)</label>
-                    <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
-                        يحدد مسافة وقف الخسارة بناءً على مؤشر الـ ATR. القيمة الافتراضية 1.5. كلما زادت القيمة كلما زادت مسافة وقف الخسارة (أكثر أماناً من التذبذبات ولكن يزيد حجم المخاطرة).
-                    </span>
-                    <input 
-                        type="number" 
-                        step="0.1"
-                        min="0.1"
-                        value={slAtrMultiplier}
-                        onChange={(e) => setSlAtrMultiplier(e.target.value)}
-                        className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
-                    />
-                 </div>
-
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-sm text-amber-400 font-bold block">نسبة رسوم المنصة (Trading Fee Rate)</label>
-                            <span className="text-[11px] text-slate-400 block leading-relaxed">
-                                القيمة الافتراضية 0.0004 (0.04% كـ Taker في بينانس). تخصم بدقة عند الدخول والخروج لمحاكاة واقعية.
-                            </span>
-                            <input 
-                                type="number" 
-                                step="0.0001"
-                                min="0"
-                                value={feeRateInput}
-                                onChange={(e) => setFeeRateInput(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-sm text-purple-400 font-bold block">الانزلاق السعري التقديري (Slippage Rate)</label>
-                            <span className="text-[11px] text-slate-400 block leading-relaxed">
-                                القيمة الافتراضية 0.0002 (0.02% انزلاق سعري). يضمن عدم تضخيم الأرباح في الحركات السريعة.
-                            </span>
-                            <input 
-                                type="number" 
-                                step="0.0001"
-                                min="0"
-                                value={slippageRateInput}
-                                onChange={(e) => setSlippageRateInput(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 focus:border-purple-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
-                            />
-                        </div>
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <label className="flex items-start sm:items-center gap-3 cursor-pointer mb-4">
-                        <input 
-                           type="checkbox" 
-                           checked={scheduleEnabled}
-                           onChange={(e) => setScheduleEnabled(e.target.checked)}
-                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500 focus:ring-offset-slate-900" 
-                        />
-                        <div>
-                           <span className="text-sm text-slate-200 font-bold block mb-1">تفعيل نظام جدولة التداول (توقيت ليبيا)</span>
-                           <span className="text-[11px] text-slate-400 block leading-relaxed">
-                               عند التفعيل، سيقوم الروبوت بفتح صفقات جديدة فقط خلال الفترات المحددة بالأسفل (الرجاء ادخال التوقيت بنظام 24 ساعة، مثلاً 15.5 يعني 3:30 عصراً). الصفقات المفتوحة مسبقاً ستستمر وتدار بشكل طبيعي حتى خارج أوقات العمل.
-                           </span>
-                        </div>
-                    </label>
-
-                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity duration-300 ${scheduleEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                        <div className="space-y-2">
-                            <label className="text-xs text-emerald-400 font-bold block">الفترة الأولى - الفتح</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaOpen1} onChange={(e) => setLibyaOpen1(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-emerald-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-rose-400 font-bold block">الفترة الأولى - الإغلاق</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaClose1} onChange={(e) => setLibyaClose1(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-rose-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-emerald-400 font-bold block">الفترة الثانية - الفتح</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaOpen2} onChange={(e) => setLibyaOpen2(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-emerald-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-rose-400 font-bold block">الفترة الثانية - الإغلاق</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaClose2} onChange={(e) => setLibyaClose2(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-rose-500 focus:outline-none"
-                            />
-                        </div>
-                    </div>
-                 </div>
-                 </div>
-
-                <div className="flex justify-end pt-4 border-t border-slate-800">
-                   <button 
-                     onClick={saveConfig}
-                     disabled={isSavingConfig}
-                     className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition"
-                   >
-                     {isSavingConfig ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                     حفظ التغييرات
-                   </button>
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                   <label className="flex gap-2 items-center text-sm text-white">
+                      <input type="checkbox" checked={haltProfitEnabled} onChange={e=>setHaltProfitEnabled(e.target.checked)}/>
+                      منع دخول صفقات جديدة عند الوصول لهدف الربح
+                   </label>
+                   <input type="number" min="1" value={haltProfitTarget} onChange={e=>setHaltProfitTarget(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                   <label className="flex gap-2 items-center text-sm text-white">
+                      <input type="checkbox" checked={haltLossEnabled} onChange={e=>setHaltLossEnabled(e.target.checked)}/>
+                      منع دخول صفقات جديدة عند حد الخسارة
+                   </label>
+                   <input type="number" min="1" value={haltLossTarget} onChange={e=>setHaltLossTarget(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
                 </div>
+                <button onClick={saveConfig} disabled={isSavingConfig}
+                  className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
+                   {isSavingConfig ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
+                   حفظ الإعدادات
+                </button>
              </div>
           </div>
        )}
