@@ -27,7 +27,7 @@ export const PredatorDashboard: React.FC = () => {
   const [scanBatchSize, setScanBatchSize] = useState('25');
   const [feeRateInput, setFeeRateInput] = useState('0.0004');
   const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
-  const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [libyaOpen1, setLibyaOpen1] = useState('10');
   const [libyaClose1, setLibyaClose1] = useState('14');
   const [libyaOpen2, setLibyaOpen2] = useState('15.5');
@@ -295,9 +295,9 @@ export const PredatorDashboard: React.FC = () => {
                            <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">RSI:</span> <span>{t.priceData.rsi}</span></div>
                            <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">الزخم:</span> <span>{t.priceData.adx}</span></div>
                            <div className="text-[9px] sm:text-[10px] flex gap-1 mt-2 flex-wrap">
-                              <span className={`px-1.5 py-0.5 rounded ${t.a_closed ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20'}`}>TP1 35%</span>
-                              <span className={`px-1.5 py-0.5 rounded ${t.b_closed ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20'}`}>TP2 40%</span>
-                              <span className={`px-1.5 py-0.5 rounded ${t.c_closed ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20'}`}>TP3 25%</span>
+                              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/20">Profit Guardian +0.50R</span>
+                              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/20">Trailing 0.20R</span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">No legacy TP exits</span>
                            </div>
                         </div>
                      )}
