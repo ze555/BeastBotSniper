@@ -1,0 +1,52 @@
+name: Railway research snapshot
+on:
+  push:
+    branches: [feat/institutional-full-trading-engine]
+    paths: [.github/workflows/railway-research-snapshot.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download research endpoints with retries
+        shell: bash
+        env:
+          BASE_URL: https://beastbotsniper-production-670ceca9.up.railway.app
+        run: |
+          set -uo pipefail
+          mkdir -p snapshot
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > snapshot/fetched_at_utc.txt
+          for endpoint in export-all trades rejected performance; do
+            echo "Fetching $endpoint..."
+            code=$(curl --silent --show-error --location --retry 4 --retry-all-errors --retry-delay 8 --connect-timeout 25 --max-time 180 --output "snapshot/$endpoint.json" --write-out '%{http_code}' "$BASE_URL/api/research/$endpoint") || code="CURL_ERROR"
+            echo "$endpoint HTTP $code"
+            echo "$endpoint $code" >> snapshot/http_status.txt
+            if [ "$code" != "200" ]; then
+              mv "snapshot/$endpoint.json" "snapshot/$endpoint.error.txt" 2>/dev/null || true
+            else
+              python3 - "$endpoint" <<'PY'
+          import json,sys
+          name=sys.argv[1]
+          path=f"snapshot/{name}.json"
+          try:
+              with open(path,encoding="utf-8") as f: json.load(f)
+              print(name, "valid JSON")
+          except Exception as exc:
+              print(name, "INVALID JSON",str(exc))
+              with open("snapshot/http_status.txt","a") as f: f.write(name+" INVALID_JSON\n")
+          PY
+            fi
+          done
+      - name: Save snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: railway-research-snapshot
+          path: snapshot/
+          retention-days: 7
+          if-no-files-found: error
