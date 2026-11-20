@@ -18,11 +18,11 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // Start Apex Predator
+  // Start exclusive Strong Flow paper engine
   startEngine();
 
   // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok", mode: "Apex Predator Only" }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok", mode: "PB_STRONG_FLOW_FIXED2_1M_V1 PAPER" }));
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
