@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Activity, Target, TrendingUp, Swords, Play, Square, Terminal, LayoutDashboard, FileText, Settings as SettingsIcon, Save, Download, Database } from 'lucide-react';
 
 export const PredatorDashboard: React.FC = () => {
@@ -22,6 +22,11 @@ export const PredatorDashboard: React.FC = () => {
   const [feeRateInput, setFeeRateInput] = useState('0.0004');
   const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [tradingMode, setTradingMode] = useState<'SCHEDULED' | 'ALWAYS'>('SCHEDULED');
+  const [tradingStart, setTradingStart] = useState('18:00');
+  const [tradingEnd, setTradingEnd] = useState('02:00');
+  const [configError, setConfigError] = useState('');
+  const tradingSettingsDirty = useRef(false);
 
   useEffect(() => {
     fetchData();
@@ -44,7 +49,12 @@ export const PredatorDashboard: React.FC = () => {
       if (statsRes.ok) {
         const data = await safeJson(statsRes);
         setStats(data);
-        if (document.activeElement?.tagName !== 'INPUT') {
+        if (document.activeElement?.tagName !== 'INPUT' && !tradingSettingsDirty.current) {
+            if (data.strategySettings?.tradingSchedule) {
+                setTradingMode(data.strategySettings.tradingSchedule.mode);
+                setTradingStart(data.strategySettings.tradingSchedule.startLocal);
+                setTradingEnd(data.strategySettings.tradingSchedule.endLocal);
+            }
             setBalanceInput(data.initialBalance?.toString() || '1000');
             setMaxTradesInput(data.maxOpenTrades?.toString() || '3');
             if (data.haltProfitTarget !== undefined) setHaltProfitTarget(data.haltProfitTarget.toString());
@@ -91,8 +101,9 @@ export const PredatorDashboard: React.FC = () => {
 
   const saveConfig = async () => {
       setIsSavingConfig(true);
+      setConfigError('');
       try {
-          await fetch('/api/predator/config', {
+          const result = await fetch('/api/predator/config', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -105,11 +116,18 @@ export const PredatorDashboard: React.FC = () => {
                   scanBatchSize: Number(scanBatchSize),
                   feeRate: Number(feeRateInput),
                   slippageRate: Number(slippageRateInput),
+                  tradingSchedule: {mode: tradingMode, startLocal: tradingStart, endLocal: tradingEnd},
               })
           });
+          if (!result.ok) {
+              const data = await safeJson(result).catch(() => ({message:'تعذر حفظ الإعدادات'}));
+              throw new Error(data.message || 'تعذر حفظ الإعدادات');
+          }
+          tradingSettingsDirty.current = false;
           await fetchData();
       } catch (e) {
           console.error(e);
+          setConfigError(e instanceof Error ? e.message : 'تعذر حفظ الإعدادات');
       }
       setIsSavingConfig(false);
   };
@@ -341,9 +359,31 @@ export const PredatorDashboard: React.FC = () => {
                 <p className="text-sm text-slate-300 leading-relaxed">
                    الاستراتيجية الوحيدة: PB_STRONG_FLOW على شموع دقيقة مغلقة. وقف أولي 2×ATR،
                    هدف كامل 2R، وخروج زمني بعد 180 دقيقة. المخاطرة المستهدفة 1% للصفقة،
-                   التداول من 16:00 إلى 24:00 UTC. جميع محركات الدخول والخروج القديمة معطّلة.
+                   التوقيت الافتراضي 18:00–02:00 بتوقيت ليبيا، ويمكن تغييره أدناه. جميع محركات الدخول والخروج القديمة معطّلة.
                 </p>
-                <p className="text-xs text-amber-400">التداول ورقي (Paper) فقط. هذه الإعدادات لا تغير قواعد الإشارة أو الخروج الثابت.</p>
+                <p className="text-xs text-amber-400">التداول ورقي (Paper) فقط. الوقت يتحكم في فتح الصفقات الجديدة، وتستمر حماية وإغلاق الصفقات المفتوحة خارج النافذة.</p>
+                <div className="border border-slate-700 rounded-lg p-4 space-y-3">
+                   <label className="block text-sm font-bold text-white">وقت فتح الصفقات
+                      <select value={tradingMode} onChange={e => {tradingSettingsDirty.current = true; setTradingMode(e.target.value as 'SCHEDULED'|'ALWAYS');}}
+                        className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white">
+                         <option value="SCHEDULED">توقيت محدد (الافتراضي: 18:00–02:00)</option>
+                         <option value="ALWAYS">طوال اليوم 24/7</option>
+                      </select>
+                   </label>
+                   {tradingMode === 'SCHEDULED' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                         <label className="text-sm text-slate-300">وقت البدء — بتوقيت ليبيا
+                            <input type="time" value={tradingStart} onChange={e => {tradingSettingsDirty.current = true; setTradingStart(e.target.value);}}
+                              className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                         </label>
+                         <label className="text-sm text-slate-300">وقت التوقف عن فتح صفقات جديدة — بتوقيت ليبيا
+                            <input type="time" value={tradingEnd} onChange={e => {tradingSettingsDirty.current = true; setTradingEnd(e.target.value);}}
+                              className="mt-2 w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                         </label>
+                      </div>
+                   )}
+                   <p className="text-xs text-slate-400">يمكن عبور منتصف الليل (مثل 18:00–02:00). وقت النهاية غير مشمول. التغيير يسري فور الحفظ.</p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                    <label className="text-sm text-slate-300">الرصيد الافتراضي الأولي ($)
                       <input type="number" min="100" value={balanceInput} onChange={e=>setBalanceInput(e.target.value)}
@@ -380,6 +420,7 @@ export const PredatorDashboard: React.FC = () => {
                    <input type="number" min="1" value={haltLossTarget} onChange={e=>setHaltLossTarget(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
                 </div>
+                {configError && <p role="alert" className="text-sm text-rose-400">{configError}</p>}
                 <button onClick={saveConfig} disabled={isSavingConfig}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
                    {isSavingConfig ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
