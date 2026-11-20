@@ -5,6 +5,7 @@
  * Existing historical research modules remain available for offline analysis.
  */
 import axios from "axios";
+import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles } from "./tradingIntegrity.js";
 import {
@@ -24,6 +25,7 @@ import {
 const FAPI = "https://fapi.binance.com";
 const MAX_DAILY_LOSS = 0.04;
 const SCAN_INTERVAL_MS = 15_000;
+const SCAN_CONCURRENCY = 12; // bound parallel klines requests / Railway resource use
 const PROTECT_INTERVAL_MS = 2_000;
 const MAX_DASHBOARD_TRADES = 150;
 let active = false;
@@ -34,7 +36,7 @@ let protectTimer: ReturnType<typeof setInterval> | null = null;
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
 let maxOpenTrades = STRONG_FLOW_MAX_CONCURRENT;
-let scanBatchSize = 25;
+let scanBatchSize = 0; // AUTO: visit every available futures symbol per full round
 let feeRate = 0.0004;
 let slippageRate = 0.0002;
 let tradingSchedule: StrongFlowTradingSchedule = {...STRONG_FLOW_DEFAULT_TRADING_SCHEDULE};
@@ -44,6 +46,14 @@ let haltLossEnabled = false;
 let haltLossTarget = 50;
 let currentBatchIndex = 0;
 let lastUniverseUpdate = 0;
+let scanBackoffUntil = 0;
+let scanPassStartedAt = 0;
+let scanPassAttempted = new Set<string>();
+let scanPassSucceeded = new Set<string>();
+let completedScanPasses = 0;
+let lastCompletedScanPass: null | {time:string; durationMs:number; attempted:number; succeeded:number; failed:number; universeSize:number} = null;
+let lastBatchAttempted = 0;
+let lastBatchSucceeded = 0;
 let dayKey = new Intl.DateTimeFormat("en-CA", {timeZone:"Africa/Tripoli"}).format(new Date());
 let today = {count:0,wins:0,losses:0,pnl:0,sumR:0};
 let watchlist: string[] = ["BTCUSDT","ETHUSDT","SOLUSDT","AVAXUSDT","LINKUSDT","SUIUSDT"];
@@ -54,7 +64,7 @@ const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
 const cooldownUntil = new Map<string,number>();
-const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{} as Record<string,number>};
+const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{} as Record<string,number>};
 
 export function addLog(message: string, type: "info"|"warn"|"success"|"error"="info") {
   logs.unshift({time:new Date().toISOString(),msg:message,type});
@@ -122,6 +132,20 @@ export function getStats(){
     watchlistLength:watchlist.length,hotWatchlistLength:hotWatchlist.length,
     hotWatchlist:hotWatchlist.slice(0,8),
     currentBatchProgress:String(currentBatchIndex)+" / "+String(watchlist.length),
+    scanCoverage:{
+      scope:"ALL_TRADING_USDM_PERPETUALS_USDT_USDC",
+      enabled:active&&isStrongFlowTradingHour(new Date(),tradingSchedule),
+      eligibleSymbols:watchlist.length,
+      universeLastUpdatedAt:lastUniverseUpdate?new Date(lastUniverseUpdate).toISOString():null,
+      mode:scanBatchSize===0?"AUTO_ALL":"MANUAL_ALL",
+      effectiveBatchSize:nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize).effectiveBatchSize,
+      currentPassAttempted:scanPassAttempted.size,
+      currentPassSucceeded:scanPassSucceeded.size,
+      completedPasses:completedScanPasses,
+      lastCompletedPass:lastCompletedScanPass,
+      lastBatchAttempted,lastBatchSucceeded,
+      rateLimitBackoffUntil:Date.now()<scanBackoffUntil?new Date(scanBackoffUntil).toISOString():null
+    },
     freeTradesCount:0,riskedTradesCount:activeTrades.length,
     isSleeping:!isStrongFlowTradingHour(new Date(), tradingSchedule),
     executionRiskLocked:entryBlocked(),
@@ -151,7 +175,8 @@ export function updateConfig(balance:number,maxTrades:number,opts:any={}){
   if(Number.isFinite(Number(opts.haltProfitTarget))&&Number(opts.haltProfitTarget)>0)haltProfitTarget=Number(opts.haltProfitTarget);
   if(typeof opts.haltLossEnabled==="boolean")haltLossEnabled=opts.haltLossEnabled;
   if(Number.isFinite(Number(opts.haltLossTarget))&&Number(opts.haltLossTarget)>0)haltLossTarget=Number(opts.haltLossTarget);
-  if(Number.isFinite(Number(opts.scanBatchSize))&&Number(opts.scanBatchSize)>0)scanBatchSize=Math.max(5,Math.min(60,Math.floor(Number(opts.scanBatchSize))));
+  if(opts.scanBatchSize !== undefined && Number.isFinite(Number(opts.scanBatchSize)) && Number(opts.scanBatchSize)>=0)
+    scanBatchSize=Number(opts.scanBatchSize)<5?0:Math.max(5,Math.min(200,Math.floor(Number(opts.scanBatchSize))));
   if(Number.isFinite(Number(opts.feeRate))&&Number(opts.feeRate)>=0&&Number(opts.feeRate)<0.01)feeRate=Number(opts.feeRate);
   if(Number.isFinite(Number(opts.slippageRate))&&Number(opts.slippageRate)>=0&&Number(opts.slippageRate)<0.01)slippageRate=Number(opts.slippageRate);
   if(opts.tradingSchedule !== undefined && isValidStrongFlowTradingSchedule(opts.tradingSchedule)) {
@@ -166,26 +191,55 @@ export function resetAccountState(){
   cooldownUntil.clear();lastSignalTime.clear();addLog("Paper account reset to $1000.","success");return true;
 }
 async function updateUniverse(){
-  if(Date.now()-lastUniverseUpdate<300_000&&watchlist.length>10)return;
-  try{
-    const [ticker,info]=await Promise.all([
-      axios.get(FAPI+"/fapi/v1/ticker/24hr",{timeout:8000}),
-      axios.get(FAPI+"/fapi/v1/exchangeInfo",{timeout:8000})
-    ]);
-    if(!Array.isArray(ticker.data)||!Array.isArray(info.data?.symbols))return;
-    const perpetuals=new Set(info.data.symbols.filter((x:any)=>x.contractType==="PERPETUAL"&&x.quoteAsset==="USDT"&&x.status==="TRADING").map((x:any)=>x.symbol));
-    const eligible=ticker.data.filter((x:any)=>perpetuals.has(x.symbol)&&Number(x.quoteVolume)>1_000_000)
-      .sort((a:any,b:any)=>Number(b.quoteVolume)-Number(a.quoteVolume));
-    if(eligible.length===0)return;
-    watchlist=eligible.map((x:any)=>x.symbol);
-    hotWatchlist=[...eligible].filter((x:any)=>Math.abs(Number(x.priceChangePercent))>=1)
-      .sort((a:any,b:any)=>Math.abs(Number(b.priceChangePercent))-Math.abs(Number(a.priceChangePercent)))
-      .slice(0,20).map((x:any)=>x.symbol);
-    currentBatchIndex=0;lastUniverseUpdate=Date.now();
-  }catch(e:any){diagnostics.scanErrors++;addLog("Universe refresh unavailable; retaining previous symbols: "+(e?.message||e),"warn");}
+  if(lastUniverseUpdate && Date.now()-lastUniverseUpdate<300_000)return;
+  try {
+    // ExchangeInfo is authoritative; do not depend on ticker availability for full coverage.
+    const info=await axios.get(FAPI+"/fapi/v1/exchangeInfo",{timeout:8000});
+    if(!Array.isArray(info.data?.symbols))return;
+    const eligible=listAllUsdmPerpetuals(info.data.symbols);
+    if(!eligible.length)return;
+    const nextSymbol=watchlist[currentBatchIndex];
+    const universeChanged=watchlist.length!==eligible.length || watchlist.some((s,i)=>s!==eligible[i]);
+    watchlist=eligible;
+    if(universeChanged) {
+      // Preserve round-robin position for existing symbols; do not repeatedly restart at 0.
+      const cursor=nextSymbol?watchlist.indexOf(nextSymbol):-1;
+      currentBatchIndex=cursor>=0?cursor:0;
+      scanPassStartedAt=0;scanPassAttempted.clear();scanPassSucceeded.clear();
+      addLog("All Binance USD-M USDT/USDC perpetual contracts eligible: "+watchlist.length,"success");
+    }
+    lastUniverseUpdate=Date.now();
+    try {
+      const ticker=await axios.get(FAPI+"/fapi/v1/ticker/24hr",{timeout:8000});
+      const eligibleSet=new Set(watchlist);
+      hotWatchlist=Array.isArray(ticker.data)?ticker.data
+        .filter((x:any)=>eligibleSet.has(x.symbol)&&Math.abs(Number(x.priceChangePercent))>=1)
+        .sort((a:any,b:any)=>Math.abs(Number(b.priceChangePercent))-Math.abs(Number(a.priceChangePercent)))
+        .slice(0,20).map((x:any)=>x.symbol):[];
+    } catch { hotWatchlist=[]; /* Ticker is optional; main coverage still runs. */ }
+  }catch(e:any) {
+    diagnostics.scanErrors++;
+    addLog("Universe refresh unavailable; retaining previous symbols: "+(e?.message||e),"warn");
+  }
 }
 async function fetchClosedOneMinuteBars(symbol:string):Promise<StrongFlowBar[]>{
-  const r=await axios.get(FAPI+"/fapi/v1/klines",{params:{symbol,interval:"1m",limit:85},timeout:5000});
+  let r;
+  try {
+    r=await axios.get(FAPI+"/fapi/v1/klines",{params:{symbol,interval:"1m",limit:85},timeout:5000});
+  } catch (e:any) {
+    const status=Number(e?.response?.status);
+    if(status===429 || status===418) {
+      const retrySeconds=Number(e?.response?.headers?.["retry-after"]);
+      const pauseMs=(Number.isFinite(retrySeconds) && retrySeconds>0
+        ? Math.min(300,retrySeconds) : 60)*1000;
+      if(Date.now()>=scanBackoffUntil) {
+        diagnostics.rateLimitEvents++;
+        addLog("Binance rate limit; full-universe scanner pausing then retrying", "warn");
+      }
+      scanBackoffUntil=Math.max(scanBackoffUntil,Date.now()+pauseMs);
+    }
+    throw e;
+  }
   if(!Array.isArray(r.data))return [];
   const bars:StrongFlowBar[]=r.data.map((k:any)=>({
     openTime:Number(k[0]),closeTime:Number(k[6]),open:Number(k[1]),high:Number(k[2]),
@@ -235,26 +289,54 @@ async function executeSignal(symbol:string,signal:StrongFlowSignal,bars:StrongFl
   addLog("PAPER "+signal.side+" "+symbol+" opened at "+entry+"; full target 2R","success");
 }
 async function scanEntries(){
-  if(entryBlocked()||scanning)return;
+  if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
   scanning=true;
   try{
     resetDailyStatsIfNeeded();
     await updateUniverse();
-    if(entryBlocked())return;
-    const current=watchlist.slice(currentBatchIndex,currentBatchIndex+scanBatchSize);
-    currentBatchIndex=currentBatchIndex+scanBatchSize>=watchlist.length?0:currentBatchIndex+scanBatchSize;
-    const symbols=[...new Set([...hotWatchlist,...current])];
-    for(let i=0;i<symbols.length&&!entryBlocked();i+=5){
-      const rows=await Promise.allSettled(symbols.slice(i,i+5).map(async symbol=>{
-        if(activeTrades.some(t=>t.symbol===symbol)||isSymbolInCooldown(symbol))return null;
+    if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil)return;
+    const batch=nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize);
+    if(batch.symbols.length===0)return;
+    if(!scanPassStartedAt)scanPassStartedAt=Date.now();
+    const regularSet=new Set(batch.symbols);
+    // Hot symbols get extra attention, but never displace a symbol in the coverage round.
+    const symbols=[...new Set([...hotWatchlist,...batch.symbols])];
+    let attempted=0,succeeded=0,complete=true;
+    for(let i=0;i<symbols.length;i+=SCAN_CONCURRENCY) {
+      if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil) {
+        complete=false;break;
+      }
+      const group=symbols.slice(i,i+SCAN_CONCURRENCY);
+      const rows=await Promise.allSettled(group.map(async symbol=>{
         const bars=await fetchClosedOneMinuteBars(symbol);
-        const signal=evaluateStrongFlowSignal(bars);
-        return signal?{symbol,bars,signal}:null;
+        return {symbol,bars,signal:evaluateStrongFlowSignal(bars)};
       }));
-      for(const result of rows){
-        if(entryBlocked())break;
-        if(result.status==="fulfilled"&&result.value)await executeSignal(result.value.symbol,result.value.signal,result.value.bars);
-        else if(result.status==="rejected")diagnostics.scanErrors++;
+      for(let j=0;j<rows.length;j++){
+        const symbol=group[j],result=rows[j];
+        if(regularSet.has(symbol)) {
+          scanPassAttempted.add(symbol);attempted++;
+          if(result.status==="fulfilled"){scanPassSucceeded.add(symbol);succeeded++;}
+        }
+        if(result.status==="fulfilled"&&result.value.signal) {
+          // Risk gates apply to placing orders, not the surveillance of the full market.
+          await executeSignal(result.value.symbol,result.value.signal,result.value.bars);
+        } else if(result.status==="rejected") diagnostics.scanErrors++;
+      }
+    }
+    lastBatchAttempted=attempted;lastBatchSucceeded=succeeded;
+    if(complete){
+      currentBatchIndex=batch.nextIndex;
+      if(batch.completedPass){
+        lastCompletedScanPass={
+          time:new Date().toISOString(),
+          durationMs:Date.now()-scanPassStartedAt,
+          attempted:scanPassAttempted.size,
+          succeeded:scanPassSucceeded.size,
+          failed:scanPassAttempted.size-scanPassSucceeded.size,
+          universeSize:watchlist.length
+        };
+        completedScanPasses++;
+        scanPassStartedAt=0;scanPassAttempted.clear();scanPassSucceeded.clear();
       }
     }
   }catch(e:any){diagnostics.scanErrors++;addLog("Strong-flow scan error: "+(e?.message||e),"warn");}
