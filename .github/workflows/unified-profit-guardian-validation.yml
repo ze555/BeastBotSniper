@@ -1,0 +1,24 @@
+name: Unified Profit Guardian Validation
+on:
+  push:
+    branches:
+      - change/unified-profit-guardian-only-20261120
+  pull_request:
+    branches:
+      - feat/institutional-full-trading-engine
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit --target ES2020 --module ESNext --moduleResolution bundler --skipLibCheck src/lib/profitGuardian.ts
+      - run: npm test
+      - name: Project-wide TypeScript baseline (reported separately)
+        run: npx tsc --noEmit --project tsconfig.json
