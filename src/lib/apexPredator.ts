@@ -177,7 +177,7 @@ export function getStats() {
     hotWatchlistLength: HOT_WATCHLIST.length,
     hotWatchlist: HOT_WATCHLIST.slice(0, 8),
     currentBatchProgress: `${Math.min(currentBatchIndex, WATCHLIST.length)} / ${WATCHLIST.length}`,
-    isSleeping: !isLibyaTradingAllowed(),
+    isSleeping: !isStrongFlowTradingHour(),
     today: todaysStats 
   }; 
 }
