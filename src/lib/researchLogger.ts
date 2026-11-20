@@ -772,7 +772,7 @@ export function logTradeDecision(trade: any, exitContext: {
          timestamp_exit: exitTime.toISOString(),
          symbol: trade.symbol,
          exchange: "Binance Futures (Paper)",
-         timeframe: "15m",
+         timeframe: trade.setupType === "PB_STRONG_FLOW" ? "1m" : "15m",
          side: trade.direction,
          signal_type: trade.setupType || "BREAKOUT_MOMENTUM",
          market_regime: marketRegimeContext.strategy_regime,
