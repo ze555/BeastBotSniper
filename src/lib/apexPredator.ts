@@ -1,5 +1,6 @@
 import { STRATEGY_REVISION, closedCandles, tightenStop, markTrade, waveEvidence } from "./tradingIntegrity.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
+import { evaluateStrongFlowSignal, isStrongFlowTrade, isStrongFlowTradingHour, STRONG_FLOW_STRATEGY_ID, STRONG_FLOW_MAX_HOLD_MS, STRONG_FLOW_MAX_CONCURRENT, STRONG_FLOW_RISK_FRACTION, type StrongFlowSignal } from "./strongFlowStrategy.js";
 import axios from "axios";
 import { calcEMA, calcATR, calcADX, calcMACD, calcRSI, calcSupertrend } from "./indicators.js";
 import { evaluateSymbolReasoning, ReasoningResult, evaluateInstitutionalTradeGuard, InstitutionalGuardResult } from "./reasoningEngine.js";
@@ -82,14 +83,16 @@ const MIN_RR_REQUIRED = 2.5;
 const TP1_R = 0.75;
 const TP2_R = 1.80;
 const TP3_R = 3.50;
-const MAX_OPEN_TRADES = 6;
+const MAX_OPEN_TRADES = 10;
 const MAX_DAILY_LOSS = 0.040;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
 const AVOID_HOURS = [22, 23, 0, 1, 2, 3, 4, 5, 6, 7];
 
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
-let maxOpenTradesConfig = 6;
+let maxOpenTradesConfig = 10;
+const STRONG_FLOW_MAIN_ENABLED = true;
+const lastStrongFlowSignal = new Map<string, number>();
 
 // New Config
 let haltProfitEnabled = false;
@@ -430,6 +433,8 @@ async function fetchKl(symbol: string, interval: string, limit: number) {
       close: parseFloat(k[4]),
       volume: parseFloat(k[5]),
       closeTime: k[6],
+      quoteVolume: parseFloat(k[7]),
+      takerBuyQuote: parseFloat(k[10]),
       takerBuy: parseFloat(k[9]),
       takerSell: parseFloat(k[5]) - parseFloat(k[9]) // volume - taker buy = taker sell
    }))).slice(-limit);
@@ -1197,6 +1202,88 @@ async function scoreEntry(symbol: string, ctx: any) {
    return { signal: "WAIT", sl, ss, reasoning, p, w, ctx };
 }
 
+// --- Main branch 1m PB_STRONG_FLOW + fixed 2R entry (PAPER only) ---
+// A separate entry path avoids passing these 1m signals through the old 15m
+// score/wave filters, which would change the historical research conditions.
+async function executeStrongFlowTrade(symbol: string, s: StrongFlowSignal, ctx: any, candles: any[]) {
+   if (!botActive || activeTrades.some(t => t.symbol === symbol) || isSymbolInCooldown(symbol) ||
+       !isStrongFlowTradingHour() || lastStrongFlowSignal.get(symbol) === s.signalCloseTime) return;
+   let quote;
+   try { quote = await fetchExecutionQuote(symbol); }
+   catch { diagnostics.quoteErrors++; recordCandidate(symbol, s.side, "STRONG_FLOW_QUOTE_UNAVAILABLE", false); return; }
+   if (!botActive || !isStrongFlowTradingHour() || Date.now() - s.signalCloseTime > 90_000) return;
+   const entry = s.side === "LONG" ? quote.ask * (1 + slippageRate) : quote.bid * (1 - slippageRate);
+   const dist = s.atr14 * 2;
+   const pct = dist / entry;
+   // Same historical fee-aware stop boundaries (0.48%-4%). Avoid false
+   // opportunity from fee friction on exceptionally narrow stops.
+   if (!(dist > 0 && entry > 0 && pct >= 0.0048 && pct <= 0.04)) {
+      recordCandidate(symbol, s.side, "STRONG_FLOW_STOP_DISTANCE", false); return;
+   }
+   const risked = activeTrades.reduce((sum, t) => sum + Math.max(0,
+      (t.direction === "LONG" ? t.entry - t.sl : t.sl - t.entry) * t.pos +
+      t.entry * t.pos * 2 * (feeRate + slippageRate)), 0);
+   const budget = Math.max(0, initialVirtualBalance * MAX_DAILY_LOSS + Math.min(0, todaysStats.pnl) - risked);
+   const riskDollars = Math.min(virtualBalance * STRONG_FLOW_RISK_FRACTION, budget);
+   const marginCapNotional = Math.min(virtualBalance * 10, virtualBalance * 0.15 * 10);
+   const pos = Math.min(riskDollars / (dist + entry * 2 * (feeRate + slippageRate)), marginCapNotional / entry);
+   if (!(pos > 0 && Number.isFinite(pos))) {
+      recordCandidate(symbol, s.side, "STRONG_FLOW_RISK_BUDGET", false); return;
+   }
+   const sign = s.side === "LONG" ? 1 : -1;
+   const stop = entry - sign * dist;
+   const target = entry + sign * 2 * dist;
+   if (!(stop > 0 && target > 0)) return;
+   const trade: any = {
+      symbol, direction: s.side, entry, sl: stop, initialSlDist: dist,
+      tp1: target, tp2: target, tp3: target, pos, initialPos: pos,
+      entryTime: new Date().toISOString(), entryTiming: extractEntryTiming(),
+      marketRegimeContext: extractMarketRegimeContext({rvol:s.rvol,atr14:s.atr14,atr20:s.atr14},ctx),
+      strategyRevision: STRONG_FLOW_STRATEGY_ID, executionMode: "PAPER",
+      setupType: "PB_STRONG_FLOW", setupLabel: "1m strong flow / fixed 2R",
+      part_a: 1, part_b: 0, part_c: 0,
+      a_closed: false, b_closed: false, c_closed: false, be_done: false,
+      peak_r: 0, micro_banked: false, score: 0, grade: "GRADE_A", pnl: 0,
+      atr: s.atr14, entrySignalTime: s.signalCloseTime, currentPrice: entry,
+      highestPrice: entry, lowestPrice: entry,
+      candlesBeforeEntry: formatCandles(candles, 40),
+      priceData: {rvol:s.rvol,atr14:s.atr14,delta:s.delta,flow5:s.flow5,flow15:s.flow15,trend15:s.trend15,trend60:s.trend60},
+      whaleData: {scenario:"STRONG_FLOW_1M_EXECUTED_TAKER_QUOTE"},
+      reasoning: {flow: {state:"STRONG_FLOW_1M"}, timingGate:{state:"CONFIRMED"}}
+   };
+   activeTrades.push(trade);
+   lastStrongFlowSignal.set(symbol, s.signalCloseTime);
+   diagnostics.opened++;
+   registerTradeForDirectionTracking(trade);
+   recordCandidate(symbol, s.side, "PB_STRONG_FLOW_FIXED_2R", true);
+   addLog(`✅ PAPER ${s.side} ${symbol} strong flow 1m | entry=${entry.toFixed(6)} SL=${stop.toFixed(6)} full TP=${target.toFixed(6)} 2R`, "success");
+}
+
+async function scanStrongFlowEntries(ctx: any, canOpenMore: () => boolean) {
+   if (!isStrongFlowTradingHour()) return;
+   // Hot queue + rotating broad universe. No 15m scoring pipeline for new trades.
+   const urgent = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
+   const all = [...new Set([...urgent, ...WATCHLIST.slice(currentBatchIndex, currentBatchIndex + scanBatchSize)])];
+   currentBatchIndex = currentBatchIndex + scanBatchSize >= WATCHLIST.length ? 0 : currentBatchIndex + scanBatchSize;
+   for (let i = 0; i < all.length && canOpenMore(); i += 5) {
+      const chunk = all.slice(i, i+5);
+      const candidates = await Promise.allSettled(chunk.map(async symbol => {
+         if (activeTrades.some(t => t.symbol === symbol) || isSymbolInCooldown(symbol)) return null;
+         try {
+            const candles = await fetchKl(symbol, "1m", 85);
+            const signal = evaluateStrongFlowSignal(candles);
+            return signal ? {symbol, candles, signal} : null;
+         } catch { return null; }
+      }));
+      for (const candidate of candidates) {
+         if (!canOpenMore()) break;
+         if (candidate.status !== "fulfilled" || !candidate.value) continue;
+         const {symbol,signal,candles} = candidate.value;
+         await executeStrongFlowTrade(symbol, signal, ctx, candles);
+      }
+   }
+}
+
 // --- SEC 5: EXECUTION ---
 async function executeTrade(symbol: string, decision: any) {
    if (isSymbolInCooldown(symbol)) {
@@ -1424,6 +1511,8 @@ async function executeTrade(symbol: string, decision: any) {
 // --- SEC 6: EXIT BRAIN ---
 async function exitBrain(trade: any, ctx: any) {
    const t = trade;
+   // New 1m fixed-2R positions are managed only by the independent quote guard.
+   if (isStrongFlowTrade(t)) return;
    // Hard protection is independent of BTC context and slow indicator requests.
    const before = await fetchExecutionQuote(t.symbol);
    protectTradeAtPrice(t, t.direction === "LONG" ? before.bid : before.ask, before.time);
@@ -1855,6 +1944,11 @@ export async function runApexLoop() {
          return;
       }
 
+      if (STRONG_FLOW_MAIN_ENABLED) {
+         await scanStrongFlowEntries(ctx, () => canOpenMore() && activeTrades.length < STRONG_FLOW_MAX_CONCURRENT);
+         return;
+      }
+
       // ═══ STAGE 1: PRIORITY HOT MOMENTUM QUEUE (Checked Every 15 Seconds) ═══
       // Examines top active movers & crypto majors instantly to catch breakout candle inception
       const hotCandidates = HOT_WATCHLIST.filter(sym => !activeTrades.some(t => t.symbol === sym) && !isSymbolInCooldown(sym));
@@ -1956,6 +2050,20 @@ export function protectTradeAtPrice(t: any, price: number, quoteTime = Date.now(
    if (!Number.isFinite(price) || price <= 0 || !(t.initialSlDist > 0)) return;
    if (!activeTrades.includes(t) || t.exitTime || t.pos <= 0) return;
    t.lastQuoteTime = quoteTime;
+   // Fixed 2R strategy must NOT inherit TP1 partials or early trailing stops.
+   if (isStrongFlowTrade(t)) {
+      if (markTrade(t, price, feeRate, slippageRate)) {
+         closeTradeFull(t, "PB_STRONG_FLOW Stop Loss");
+         return;
+      }
+      const sign = t.direction === "LONG" ? 1 : -1;
+      if (sign * (price - t.entry) >= 2 * t.initialSlDist) {
+         closeTradeFull(t, "PB_STRONG_FLOW Fixed 2R Target");
+      } else if (Date.now() - new Date(t.entryTime).getTime() >= STRONG_FLOW_MAX_HOLD_MS) {
+         closeTradeFull(t, "PB_STRONG_FLOW 180m Time Exit");
+      }
+      return;
+   }
    if (markTrade(t, price, feeRate, slippageRate)) {
       closeTradeFull(t, t.be_done ? "Protected Stop Hit" : "SL Hit");
       return;
