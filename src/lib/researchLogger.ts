@@ -909,9 +909,9 @@ export function logTradeDecision(trade: any, exitContext: {
          entry_price: entryPrice,
          exit_price: exitContext.exitPrice,
          stop_loss: trade.sl,
-         take_profit_1: trade.tp1,
-         take_profit_2: trade.tp2,
-         take_profit_3: trade.tp3,
+         take_profit_1: null,
+         take_profit_2: null,
+         take_profit_3: null,
          position_size: trade.initialPos,
          leverage: 1,
          risk_percent: trade.grade === "GRADE_A" ? 1.0 : trade.grade === "GRADE_B" ? 0.7 : 0.5,
@@ -922,6 +922,7 @@ export function logTradeDecision(trade: any, exitContext: {
          holding_time_seconds: holdingSeconds,
          result,
          exit_reason: exitContext.exitReason,
+         exit_engine: trade.exitEngine || "LEGACY_POSITION",
          confidence_score: trade.score,
 
          // ═══ EXCURSION METRICS ═══
@@ -1021,7 +1022,7 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
          unrealized_pnl: Number(pnl.toFixed(2)),
          profit_r: Number((trade.profitR || 0).toFixed(2)),
          distance_to_sl: Math.abs(currentPrice - trade.sl),
-         distance_to_tp1: Math.abs(currentPrice - trade.tp1),
+         distance_to_tp1: null,
          be_done: trade.be_done || false
       };
 
