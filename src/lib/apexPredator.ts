@@ -314,7 +314,7 @@ async function scanEntries(){
         const symbol=group[j],result=rows[j];
         if(regularSet.has(symbol)) {
           scanPassAttempted.add(symbol);attempted++;
-          if(result.status==="fulfilled"){scanPassSucceeded.add(symbol);succeeded++;}
+          if(result.status==="fulfilled"&&result.value.bars.length>=64){scanPassSucceeded.add(symbol);succeeded++;}
         }
         if(result.status==="fulfilled"&&result.value.signal) {
           // Risk gates apply to placing orders, not the surveillance of the full market.
