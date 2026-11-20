@@ -26,7 +26,7 @@ const tripoliClock = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Africa/Tripoli", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
 });
 function minuteOfDay(value: string): number | null {
-  if (typeof value !== "string" || !/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return null;
+  if (typeof value !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
   const [h,m] = value.split(":").map(Number);
   return h * 60 + m;
 }
