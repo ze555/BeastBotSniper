@@ -14,10 +14,10 @@ import {
 } from "./researchLogger.js";
 
 import { evaluateExecutionFilter } from "./executionFilter.js";
-import { evaluateInstitutionalMarket, evaluateInstitutionalExit } from "./institutionalMarketEngine.js";
+import { evaluateInstitutionalMarket } from "./institutionalMarketEngine.js";
 import { evaluateEntryQuality } from "./entryQualityEngine.js";
-import { apexEntryTrapGate, apexReversalExit } from "./apexV2PolicyBridge.js";
-import { evaluateReverseWave } from "./reverseWaveEngine.js";
+import { apexEntryTrapGate } from "./apexV2PolicyBridge.js";
+import { evaluateProfitGuardian } from "./profitGuardian.js";
 import { evaluateMarketAlignment } from "./marketAlignmentEngine.js";
 import { startFuturesWaveFeed, stopFuturesWaveFeed, getFuturesTapeFlow, getFuturesWaveCandidates, getFuturesLiquidationFlow, getFuturesWaveFeedStatus, getFuturesBookFlow } from "./futuresWaveFeed.js";
 import { evaluateTriRegimeExecution, detectMacroRegime, TriRegimeEvaluationResult } from "./triRegimeEngine.js";
@@ -53,10 +53,6 @@ let lastWatchlistUpdate = 0;
 let lastHotWatchlistUpdate = 0;
 
 
-const MIN_RR_REQUIRED = 2.5;
-const TP1_R = 1.00;
-const TP2_R = 2.00;
-const TP3_R = 3.50;
 const MAX_OPEN_TRADES = 6;
 const MAX_DAILY_LOSS = 0.040;
 const BEST_HOURS_UTC = [12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -221,7 +217,7 @@ export function getStats() {
     libyaOpen2,
     libyaClose2,
     isSleeping: false,
-    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && (virtualBalance - initialVirtualBalance) <= -haltLossTarget) || (haltProfitEnabled && (virtualBalance - initialVirtualBalance) >= haltProfitTarget),
+    executionRiskLocked: todayNetPnl <= -(initialVirtualBalance * MAX_DAILY_LOSS) || (haltLossEnabled && (virtualBalance - initialVirtualBalance + todayFloatingPnl) <= -haltLossTarget) || (haltProfitEnabled && (virtualBalance - initialVirtualBalance + todayFloatingPnl) >= haltProfitTarget),
     scannerMode: "CONTINUOUS_DISCOVERY_WITH_EXECUTION_GUARDS",
     today: { ...todaysStats, floatingPnl: todayFloatingPnl, netPnl: todayNetPnl } 
   }; 
@@ -1022,16 +1018,7 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry + (initialSlDist * TP1_R); // Quick Win TP1 (Banks 40% of trade)
-      const tp2 = entry + (initialSlDist * TP2_R); // Major Target TP2 (Banks 35% of trade)
-      const tp3 = entry + (initialSlDist * TP3_R); // Runner TP3 (Banks 25% of trade)
-
-      const calculatedRR = (tp3 - entry) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض LONG ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
-         return;
-      }
-
+      
       // IRON NOTIONAL & MARGIN CEILING:
       // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
       // Maximum margin allocated cannot exceed 15% of virtualBalance ($150 max).
@@ -1046,12 +1033,10 @@ function executeTrade(symbol: string, decision: any) {
       }
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
-         symbol, direction: "LONG", entry, sl, initialSlDist, tp1, tp2, tp3,
+         symbol, direction: "LONG", entry, sl, initialSlDist, exitEngine: "UNIFIED_PROFIT_GUARDIAN_V1",
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.25, part_b: 0.20, part_c: 0.55,
-         a_closed: false, b_closed: false, c_closed: false,
-         be_done: false, micro_banked: false, grade: grade.label, pnl: 0,
+         be_done: false, grade: grade.label, pnl: 0,
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
@@ -1093,16 +1078,7 @@ function executeTrade(symbol: string, decision: any) {
       if (realSlDist <= 0 || realSlDist < minSlDistance * 0.95) return;
       const initialSlDist = Math.abs(entry - sl);
 
-      const tp1 = entry - (initialSlDist * TP1_R);
-      const tp2 = entry - (initialSlDist * TP2_R);
-      const tp3 = entry - (initialSlDist * TP3_R);
-
-      const calculatedRR = (entry - tp3) / realSlDist;
-      if (calculatedRR < MIN_RR_REQUIRED) {
-         addLog(`❌ رُفض SHORT ${symbol}: RR الفعلي (${calculatedRR.toFixed(2)}) أقل من الحد الأدنى (${MIN_RR_REQUIRED})`, "error");
-         return;
-      }
-
+      
       // IRON NOTIONAL & MARGIN CEILING:
       // Maximum contract value cannot exceed 10x virtualBalance (e.g. $10,000 max for $1,000 balance).
       // Maximum margin allocated cannot exceed 15% of virtualBalance ($150 max).
@@ -1117,12 +1093,10 @@ function executeTrade(symbol: string, decision: any) {
       }
       const setupLabel = isBounce ? "🏹 قناص فخاخ السيولة" : (isPullback ? "🎯 قناص الارتداد" : "⚡ اختراق الزخم");
       const newTrade = {
-         symbol, direction: "SHORT", entry, sl, initialSlDist, tp1, tp2, tp3,
+         symbol, direction: "SHORT", entry, sl, initialSlDist, exitEngine: "UNIFIED_PROFIT_GUARDIAN_V1",
          pos, initialPos: pos, entryTime: new Date().toISOString(),
          entryTiming, marketRegimeContext,
-         part_a: 0.25, part_b: 0.20, part_c: 0.55,
-         a_closed: false, b_closed: false, c_closed: false,
-         be_done: false, micro_banked: false, grade: grade.label, pnl: 0,
+         be_done: false, grade: grade.label, pnl: 0,
          institutionalEvidence: institutional, institutionalInvalidationLevel: p.institutionalInvalidation,
          setupType: isBounce ? "BOUNCE_SNIPER" : (isPullback ? "PULLBACK_SNIPER" : "BREAKOUT_MOMENTUM"),
          setupLabel,
@@ -1150,279 +1124,71 @@ function executeTrade(symbol: string, decision: any) {
    }
 }
 
-// --- SEC 6: EXIT BRAIN ---
-async function exitBrain(trade: any, ctx: any) {
+// --- SINGLE REPLACEMENT EXIT ENGINE: PROFIT GUARDIAN ONLY ---
+// No historical partial take-profits, reversal exits or independent ATR exit
+// decisions are executed here. Original risk stop remains mandatory.
+async function exitBrain(trade: any, _ctx: any) {
    const t = trade;
-   const w = await readWhale(t.symbol, 0); // Fast check
+   const w = await readWhale(t.symbol, 0);
    const p = await readPrice(t.symbol, w.c15);
-   
    const price = p.price;
+   if (!Number.isFinite(price) || price <= 0) {
+      addLog(`⚠️ [PROFIT GUARDIAN] Invalid quote for ${t.symbol}; keeping current hard stop`, "warn");
+      return;
+   }
+
    t.currentPrice = price;
    updateDirectionTracking(t.symbol, price);
    updateRejectedSignalsOutcomes(t.symbol, price, p.klines);
 
-   const slDist = t.initialSlDist || Math.abs(t.entry - t.sl);
-   const profitR = t.direction === "LONG" ? (price - t.entry)/slDist : (t.entry - price)/slDist;
-   t.profitR = profitR;
-   if (profitR > t.peak_r) t.peak_r = profitR;
+   const risk = Number(t.initialSlDist);
+   const initialStop = t.direction === "LONG" ? t.entry - risk : t.entry + risk;
+   const result = evaluateProfitGuardian({
+      direction: t.direction,
+      entry: t.entry,
+      price,
+      initialStop,
+      currentStop: t.sl,
+      peakR: Number(t.peak_r || 0)
+   });
+   if (result.reason === "INVALID_INPUT") {
+      if (!t.__profitGuardianInvalidLogged) {
+         addLog(`⚠️ [PROFIT GUARDIAN] Invalid stop/risk data: ${t.symbol}; no discretionary exit attempted`, "error");
+         t.__profitGuardianInvalidLogged = true;
+      }
+      return;
+   }
+
+   t.profitR = result.currentR;
+   t.peak_r = result.peakR;
+   t.sl = result.stop;
+   t.guardianArmed = result.armed;
+   t.exitEngine = "UNIFIED_PROFIT_GUARDIAN_V1";
    if (!Number.isFinite(t.peakPrice)) t.peakPrice = price;
    t.peakPrice = t.direction === "LONG" ? Math.max(t.peakPrice, price) : Math.min(t.peakPrice, price);
 
-   // Floating PnL Mark-to-Market calculation (Exact match with closePart and closeTradeFull formulas)
    const effectiveExitPrice = t.direction === "LONG"
       ? price * (1 - slippageRate)
       : price * (1 + slippageRate);
+   const rawRemainingFloating = (t.direction === "LONG" ? effectiveExitPrice - t.entry : t.entry - effectiveExitPrice) * t.pos;
+   const estimatedRemainingFees = (t.entry * t.pos + effectiveExitPrice * t.pos) * feeRate;
+   t.pnl = (t.realizedPnl || 0) + rawRemainingFloating - estimatedRemainingFees;
 
-   const rawRemainingFloating = (t.direction === "LONG" ? (effectiveExitPrice - t.entry) : (t.entry - effectiveExitPrice)) * t.pos;
-   const estimatedRemainingFees = ((t.entry * t.pos) + (effectiveExitPrice * t.pos)) * feeRate;
-   const remainingNetFloating = rawRemainingFloating - estimatedRemainingFees;
+   // "Breakeven" only when the protected stop reasonably covers fees + slip.
+   const netCostBuffer = t.entry * (2 * feeRate + slippageRate);
+   t.be_done = t.direction === "LONG"
+      ? t.sl >= t.entry + netCostBuffer
+      : t.sl <= t.entry - netCostBuffer;
 
-   // t.pnl represents total Mark-to-Market net PnL of this trade (realized from partials + unrealized remaining)
-   t.pnl = (t.realizedPnl || 0) + remainingNetFloating;
-
-   // Record trade journey periodic snapshot (MFE/MAE tracking)
    logTradeJourneySnapshot(t, price, t.pnl);
 
-   // --- SEC 6.1: INSTITUTIONAL EXECUTED-FLOW EXIT ENGINE (NO SCORE) ---
-   const institutionalInvalidation = Number.isFinite(t.institutionalInvalidationLevel)
-      ? t.institutionalInvalidationLevel
-      : t.sl;
-   const structureInvalidated = t.direction === "LONG"
-      ? price < institutionalInvalidation
-      : price > institutionalInvalidation;
-   const exitEvidence = evaluateInstitutionalExit({
-      direction: t.direction,
-      price,
-      entry: t.entry,
-      stop: t.sl,
-      structureInvalidated,
-      futuresFlow: w.futuresFlow || null,
-      fundingRate: Number.isFinite(w.fund) ? w.fund : null,
-      timestamp: Date.now(),
-      consecutiveAdverseObservations: (() => {
-         const flow = w.futuresFlow;
-         if (!flow) { t.institutionalAdverseCount = 0; return 0; }
-         const sign = t.direction === "LONG" ? 1 : -1;
-         const b30 = Number.isFinite(flow.buyQuote30s) ? flow.buyQuote30s : flow.buyQuote;
-         const s30 = Number.isFinite(flow.sellQuote30s) ? flow.sellQuote30s : flow.sellQuote;
-         const b1 = Number.isFinite(flow.buyQuote1m) ? flow.buyQuote1m : b30;
-         const s1 = Number.isFinite(flow.sellQuote1m) ? flow.sellQuote1m : s30;
-         const d30 = (b30 + s30) > 0 ? ((b30 - s30) / (b30 + s30)) * sign : 0;
-         const d1 = (b1 + s1) > 0 ? ((b1 - s1) / (b1 + s1)) * sign : d30;
-         const p30 = Number.isFinite(flow.priceChange30sPct) ? flow.priceChange30sPct * sign : null;
-         const p1 = Number.isFinite(flow.priceChange1mPct) ? flow.priceChange1mPct * sign : null;
-         const d5 = Number.isFinite(flow.buyQuote5m) && Number.isFinite(flow.sellQuote5m) && (flow.buyQuote5m + flow.sellQuote5m) > 0
-            ? ((flow.buyQuote5m - flow.sellQuote5m) / (flow.buyQuote5m + flow.sellQuote5m)) * sign : null;
-         const p5 = Number.isFinite(flow.priceChange5mPct) ? flow.priceChange5mPct * sign : null;
-         const parentWaveSupported = d5 !== null && d5 >= 0.04 && p5 !== null && p5 > -0.001;
-         const adverse = !parentWaveSupported && d30 <= -0.08 && d1 <= -0.06 && ((p30 !== null && p30 <= -0.0003) || (p1 !== null && p1 <= -0.0006));
-         t.institutionalAdverseCount = adverse ? Math.min(5, (t.institutionalAdverseCount || 0) + 1) : 0;
-         return t.institutionalAdverseCount;
-      })()
-   });
-
-   // ApexV2 confirmed reversal: two completed 15m closes beyond EMA21,
-   // opposite 5m+15m CVD and a position that previously reached +0.45R.
-   // Do not act on absent candles, unavailable flow or a single noisy wick.
-   const apexCloses = (w.c15 || []).slice(-3, -1).map((c: any) => Number(c.close));
-   const apexEmaCloses = (w.c15 || []).slice(0, -1).map((c: any) => Number(c.close));
-   const apexEma21 = apexEmaCloses.length >= 21
-      ? calcEMA(apexEmaCloses, 21).pop() || null : null;
-   const apexExit = apexReversalExit({
-      side: t.direction, profitR, peakR: t.peak_r || 0, price,
-      ema21: apexEma21, lastTwoCloses: apexCloses,
-      cvd5m: Number.isFinite(w.slope5) ? w.slope5 : null,
-      cvd15m: Number.isFinite(w.slope15) ? w.slope15 : null
-   });
-   if (apexExit.exit) {
-      addLog(`🚨 [APEXV2 CONFIRMED REVERSAL] ${t.symbol} ${t.direction}: ${apexExit.reason}`, "warn");
-      closeTradeFull(t, apexExit.reason);
-      return;
+   if (result.action === "EXIT") {
+      closeTradeFull(t, result.armed ? "Unified Profit Guardian Trail Stop" : "Unified Initial Hard Stop");
    }
-   if (exitEvidence.action === "EXIT") {
-      addLog(`🚨 [INSTITUTIONAL REVERSAL CONFIRMED] ${t.symbol} ${t.direction} at ${profitR.toFixed(2)}R | ${exitEvidence.reasons.join(" | ")}`, "warn");
-      closeTradeFull(t, "Institutional Structure + Futures Flow Reversal");
-      // Close the old side first; only a fresh opposite entry with independent confirmation may reverse.
-      try {
-         const reverseCandidate = await evaluateInstitutionalEntry(t.symbol, ctx);
-         const reverse = evaluateReverseWave({
-            fromSide: t.direction,
-            candidateSide: reverseCandidate.signal === "LONG" || reverseCandidate.signal === "SHORT" ? reverseCandidate.signal : "NONE",
-            entryAllowed: reverseCandidate.signal === (t.direction === "LONG" ? "SHORT" : "LONG"),
-            structureConfirmed: reverseCandidate.institutional?.canEnter === true,
-            flow: reverseCandidate.w?.futuresFlow || null,
-            now: Date.now(),
-            price: Number.isFinite(reverseCandidate.p?.price) ? reverseCandidate.p.price : NaN,
-            atr: Number.isFinite(reverseCandidate.p?.waveAtr) ? reverseCandidate.p.waveAtr : NaN,
-            cvd5mSlope: Number.isFinite(reverseCandidate.w?.slope5) ? reverseCandidate.w.slope5 : null,
-            cvd15mSlope: Number.isFinite(reverseCandidate.w?.slope15) ? reverseCandidate.w.slope15 : null,
-            cvd4hSlope: Number.isFinite(reverseCandidate.w?.slope4h) ? reverseCandidate.w.slope4h : null,
-            oiChange: reverseCandidate.w?.oi_available ? reverseCandidate.w.oi_chg : null,
-            oiPriceChange: Number.isFinite(reverseCandidate.w?.p_chg) ? reverseCandidate.w.p_chg : null,
-            book: reverseCandidate.w?.orderBook || null,
-            liquidation: getFuturesLiquidationFlow(t.symbol)
-         });
-         // Persist the exact reverse-wave evidence on the opened trade for post-trade audit.
-         if (reverseCandidate.reasoning) reverseCandidate.reasoning.reverseWave = reverse;
-         addLog(`🧪 [REVERSE WAVE AUDIT] ${t.symbol} | ${JSON.stringify(reverse.confirmations)}`, reverse.confirmed ? "success" : "info");
-         const riskedOpen = activeTrades.filter(open => !open.be_done).length;
-         const capacityAvailable = freeTradeSlotEnabled
-            ? riskedOpen < maxOpenTradesConfig && activeTrades.length < maxOpenTradesConfig + 2
-            : activeTrades.length < maxOpenTradesConfig;
-         if (reverse.confirmed && capacityAvailable && !activeTrades.some(open => open.symbol === t.symbol)) {
-            addLog(`🔁 [REVERSE WAVE CONFIRMED] ${t.symbol}: ${t.direction} → ${reverse.direction}`, "success");
-            executeTrade(t.symbol, reverseCandidate);
-         } else {
-            addLog(`⏳ [REVERSE WAVE NOT ARMED] ${t.symbol} ${t.direction} closed; no opposite position opened. ${reverse.reasons.join(" | ")}`, "info");
-         }
-      } catch (reverseError: any) {
-         addLog(`⚠️ [REVERSE WAVE CHECK FAILED] ${t.symbol}: ${reverseError?.message || "unknown error"}`, "warn");
-      }
-      return;
-   }
-   if (exitEvidence.action === "PROTECT") {
-      addLog(`🛡️ [INSTITUTIONAL EXHAUSTION WARNING] ${t.symbol} ${t.direction} | ${exitEvidence.reasons.join(" | ")}`, "info");
-      if (profitR >= 0.30) {
-         const protectedStop = t.direction === "LONG"
-            ? t.entry + slDist * 0.10
-            : t.entry - slDist * 0.10;
-         if (t.direction === "LONG") t.sl = Math.max(t.sl, protectedStop);
-         else t.sl = Math.min(t.sl, protectedStop);
-         t.be_done = true;
-      }
-   }
-
-   const futuresDelta = w.futuresFlow ? w.futuresFlow.buyQuote - w.futuresFlow.sellQuote : 0;
-   const supportiveFlow = t.direction === "LONG" ? futuresDelta > 0 : futuresDelta < 0;
-   const isTsunamiRunner = supportiveFlow && profitR >= 1.0 && exitEvidence.action === "HOLD";
-   const isBenignPullback = supportiveFlow && profitR > 0 && exitEvidence.action === "HOLD";
-
-   let trailDist = p.atr14 * (p.rvol > 1.5 ? 1.0 : 0.7);
-
-   // Early risk reduction: reduce the original risk without choking normal pullbacks.
-   if (!t.micro_banked && profitR >= 0.45) {
-      const reducedRiskStop = t.direction === "LONG"
-         ? t.entry - (slDist * 0.10)
-         : t.entry + (slDist * 0.10);
-      t.sl = t.direction === "LONG" ? Math.max(t.sl, reducedRiskStop) : Math.min(t.sl, reducedRiskStop);
-      t.micro_banked = true;
-      addLog(`🛡️ [RISK REDUCED] ${t.symbol} reached +${profitR.toFixed(2)}R; initial risk reduced to -0.10R.`, "info");
-   }
-
-   // Once the trade reaches +0.85R, protect a small net-positive floor while allowing room to reach +1R.
-   if (profitR >= 0.85 && !t.a_closed) {
-      const earlyProfitStop = t.direction === "LONG"
-         ? t.entry + slDist * 0.05
-         : t.entry - slDist * 0.05;
-      t.sl = t.direction === "LONG" ? Math.max(t.sl, earlyProfitStop) : Math.min(t.sl, earlyProfitStop);
-   }
-
-   // PILLAR 2: TIME-DECAY STAGNATION EXIT (قاعدة الساعة الرملية لركود الزخم بعد 45 دقيقة)
-   const elapsedSeconds = (Date.now() - new Date(t.entryTime).getTime()) / 1000;
-   if (!isTsunamiRunner && !isBenignPullback && !t.a_closed && elapsedSeconds >= 2700) {
-      // 45 minutes without breaking out towards TP1
-      const isStagnant = profitR < 0.30 && profitR > -0.30;
-      const momentumDying = p.rvol < 1.1 || !supportiveFlow;
-      if (isStagnant && momentumDying) {
-         addLog(`⏳ [الركيزة 2: إغلاق الركود الزمني] إغلاق صفقة ${t.symbol} بعد ${(elapsedSeconds/60).toFixed(0)} دقيقة عند ${profitR.toFixed(2)}R لتفادي الانعكاس وتحرير السيولة.`, 'warn');
-         closeTradeFull(t, "Time-Decay Stagnation Cut");
-         return;
-      }
-   }
-
-   // 1. Bank only a quarter at +1R; keep three quarters working.
-   if (!t.a_closed && profitR >= 1.0) {
-      closePart(t, "A", t.part_a);
-      t.a_closed = true;
-      t.be_done = true;
-      const floorR = 0.20;
-      const floorStop = t.direction === "LONG"
-         ? t.entry + slDist * floorR
-         : t.entry - slDist * floorR;
-      t.sl = t.direction === "LONG" ? Math.max(t.sl, floorStop) : Math.min(t.sl, floorStop);
-      addLog(`🎯 [PROFIT BANKED] ${t.symbol}: closed 25% at +${profitR.toFixed(2)}R; remaining 75% protected above +0.20R.`, "success");
-   }
-
-   // 2. Bank another 20% at +2R; the remaining 55% becomes an open-ended runner.
-   if (t.a_closed && !t.b_closed && profitR >= 2.0) {
-      closePart(t, "B", t.part_b);
-      t.b_closed = true;
-      const floorR = 0.80;
-      const floorStop = t.direction === "LONG"
-         ? t.entry + slDist * floorR
-         : t.entry - slDist * floorR;
-      t.sl = t.direction === "LONG" ? Math.max(t.sl, floorStop) : Math.min(t.sl, floorStop);
-      addLog(`🎯 [EXPANSION BANKED] ${t.symbol}: additional 20% closed at +${profitR.toFixed(2)}R; 55% remains as runner.`, "success");
-   }
-
-   // 3. Adaptive peak-based trailing begins after the first bank, not after TP2/TP3.
-   // Supportive flow gets room; weakening flow tightens the leash. The stop can only tighten.
-   if (t.a_closed) {
-      const atrValue = Number.isFinite(p.atr14) && p.atr14 > 0
-         ? p.atr14
-         : (Number.isFinite(t.atr) && t.atr > 0 ? t.atr : slDist);
-      const trailMultiplier = exitEvidence.action === "PROTECT"
-         ? 0.90
-         : (supportiveFlow && exitEvidence.action === "HOLD" ? 1.80 : 1.35);
-      trailDist = Math.max(atrValue * trailMultiplier, slDist * 0.20);
-
-      const peakPrice = Number.isFinite(t.peakPrice) ? t.peakPrice : price;
-      const peakTrailStop = t.direction === "LONG"
-         ? peakPrice - trailDist
-         : peakPrice + trailDist;
-
-      // Convert the best excursion into a progressively higher guaranteed R floor.
-      const peakR = Number.isFinite(t.peak_r) ? t.peak_r : profitR;
-      const protectedR = peakR >= 4.0 ? 2.00
-         : peakR >= 3.0 ? 1.25
-         : peakR >= 2.0 ? 0.80
-         : peakR >= 1.5 ? 0.40
-         : peakR >= 1.0 ? 0.20
-         : 0;
-
-      const peakFloorStop = t.direction === "LONG"
-         ? t.entry + slDist * protectedR
-         : t.entry - slDist * protectedR;
-
-      if (t.direction === "LONG") {
-         t.sl = Math.max(t.sl, peakTrailStop, peakFloorStop);
-      } else {
-         t.sl = Math.min(t.sl, peakTrailStop, peakFloorStop);
-      }
-
-      if (!t.runnerTrailLogged || peakR >= (t.lastRunnerTrailLogR || 0) + 1.0) {
-         addLog(`🏃 [ADAPTIVE RUNNER] ${t.symbol} | peak +${peakR.toFixed(2)}R | protected floor +${protectedR.toFixed(2)}R | ATR trail x${trailMultiplier.toFixed(2)}`, "info");
-         t.runnerTrailLogged = true;
-         t.lastRunnerTrailLogR = peakR;
-      }
-   }
-
-   // Hard SL Hit
-   if (t.direction === "LONG" && price <= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
-   if (t.direction === "SHORT" && price >= t.sl) closeTradeFull(t, t.be_done ? "Breakeven Protected Exit" : "SL Hit");
-}
-
-function bodySize(klines: any[]) { return Math.abs(klines[klines.length-1].close - klines[klines.length-1].open); }
-
-function closePart(t: any, part: string, pct: number) {
-   const size = t.initialPos * pct;
-   t.pos -= size;
-   
-   // Effective exit price with simulated slippage
-   const effectiveExitPrice = t.direction === "LONG"
-      ? t.currentPrice * (1 - slippageRate)
-      : t.currentPrice * (1 + slippageRate);
-
-   const rawPnl = (t.direction === "LONG" ? (effectiveExitPrice - t.entry) : (t.entry - effectiveExitPrice)) * size;
-   const tradeFees = ((t.entry * size) + (effectiveExitPrice * size)) * feeRate;
-   const realizedPnl = rawPnl - tradeFees;
-
-   t.realizedPnl = (t.realizedPnl || 0) + realizedPnl;
-   t.totalFees = (t.totalFees || 0) + tradeFees;
-   virtualBalance += realizedPnl;
 }
 
 function closeTradeFull(t: any, reason: string = "") {
+   if (t.pos <= 0 || !activeTrades.includes(t)) return; // idempotent close
    if (t.pos > 0) {
       const effectiveExitPrice = t.direction === "LONG"
          ? t.currentPrice * (1 - slippageRate)
@@ -1486,7 +1252,7 @@ export async function runApexLoop() {
 
       // Calculate overall Net PnL (Fully consistent mark-to-market across closed & active)
       let totalFloatingPnl = 0;
-      let totalRealizedPnl = closedTrades.reduce((acc, t) => acc + (t.finalPnl || t.realizedPnl || 0), 0);
+      let totalRealizedPnl = virtualBalance - initialVirtualBalance;
       for (const t of activeTrades) {
          if (t.pnl) totalFloatingPnl += t.pnl; 
       }
