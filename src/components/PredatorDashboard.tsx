@@ -18,20 +18,9 @@ export const PredatorDashboard: React.FC = () => {
   const [haltProfitTarget, setHaltProfitTarget] = useState('150');
   const [haltLossEnabled, setHaltLossEnabled] = useState(false);
   const [haltLossTarget, setHaltLossTarget] = useState('50');
-  const [smartBtcHoldEnabled, setSmartBtcHoldEnabled] = useState(true);
-  const [btcVolThresholdStr, setBtcVolThresholdStr] = useState('0.80');
-  const [slAtrMultiplier, setSlAtrMultiplier] = useState('1.3');
-  const [geniusMode, setGeniusMode] = useState(true);
-  const [pullbackSniperEnabled, setPullbackSniperEnabled] = useState(true);
-  const [freeTradeSlotEnabled, setFreeTradeSlotEnabled] = useState(true);
   const [scanBatchSize, setScanBatchSize] = useState('25');
   const [feeRateInput, setFeeRateInput] = useState('0.0004');
   const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
-  const [scheduleEnabled, setScheduleEnabled] = useState(true);
-  const [libyaOpen1, setLibyaOpen1] = useState('10');
-  const [libyaClose1, setLibyaClose1] = useState('14');
-  const [libyaOpen2, setLibyaOpen2] = useState('15.5');
-  const [libyaClose2, setLibyaClose2] = useState('18');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   useEffect(() => {
@@ -62,20 +51,9 @@ export const PredatorDashboard: React.FC = () => {
             if (data.haltProfitEnabled !== undefined) setHaltProfitEnabled(data.haltProfitEnabled);
             if (data.haltLossTarget !== undefined) setHaltLossTarget(data.haltLossTarget.toString());
             if (data.haltLossEnabled !== undefined) setHaltLossEnabled(data.haltLossEnabled);
-            if (data.smartBtcHoldEnabled !== undefined) setSmartBtcHoldEnabled(data.smartBtcHoldEnabled);
-            if (data.btcVolThresholdStr !== undefined) setBtcVolThresholdStr(data.btcVolThresholdStr);
-            if (data.slAtrMultiplier !== undefined) setSlAtrMultiplier(data.slAtrMultiplier.toString());
-            if (data.geniusMode !== undefined) setGeniusMode(data.geniusMode);
-            if (data.pullbackSniperEnabled !== undefined) setPullbackSniperEnabled(data.pullbackSniperEnabled);
-            if (data.freeTradeSlotEnabled !== undefined) setFreeTradeSlotEnabled(data.freeTradeSlotEnabled);
             if (data.scanBatchSize !== undefined) setScanBatchSize(data.scanBatchSize.toString());
             if (data.feeRate !== undefined) setFeeRateInput(data.feeRate.toString());
             if (data.slippageRate !== undefined) setSlippageRateInput(data.slippageRate.toString());
-            if (data.scheduleEnabled !== undefined) setScheduleEnabled(data.scheduleEnabled);
-            if (data.libyaOpen1 !== undefined) setLibyaOpen1(data.libyaOpen1.toString());
-            if (data.libyaClose1 !== undefined) setLibyaClose1(data.libyaClose1.toString());
-            if (data.libyaOpen2 !== undefined) setLibyaOpen2(data.libyaOpen2.toString());
-            if (data.libyaClose2 !== undefined) setLibyaClose2(data.libyaClose2.toString());
         }
       }
       const tradesRes = await fetch('/api/trades/active');
@@ -124,20 +102,9 @@ export const PredatorDashboard: React.FC = () => {
                   haltProfitTarget: Number(haltProfitTarget),
                   haltLossEnabled,
                   haltLossTarget: Number(haltLossTarget),
-                  smartBtcHoldEnabled,
-                  btcVolThresholdStr,
-                  slAtrMultiplier: Number(slAtrMultiplier),
-                  geniusMode,
-                  pullbackSniperEnabled,
-                  freeTradeSlotEnabled,
                   scanBatchSize: Number(scanBatchSize),
                   feeRate: Number(feeRateInput),
                   slippageRate: Number(slippageRateInput),
-                  scheduleEnabled,
-                  libyaOpen1: Number(libyaOpen1),
-                  libyaClose1: Number(libyaClose1),
-                  libyaOpen2: Number(libyaOpen2),
-                  libyaClose2: Number(libyaClose2),
               })
           });
           await fetchData();
@@ -281,23 +248,15 @@ export const PredatorDashboard: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
                      {t.whaleData && (
                         <div className="space-y-1">
-                           <div className="text-[10px] text-blue-400 uppercase tracking-widest mb-2 font-semibold">المؤشرات المؤسساتية</div>
+                           <div className="text-[10px] text-blue-400 uppercase tracking-widest mb-2 font-semibold">معلومات تدفق Binance 1m</div>
                            <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">السيناريو:</span> <span>{t.whaleData.scenario}</span></div>
-                           <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">التمركز:</span> <span>{t.whaleData.institutionalBias}</span></div>
-                           <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">نشاط مخفي:</span> <span>{t.whaleData.hiddenBuy}</span></div>
-                           <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">التمويل:</span> <span dir="ltr">{t.whaleData.fund}</span></div>
                         </div>
                      )}
                      {t.priceData && (
                         <div className="space-y-1 mt-2 sm:mt-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/50">
                            <div className="text-[10px] text-blue-400 uppercase tracking-widest mb-2 font-semibold">بنية السعر الفنية</div>
-                           <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">حالة الترند:</span> <span>{t.priceData.marketAlignment}</span></div>
-                           <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">RSI:</span> <span>{t.priceData.rsi}</span></div>
-                           <div className="text-[10px] sm:text-[11px] flex justify-between text-slate-300"><span className="text-slate-500 text-[10px] mr-1">الزخم:</span> <span>{t.priceData.adx}</span></div>
                            <div className="text-[9px] sm:text-[10px] flex gap-1 mt-2 flex-wrap">
-                              <span className={`px-1.5 py-0.5 rounded ${t.a_closed ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20'}`}>TP1 35%</span>
-                              <span className={`px-1.5 py-0.5 rounded ${t.b_closed ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20'}`}>TP2 40%</span>
-                              <span className={`px-1.5 py-0.5 rounded ${t.c_closed ? 'bg-slate-700 text-slate-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20'}`}>TP3 25%</span>
+                              <span className="text-blue-400">هدف واحد +2R · وقف −1R · لا خروج جزئي</span>
                            </div>
                         </div>
                      )}
@@ -318,7 +277,7 @@ export const PredatorDashboard: React.FC = () => {
        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
          <h1 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2 tracking-tight">
            <Swords className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" />
-           لوحة تحكم (APEX PREDATOR SYSTEM)
+           لوحة تحكم PB_STRONG_FLOW — Fixed 2R (PAPER)
          </h1>
          <div className="flex w-full sm:w-auto gap-2 items-center">
            {stats?.isSleeping && botActive && (
@@ -445,71 +404,6 @@ export const PredatorDashboard: React.FC = () => {
                     </div>
                  </div>
 
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <label className="flex items-start sm:items-center gap-3 cursor-pointer">
-                        <input 
-                           type="checkbox" 
-                           checked={smartBtcHoldEnabled}
-                           onChange={(e) => setSmartBtcHoldEnabled(e.target.checked)}
-                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500 focus:ring-offset-slate-900" 
-                        />
-                        <div>
-                           <span className="text-sm text-slate-200 font-bold block mb-1">الاحتفاظ الذكي مع اتجاه البيتكوين (Smart Hold)</span>
-                           <span className="text-[11px] text-slate-400 block leading-relaxed">
-                              عند تفعيل هذا الخيار، سيقوم الروبوت بتجاهل إشارات الخروج الطارئة (Emergency Exits) الناجمة عن تخبط السوق إذا كانت اتجاهات الصفقات المفتوحة موازية لحركة البيتكوين، لتجنب الخروج المبكر من الصفقات الرابحة فقط بسبب تذبذب البيتكوين المؤقت.
-                           </span>
-                        </div>
-                    </label>
-                 </div>
-
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <div>
-                        <span className="text-sm text-slate-200 font-bold block mb-1">نسبة التذبذب العنيف للبيتكوين (%)</span>
-                        <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
-                            إذا تحرك البيتكوين بنسبة فجائية (خلال ربع ساعة) تفوق هذه النسبة المئوية المحددة، سيعتبره الروبوت تذبذب طارئ (BTC Chaos) وقد يقوم بإيقاف الصفقات وإلغاء عمليات الفحص لضمان الأمان.
-                        </span>
-                        <input 
-                            type="number" 
-                            step="0.05"
-                            min="0.10"
-                            value={btcVolThresholdStr}
-                            onChange={(e) => setBtcVolThresholdStr(e.target.value)}
-                            className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
-                        />
-                    </div>
-                 </div>
-
-                 
-                 <div className="bg-slate-950 p-4 rounded-xl border border-blue-500/50 mt-2 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-                    <label className="flex items-start sm:items-center gap-3 cursor-pointer">
-                        <input 
-                           type="checkbox" 
-                           checked={geniusMode}
-                           onChange={(e) => setGeniusMode(e.target.checked)}
-                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500" 
-                        />
-                        <div>
-                           <span className="text-sm text-blue-400 font-bold block mb-1">🤖 وضع العبقرية (Genius Mode)</span>
-                           <span className="text-[11px] text-slate-400 block leading-relaxed">
-                               يحد من الصفقات الخاسرة برفع معايير الدخول (فقط 🥈 أو 💎)، مع تأمين الصفقة وقاع الأرباح عند +0.30R بعد تحقيق الهدف الأول (+0.75R)، وفلترة الأسواق المتقلبة.
-                           </span>
-                        </div>
-                    </label>
-                 </div>
-<div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <label className="text-sm text-slate-200 font-bold block mb-1">مضاعف الـ ATR لوقف الخسارة (SL ATR Multiplier)</label>
-                    <span className="text-[11px] text-slate-400 block leading-relaxed mb-3">
-                        يحدد مسافة وقف الخسارة بناءً على مؤشر الـ ATR. القيمة الافتراضية 1.5. كلما زادت القيمة كلما زادت مسافة وقف الخسارة (أكثر أماناً من التذبذبات ولكن يزيد حجم المخاطرة).
-                    </span>
-                    <input 
-                        type="number" 
-                        step="0.1"
-                        min="0.1"
-                        value={slAtrMultiplier}
-                        onChange={(e) => setSlAtrMultiplier(e.target.value)}
-                        className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 focus:border-blue-500 rounded-lg p-2 text-slate-200 font-mono focus:outline-none"
-                    />
-                 </div>
 
                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -544,57 +438,6 @@ export const PredatorDashboard: React.FC = () => {
                     </div>
                  </div>
 
-                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mt-2">
-                    <label className="flex items-start sm:items-center gap-3 cursor-pointer mb-4">
-                        <input 
-                           type="checkbox" 
-                           checked={scheduleEnabled}
-                           onChange={(e) => setScheduleEnabled(e.target.checked)}
-                           className="w-5 h-5 mt-1 sm:mt-0 accent-blue-500 shrink-0 bg-slate-800 border-slate-700 rounded focus:ring-blue-500 focus:ring-offset-slate-900" 
-                        />
-                        <div>
-                           <span className="text-sm text-slate-200 font-bold block mb-1">تفعيل نظام جدولة التداول (توقيت ليبيا)</span>
-                           <span className="text-[11px] text-slate-400 block leading-relaxed">
-                               عند التفعيل، سيقوم الروبوت بفتح صفقات جديدة فقط خلال الفترات المحددة بالأسفل (الرجاء ادخال التوقيت بنظام 24 ساعة، مثلاً 15.5 يعني 3:30 عصراً). الصفقات المفتوحة مسبقاً ستستمر وتدار بشكل طبيعي حتى خارج أوقات العمل.
-                           </span>
-                        </div>
-                    </label>
-
-                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity duration-300 ${scheduleEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                        <div className="space-y-2">
-                            <label className="text-xs text-emerald-400 font-bold block">الفترة الأولى - الفتح</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaOpen1} onChange={(e) => setLibyaOpen1(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-emerald-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-rose-400 font-bold block">الفترة الأولى - الإغلاق</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaClose1} onChange={(e) => setLibyaClose1(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-rose-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-emerald-400 font-bold block">الفترة الثانية - الفتح</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaOpen2} onChange={(e) => setLibyaOpen2(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-emerald-500 focus:outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-rose-400 font-bold block">الفترة الثانية - الإغلاق</label>
-                            <input 
-                                type="number" step="0.5" min="0" max="24"
-                                value={libyaClose2} onChange={(e) => setLibyaClose2(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white font-mono focus:border-rose-500 focus:outline-none"
-                            />
-                        </div>
-                    </div>
-                 </div>
                  </div>
 
                 <div className="flex justify-end pt-4 border-t border-slate-800">
@@ -715,23 +558,23 @@ export const PredatorDashboard: React.FC = () => {
        {/* Dashboard Tab */}
        {activeTab === 'DASHBOARD' && (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
-             {/* 3:1 Genius Architecture Banner */}
+             {/* Exclusive StrongFlow strategy status — no projected win-rate claims */}
              <div className="bg-gradient-to-r from-blue-950/70 via-slate-900 to-emerald-950/60 border border-blue-500/30 rounded-xl p-4 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="space-y-1">
                    <div className="flex items-center gap-2">
                       <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs px-2.5 py-0.5 rounded-full font-black flex items-center gap-1.5">
                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                         نظام التفوق الرياضي 3:1 نشط
+                         Strong Flow — Fixed 2R
                       </span>
                       <span className="text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded font-mono">
-                         Win Target: 75%+
+                         PAPER ONLY
                       </span>
                    </div>
                    <p className="text-sm font-bold text-white">
-                      استراتيجية التناغم الثلاثي + درع الوقف الصفري لحماية رأس المال ($1,000)
+                      محرك Binance Futures 1m — دخول قوي وخروج ثابت بدون وقف متحرك أو جني جزئي
                    </p>
                    <p className="text-xs text-slate-400">
-                      يتم اقتناص الصفقات عند تلاقي سيولة الحيتان (CVD + OI) مع اتجاه البيتكوين، وتأمين الربح عند +0.70R بنقل الوقف لنقطة الدخول فوراً.
+                      الإشارات من شموع الدقيقة المغلقة وتدفق المشترين المنفذ. وقف خسارة 2×ATR، هدف كامل +2R، وخروج زمني بعد 180 دقيقة؛ الأداء السابق غير مضمون.
                    </p>
                 </div>
                 <div className="flex items-center gap-3 bg-slate-950/70 p-3 rounded-lg border border-slate-800 text-xs font-mono shrink-0">
@@ -750,7 +593,7 @@ export const PredatorDashboard: React.FC = () => {
                       <span className="text-blue-400 font-bold text-base">
                          {stats?.today?.count > 0 
                             ? `${((stats.today.wins / stats.today.count) * 100).toFixed(0)}%` 
-                            : '100%'}
+                            : '—'}
                       </span>
                    </div>
                 </div>
