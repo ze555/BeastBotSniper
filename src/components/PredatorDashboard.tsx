@@ -558,23 +558,23 @@ export const PredatorDashboard: React.FC = () => {
        {/* Dashboard Tab */}
        {activeTab === 'DASHBOARD' && (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
-             {/* 3:1 Genius Architecture Banner */}
+             {/* Exclusive StrongFlow strategy status — no projected win-rate claims */}
              <div className="bg-gradient-to-r from-blue-950/70 via-slate-900 to-emerald-950/60 border border-blue-500/30 rounded-xl p-4 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="space-y-1">
                    <div className="flex items-center gap-2">
                       <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs px-2.5 py-0.5 rounded-full font-black flex items-center gap-1.5">
                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                         نظام التفوق الرياضي 3:1 نشط
+                         Strong Flow — Fixed 2R
                       </span>
                       <span className="text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded font-mono">
-                         Win Target: 75%+
+                         PAPER ONLY
                       </span>
                    </div>
                    <p className="text-sm font-bold text-white">
-                      استراتيجية التناغم الثلاثي + درع الوقف الصفري لحماية رأس المال ($1,000)
+                      محرك Binance Futures 1m — دخول قوي وخروج ثابت بدون وقف متحرك أو جني جزئي
                    </p>
                    <p className="text-xs text-slate-400">
-                      يتم اقتناص الصفقات عند تلاقي سيولة الحيتان (CVD + OI) مع اتجاه البيتكوين، وتأمين الربح عند +0.70R بنقل الوقف لنقطة الدخول فوراً.
+                      الإشارات من شموع الدقيقة المغلقة وتدفق المشترين المنفذ. وقف خسارة 2×ATR، هدف كامل +2R، وخروج زمني بعد 180 دقيقة؛ الأداء السابق غير مضمون.
                    </p>
                 </div>
                 <div className="flex items-center gap-3 bg-slate-950/70 p-3 rounded-lg border border-slate-800 text-xs font-mono shrink-0">
@@ -593,7 +593,7 @@ export const PredatorDashboard: React.FC = () => {
                       <span className="text-blue-400 font-bold text-base">
                          {stats?.today?.count > 0 
                             ? `${((stats.today.wins / stats.today.count) * 100).toFixed(0)}%` 
-                            : '100%'}
+                            : '—'}
                       </span>
                    </div>
                 </div>
