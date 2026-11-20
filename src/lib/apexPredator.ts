@@ -100,13 +100,19 @@ let apexPredatorStats: any = {
 };
 
 export function resetAccountState() {
+  // Full reset is explicitly requested for the PAPER account only.
+  // There are no exchange API orders in this engine.
+  botActive = false;
   virtualBalance = 1000;
   initialVirtualBalance = 1000;
+  activeTrades = [];
+  closedTrades = [];
   todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
+  statsDay = new Intl.DateTimeFormat("en-CA", {timeZone:"Africa/Tripoli"}).format(new Date());
+  lastStrongFlowSignal.clear();
+  candidateAudit.length = 0;
   clearSymbolCooldowns();
-  closedTrades = closedTrades.filter(t => t.symbol !== 'AMZNUSDT' && !((t.pos || t.initialPos) > 100));
-  activeTrades = activeTrades.filter(t => t.symbol !== 'AMZNUSDT');
-  addLog(`✨ [ACCOUNT REFRESH] تم تطهير الصفقات الشاذة وإعادة ضبط رصيد الحساب إلى $1,000 وتصفير فترات التهدئة وإلغاء قفل الخسارة اليومية.`, 'success');
+  addLog("StrongFlow PAPER account reset: positions cleared, balance 1000, bot paused.", "success");
 }
 
 export function updateConfig(balance: number, maxTrades: number, opts?: any) {
@@ -115,7 +121,7 @@ export function updateConfig(balance: number, maxTrades: number, opts?: any) {
      virtualBalance = balance;
      todaysStats = { count: 0, wins: 0, losses: 0, pnl: 0, sumR: 0 };
   }
-  maxOpenTradesConfig = maxTrades;
+  maxOpenTradesConfig = Math.max(1, Math.min(STRONG_FLOW_MAX_CONCURRENT, Number(maxTrades) || STRONG_FLOW_MAX_CONCURRENT));
   if (opts) {
       if (opts.haltProfitEnabled !== undefined) haltProfitEnabled = opts.haltProfitEnabled;
       if (opts.haltProfitTarget !== undefined) haltProfitTarget = opts.haltProfitTarget;
@@ -198,7 +204,7 @@ export function getConfig() {
 export function setConfig(config: any) {
   if (config.virtualBalance) virtualBalance = config.virtualBalance;
   if (config.initialVirtualBalance) initialVirtualBalance = config.initialVirtualBalance;
-  if (config.maxOpenTradesConfig) maxOpenTradesConfig = config.maxOpenTradesConfig;
+  if (config.maxOpenTradesConfig) maxOpenTradesConfig = Math.max(1, Math.min(STRONG_FLOW_MAX_CONCURRENT, Number(config.maxOpenTradesConfig) || STRONG_FLOW_MAX_CONCURRENT));
   if (config.haltProfitEnabled !== undefined) haltProfitEnabled = config.haltProfitEnabled;
   if (config.haltProfitTarget !== undefined) haltProfitTarget = config.haltProfitTarget;
   if (config.haltLossEnabled !== undefined) haltLossEnabled = config.haltLossEnabled;
