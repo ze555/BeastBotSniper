@@ -9,6 +9,8 @@ import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles } from "./tradingIntegrity.js";
 import {
   evaluateStrongFlowSignal, isStrongFlowTradingHour,
+  isValidStrongFlowTradingSchedule, STRONG_FLOW_DEFAULT_TRADING_SCHEDULE,
+  type StrongFlowTradingSchedule,
   STRONG_FLOW_STRATEGY_ID, STRONG_FLOW_MAX_HOLD_MS,
   STRONG_FLOW_MAX_CONCURRENT, STRONG_FLOW_RISK_FRACTION,
   type StrongFlowSignal, type StrongFlowBar
@@ -35,6 +37,7 @@ let maxOpenTrades = STRONG_FLOW_MAX_CONCURRENT;
 let scanBatchSize = 25;
 let feeRate = 0.0004;
 let slippageRate = 0.0002;
+let tradingSchedule: StrongFlowTradingSchedule = {...STRONG_FLOW_DEFAULT_TRADING_SCHEDULE};
 let haltProfitEnabled = false;
 let haltProfitTarget = 150;
 let haltLossEnabled = false;
@@ -92,7 +95,7 @@ function riskedDollars(){
   },0);
 }
 function entryBlocked(){
-  if(!active || !isStrongFlowTradingHour())return true;
+  if(!active || !isStrongFlowTradingHour(new Date(), tradingSchedule))return true;
   if(!Number.isFinite(virtualBalance)||virtualBalance<=0)return true;
   if(activeTrades.length>=Math.min(maxOpenTrades,STRONG_FLOW_MAX_CONCURRENT))return true;
   if(today.pnl+floatingPnl()<=-initialVirtualBalance*MAX_DAILY_LOSS)return true;
@@ -120,16 +123,16 @@ export function getStats(){
     hotWatchlist:hotWatchlist.slice(0,8),
     currentBatchProgress:String(currentBatchIndex)+" / "+String(watchlist.length),
     freeTradesCount:0,riskedTradesCount:activeTrades.length,
-    isSleeping:!isStrongFlowTradingHour(),
+    isSleeping:!isStrongFlowTradingHour(new Date(), tradingSchedule),
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
-    strategySettings:{entryUtc:"16:00–24:00",timeframe:"1m closed",stopAtr:2,targetR:2,
+    strategySettings:{tradingSchedule:{...tradingSchedule},timeframe:"1m closed",stopAtr:2,targetR:2,
       riskFraction:STRONG_FLOW_RISK_FRACTION,maxHoldMinutes:STRONG_FLOW_MAX_HOLD_MS/60_000,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
 }
 export function getConfig(){return {virtualBalance,initialVirtualBalance,maxOpenTradesConfig:maxOpenTrades,
-  haltProfitEnabled,haltProfitTarget,haltLossEnabled,haltLossTarget,scanBatchSize,feeRate,slippageRate};}
+  haltProfitEnabled,haltProfitTarget,haltLossEnabled,haltLossTarget,scanBatchSize,feeRate,slippageRate,tradingSchedule:{...tradingSchedule}};}
 export function setConfig(config:any){
   if(config&&typeof config==="object"){
     if(Number.isFinite(config.virtualBalance)&&config.virtualBalance>0)virtualBalance=config.virtualBalance;
@@ -151,6 +154,10 @@ export function updateConfig(balance:number,maxTrades:number,opts:any={}){
   if(Number.isFinite(Number(opts.scanBatchSize))&&Number(opts.scanBatchSize)>0)scanBatchSize=Math.max(5,Math.min(60,Math.floor(Number(opts.scanBatchSize))));
   if(Number.isFinite(Number(opts.feeRate))&&Number(opts.feeRate)>=0&&Number(opts.feeRate)<0.01)feeRate=Number(opts.feeRate);
   if(Number.isFinite(Number(opts.slippageRate))&&Number(opts.slippageRate)>=0&&Number(opts.slippageRate)<0.01)slippageRate=Number(opts.slippageRate);
+  if(opts.tradingSchedule !== undefined && isValidStrongFlowTradingSchedule(opts.tradingSchedule)) {
+    tradingSchedule = {...opts.tradingSchedule};
+    addLog("Entry hours updated: "+(tradingSchedule.mode==="ALWAYS"?"24/7":tradingSchedule.startLocal+"–"+tradingSchedule.endLocal+" Africa/Tripoli"),"info");
+  }
 }
 export function resetAccountState(){
   if(activeTrades.length){addLog("Reset rejected: open paper positions must be closed first.","warn");return false;}
