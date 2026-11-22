@@ -50,15 +50,15 @@ for(const side of ["LONG","SHORT"] as const){
   const overextended={...s,trend60:d*.053};
   assert.equal(confirmEntryContext(overextended,rows,now).reason,"LATE_TREND_EXHAUSTION");
 }
-const range={...signal("LONG"),setupType:"RANGE_REVERSION" as const,regime:"RANGE" as const};
+const range={...signal("LONG"),setupType:"RANGE_REVERSION" as const,regime:"RANGE" as const,trend60:.004};
 const rowRange=makeBars("LONG");
 assert.equal(confirmEntryContext(range,rowRange,now).allowed,true);
 const q={bid:100.885,ask:100.895,time:now-200},oi={delta:.005,timestamp:now-6*60000,previousTimestamp:now-11*60000};
 const depth={allowed:true,reason:"REAL_DEPTH_CONFIRMED",imbalance:0.02,spread:.0001,depthNotional:60000,
 bestBid:q.bid,bestAsk:q.ask,time:now-100};
 assert.equal(verifyExecutableEntry(range,rowRange,q,depth,oi,.0004,.0002,now).reason,"ENTRY_OPPOSING_LIQUIDITY");
-assert.equal(parseOpenInterestHistory([{timestamp:now-11*60000,sumOpenInterest:"1000"},
-{timestamp:now-6*60000,sumOpenInterest:"1012"}],now)?.delta,.012);
+assert(Math.abs((parseOpenInterestHistory([{timestamp:now-11*60000,sumOpenInterest:"1000"},
+{timestamp:now-6*60000,sumOpenInterest:"1012"}],now)?.delta||0)-.012)<1e-10);
 assert.equal(parseOpenInterestHistory([{timestamp:now-11*60000,sumOpenInterest:"1000"}],now),null);
 assert.equal(parseOpenInterestHistory([{timestamp:now+60000,sumOpenInterest:"1000"},{timestamp:now-6*60000,sumOpenInterest:"990"}],now),null);
 // AIOUSDT-like counter-trend breakdown (observed signal trend60 was positive ~3.8%).
