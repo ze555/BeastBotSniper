@@ -357,9 +357,9 @@ export const PredatorDashboard: React.FC = () => {
                    <SettingsIcon className="w-5 h-5 text-blue-400"/> إعدادات المحرك الجديد فقط
                 </h2>
                 <p className="text-sm text-slate-300 leading-relaxed">
-                   الاستراتيجية الوحيدة: PB_STRONG_FLOW على شموع دقيقة مغلقة. وقف أولي 2×ATR،
-                   هدف كامل 2R، وخروج زمني بعد 180 دقيقة. المخاطرة المستهدفة 1% للصفقة،
-                   التوقيت الافتراضي 18:00–02:00 بتوقيت ليبيا، ويمكن تغييره أدناه. جميع محركات الدخول والخروج القديمة معطّلة.
+                   المحرك التكيفي: اتجاه صاعد وهابط، تذبذب، واختراق بتدفق تنفيذ حقيقي وعمق دفتر Binance وبيانات OI اختيارية.
+                   وقف متحرك لحماية الأرباح وأهداف وزمن خروج حسب حالة السوق. المخاطرة المستهدفة 0.5% للصفقة،
+                   والتداول الافتراضي طوال اليوم (PAPER فقط) ويمكن تحديد الأوقات أدناه. لم يثبت بعد تفوقه الربحي باختبار مستقل.
                 </p>
                 <p className="text-xs text-amber-400">التداول ورقي (Paper) فقط. الوقت يتحكم في فتح الصفقات الجديدة، وتستمر حماية وإغلاق الصفقات المفتوحة خارج النافذة.</p>
                 <div className="border border-slate-700 rounded-lg p-4 space-y-3">
@@ -544,7 +544,7 @@ export const PredatorDashboard: React.FC = () => {
                          نظام التفوق الرياضي 3:1 نشط
                       </span>
                       <span className="text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded font-mono">
-                         Win Target: 75%+
+                         Adaptive • PAPER
                       </span>
                    </div>
                    <p className="text-sm font-bold text-white">
@@ -570,7 +570,7 @@ export const PredatorDashboard: React.FC = () => {
                       <span className="text-blue-400 font-bold text-base">
                          {stats?.today?.count > 0 
                             ? `${((stats.today.wins / stats.today.count) * 100).toFixed(0)}%` 
-                            : '100%'}
+                            : '0%'}
                       </span>
                    </div>
                 </div>

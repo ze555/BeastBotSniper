@@ -23,7 +23,7 @@ async function startServer() {
   startEngine();
 
   // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "PB_STRONG_FLOW_FIXED2_1M_V1", mode: "PAPER", legacyEnginesEnabled: false }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "ADAPTIVE_REGIME_ORDERFLOW_V1", mode: "PAPER", legacyEnginesEnabled: false }));
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
@@ -48,7 +48,7 @@ async function startServer() {
       slippageRate: req.body.slippageRate,
       tradingSchedule: req.body.tradingSchedule,
     });
-    res.json({success:true,strategy:"PB_STRONG_FLOW_FIXED2_1M_V1"});
+    res.json({success:true,strategy:"ADAPTIVE_REGIME_ORDERFLOW_V1"});
   });
   app.post("/api/predator/reset", (req, res) => {
     const ok = resetAccountState();
