@@ -772,7 +772,7 @@ export function logTradeDecision(trade: any, exitContext: {
          timestamp_exit: exitTime.toISOString(),
          symbol: trade.symbol,
          exchange: "Binance Futures (Paper)",
-         timeframe: "15m",
+         timeframe: trade.timeframe || "1m",
          side: trade.direction,
          signal_type: trade.setupType || "BREAKOUT_MOMENTUM",
          market_regime: marketRegimeContext.strategy_regime,
@@ -782,7 +782,7 @@ export function logTradeDecision(trade: any, exitContext: {
          market_context: marketRegimeContext,
          timing_gate_state: trade.reasoning?.timingGate?.state || "CONFIRMED",
          flow_persistence_state: trade.reasoning?.flow?.persistenceState || "MODERATE",
-         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? 75,
+         flow_persistence_score: trade.reasoning?.flow?.persistenceScore ?? null,
          entry_quality: entryQuality,
 
          entry_price: entryPrice,
@@ -1069,7 +1069,11 @@ function updateSummaries(lastTrade: any) {
             by_symbol: bySymbol
          },
          directional_accuracy_report: {
-            total_predictions: eval15m,
+            total_predictions: allTrades.length,
+            evaluated_predictions_5m: eval5m,
+            evaluated_predictions_15m: eval15m,
+            evaluated_predictions_30m: eval30m,
+            evaluated_predictions_60m: eval60m,
             correct_direction_5m: correct5m,
             directional_accuracy_5m: eval5m > 0 ? Number(((correct5m / eval5m) * 100).toFixed(1)) : 0,
             correct_direction_15m: correct15m,

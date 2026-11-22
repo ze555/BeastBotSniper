@@ -7,14 +7,14 @@
 import axios from "axios";
 import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
-import { markTrade, closedCandles } from "./tradingIntegrity.js";
+import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
+import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, ADAPTIVE_STRATEGY_ID, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
 import {
-  evaluateStrongFlowSignal, isStrongFlowTradingHour,
+  isStrongFlowTradingHour,
   isValidStrongFlowTradingSchedule, STRONG_FLOW_DEFAULT_TRADING_SCHEDULE,
   type StrongFlowTradingSchedule,
-  STRONG_FLOW_STRATEGY_ID, STRONG_FLOW_MAX_HOLD_MS,
-  STRONG_FLOW_MAX_CONCURRENT, STRONG_FLOW_RISK_FRACTION,
-  type StrongFlowSignal, type StrongFlowBar
+  STRONG_FLOW_MAX_CONCURRENT,
+  type StrongFlowBar
 } from "./strongFlowStrategy.js";
 import {
   extractEntryTiming, extractMarketRegimeContext, formatCandles,
@@ -25,10 +25,12 @@ import {
 const FAPI = "https://fapi.binance.com";
 const MAX_DAILY_LOSS = 0.04;
 const SCAN_INTERVAL_MS = 15_000;
-const SCAN_CONCURRENCY = 12; // bound parallel klines requests / Railway resource use
+const SCAN_CONCURRENCY = 8; // bound parallel klines requests / Railway resource use
 const PROTECT_INTERVAL_MS = 2_000;
 const MAX_DASHBOARD_TRADES = 150;
-let active = false;
+const ADAPTIVE_RISK_FRACTION = 0.005; // 0.5% per position, 4% daily cap
+const openInterestSamples = new Map<string,{value:number,time:number}>();
+let active = true; // PAPER-only auto-start after deployment
 let scanning = false;
 let protecting = false;
 let scanTimer: ReturnType<typeof setInterval> | null = null;
@@ -39,7 +41,7 @@ let maxOpenTrades = STRONG_FLOW_MAX_CONCURRENT;
 let scanBatchSize = 0; // AUTO: visit every available futures symbol per full round
 let feeRate = 0.0004;
 let slippageRate = 0.0002;
-let tradingSchedule: StrongFlowTradingSchedule = {...STRONG_FLOW_DEFAULT_TRADING_SCHEDULE};
+let tradingSchedule: StrongFlowTradingSchedule = {...STRONG_FLOW_DEFAULT_TRADING_SCHEDULE,mode:"ALWAYS"};
 let haltProfitEnabled = false;
 let haltProfitTarget = 150;
 let haltLossEnabled = false;
@@ -64,7 +66,7 @@ const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
 const cooldownUntil = new Map<string,number>();
-const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{} as Record<string,number>};
+const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{} as Record<string,number>};
 
 export function addLog(message: string, type: "info"|"warn"|"success"|"error"="info") {
   logs.unshift({time:new Date().toISOString(),msg:message,type});
@@ -74,7 +76,7 @@ export function addLog(message: string, type: "info"|"warn"|"success"|"error"="i
 function audit(symbol:string,side:string,reason:string,allowed:boolean) {
   diagnostics.lastReason=reason;
   diagnostics.reasons[reason]=(diagnostics.reasons[reason]||0)+1;
-  audits.unshift({time:new Date().toISOString(),revision:STRONG_FLOW_STRATEGY_ID,symbol,side,reason,allowed});
+  audits.unshift({time:new Date().toISOString(),revision:ADAPTIVE_STRATEGY_ID,symbol,side,reason,allowed});
   if(audits.length>200) audits.length=200;
 }
 export function getCandidateAudit(){return audits;}
@@ -116,8 +118,8 @@ function entryBlocked(){
 }
 export function getStats(){
   return {
-    strategyRevision:STRONG_FLOW_STRATEGY_ID,
-    strategyMode:"PB_STRONG_FLOW_FIXED_2R_ONLY",
+    strategyRevision:ADAPTIVE_STRATEGY_ID,
+    strategyMode:"ADAPTIVE_TREND_RANGE_BREAKOUT",
     executionMode:"PAPER",
     legacyEnginesEnabled:false,
     totalEvaluations:audits.length,
@@ -150,8 +152,8 @@ export function getStats(){
     isSleeping:!isStrongFlowTradingHour(new Date(), tradingSchedule),
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
-    strategySettings:{tradingSchedule:{...tradingSchedule},timeframe:"1m closed",stopAtr:2,targetR:2,
-      riskFraction:STRONG_FLOW_RISK_FRACTION,maxHoldMinutes:STRONG_FLOW_MAX_HOLD_MS/60_000,
+    strategySettings:{tradingSchedule:{...tradingSchedule},timeframe:"1m closed + 15m/60m context",stopAtr:"adaptive",targetR:"adaptive",
+      riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
 }
@@ -247,45 +249,73 @@ async function fetchClosedOneMinuteBars(symbol:string):Promise<StrongFlowBar[]>{
   // Binance includes a still-forming final candle: using it suppresses valid closed-bar signals.
   return closedCandles(bars);
 }
-async function executeSignal(symbol:string,signal:StrongFlowSignal,bars:StrongFlowBar[]){
+/** Read-only Binance depth and OI. No fallback to invented market data. */
+async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"){
+  const [depthResult,oiResult]=await Promise.allSettled([
+    axios.get(FAPI+"/fapi/v1/depth",{params:{symbol,limit:20},timeout:3500}),
+    axios.get(FAPI+"/fapi/v1/openInterest",{params:{symbol},timeout:3500})
+  ]);
+  if(depthResult.status!=="fulfilled"){diagnostics.depthErrors++;audit(symbol,side,"DEPTH_UNAVAILABLE",false);return null;}
+  const depth=assessOrderBook(side,depthResult.value.data?.bids,depthResult.value.data?.asks);
+  if(!depth.allowed){audit(symbol,side,depth.reason,false);return null;}
+  let oiDelta:number|null=null;
+  if(oiResult.status==="fulfilled"){
+    const oi=Number(oiResult.value.data?.openInterest),prev=openInterestSamples.get(symbol),now=Date.now();
+    if(Number.isFinite(oi)&&oi>0){
+      if(prev&&now-prev.time>=60_000&&now-prev.time<=30*60_000&&prev.value>0)oiDelta=oi/prev.value-1;
+      openInterestSamples.set(symbol,{value:oi,time:now});
+    }
+  }else diagnostics.openInterestErrors++;
+  // OI changes do not identify the direction of positions, so never invent directional OI evidence.
+  return {bookImbalance:depth.imbalance,bookSpread:depth.spread,depthNotional:depth.depthNotional,openInterestDelta:oiDelta};
+}
+
+async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlowBar[]){
   if(entryBlocked()||activeTrades.some(t=>t.symbol===symbol)||isSymbolInCooldown(symbol)
     ||lastSignalTime.get(symbol)===signal.signalCloseTime)return;
   let quote;
   try{quote=await fetchExecutionQuote(symbol);}
   catch{diagnostics.quoteErrors++;audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return;}
   if(entryBlocked()||Date.now()-signal.signalCloseTime>90_000)return;
+  const micro=await confirmMarketEvidence(symbol,signal.side);
+  if(!micro||entryBlocked()||Date.now()-signal.signalCloseTime>90_000)return;
   const sign=signal.side==="LONG"?1:-1;
   const entry=(signal.side==="LONG"?quote.ask:quote.bid)*(1+sign*slippageRate);
-  const dist=signal.atr14*2;
+  const dist=signal.atr14*signal.stopAtr;
   if(!(entry>0&&dist>0&&dist/entry>=0.0048&&dist/entry<=0.04)){
     audit(symbol,signal.side,"STOP_DISTANCE_OUT_OF_RANGE",false);return;
   }
-  const stop=entry-sign*dist,target=entry+sign*2*dist;
+  const stop=entry-sign*dist,target=entry+sign*signal.targetR*dist;
   if(!(stop>0&&target>0))return;
   const riskBudget=Math.max(0,initialVirtualBalance*MAX_DAILY_LOSS+Math.min(0,today.pnl)-riskedDollars());
-  const dollars=Math.min(virtualBalance*STRONG_FLOW_RISK_FRACTION,riskBudget);
+  const dollars=Math.min(virtualBalance*ADAPTIVE_RISK_FRACTION,riskBudget);
+  if(dollars<initialVirtualBalance*0.003){audit(symbol,signal.side,"INSUFFICIENT_RISK_BUDGET",false);return;}
   const notionalCap=Math.min(virtualBalance*10,virtualBalance*0.15*10);
   const pos=Math.min(dollars/(dist+entry*2*(feeRate+slippageRate)),notionalCap/entry);
   if(!(pos>0&&Number.isFinite(pos))){audit(symbol,signal.side,"RISK_BUDGET",false);return;}
+  if(pos*(dist+entry*2*(feeRate+slippageRate))<initialVirtualBalance*0.003){
+    audit(symbol,signal.side,"POSITION_TOO_SMALL",false);return;
+  }
   const t:any={
     symbol,direction:signal.side,entry,sl:stop,initialSlDist:dist,
     tp1:target,tp2:target,tp3:target,pos,initialPos:pos,
     part_a:1,part_b:0,part_c:0,a_closed:false,b_closed:false,c_closed:false,
     be_done:false,micro_banked:false,peak_r:0,pnl:0,realizedPnl:0,totalFees:0,
     entryTime:new Date().toISOString(),entrySignalTime:signal.signalCloseTime,
-    entryTiming:extractEntryTiming(),marketRegimeContext:extractMarketRegimeContext({rvol:signal.rvol,atr14:signal.atr14,atr20:signal.atr14}),
-    strategyRevision:STRONG_FLOW_STRATEGY_ID,executionMode:"PAPER",
-    setupType:"PB_STRONG_FLOW",setupLabel:"1m strong flow / fixed 2R",grade:"GRADE_A",
+    entryTiming:extractEntryTiming(),marketRegimeContext:{...extractMarketRegimeContext({rvol:signal.rvol,atr14:signal.atr14,atr20:signal.atr14}),strategy_regime:signal.regime},
+    strategyRevision:ADAPTIVE_STRATEGY_ID,executionMode:"PAPER",timeframe:"1m",
+    setupType:signal.setupType,setupLabel:signal.regime+" / "+signal.setupType,grade:"EVIDENCE_CHECKED",
+    marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR:signal.targetR,
     atr:signal.atr14,highestPrice:entry,lowestPrice:entry,currentPrice:entry,
     candlesBeforeEntry:formatCandles(bars,40),
-    priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow5:signal.flow5,flow15:signal.flow15,trend15:signal.trend15,trend60:signal.trend60},
-    whaleData:{scenario:"STRONG_FLOW_1M_EXECUTED_TAKER_QUOTE"},
-    reasoning:{flow:{state:"STRONG_FLOW_1M"},timingGate:{state:"CONFIRMED"}}
+    priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow5:signal.flow5,flow15:signal.flow15,trend15:signal.trend15,trend60:signal.trend60,...micro},
+    whaleData:{scenario:"BINANCE_EXECUTED_TAKER_QUOTE_PLUS_REST_BOOK_AND_OI"},
+    reasoning:{flow:{state:"EXECUTED_TAKER_CANDLE_FLOW"},timingGate:{state:"CONFIRMED"}}
   };
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
   diagnostics.opened++;registerTradeForDirectionTracking(t);
-  audit(symbol,signal.side,"PB_STRONG_FLOW_FIXED_2R",true);
-  addLog("PAPER "+signal.side+" "+symbol+" opened at "+entry+"; full target 2R","success");
+  audit(symbol,signal.side,signal.setupType,true);
+  addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+signal.targetR+"R","success");
 }
 async function scanEntries(){
   if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
@@ -308,7 +338,7 @@ async function scanEntries(){
       const group=symbols.slice(i,i+SCAN_CONCURRENCY);
       const rows=await Promise.allSettled(group.map(async symbol=>{
         const bars=await fetchClosedOneMinuteBars(symbol);
-        return {symbol,bars,signal:evaluateStrongFlowSignal(bars)};
+        return {symbol,bars,signal:evaluateAdaptiveSignal(bars)};
       }));
       for(let j=0;j<rows.length;j++){
         const symbol=group[j],result=rows[j];
@@ -363,7 +393,7 @@ function closeFull(t:any,reason:string){
   logTradeDecision(t,{exitPrice:price,exitReason:reason,finalPnl:t.finalPnl,fees:t.totalFees});
   addLog(t.symbol+" "+reason+" net $"+t.finalPnl.toFixed(2),t.finalPnl>=0?"success":"warn");
 }
-/** Sole exit policy: initial SL, full 2R take-profit, 180m time stop. No partial exits/trailing. */
+/** Regime-specific target + monotonic ATR/R profit protection + bounded time exit. */
 export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   const now=Date.now();
   if(!Number.isFinite(quoteTime)||quoteTime>now+1000||now-quoteTime>5000||quoteTime<(t.lastQuoteTime||0))return;
@@ -373,13 +403,16 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   const stopped=markTrade(t,price,feeRate,slippageRate);
   updateDirectionTracking(t.symbol,price);
   logTradeJourneySnapshot(t,price,t.pnl);
-  if(stopped){closeFull(t,"PB_STRONG_FLOW Stop Loss");return;}
+  if(stopped){closeFull(t,"ADAPTIVE Stop Loss");return;}
+  const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
+  if(candidate!==null)tightenStop(t,candidate);
   const sign=t.direction==="LONG"?1:-1;
-  if(sign*(price-t.entry)>=2*t.initialSlDist){
-    closeFull(t,"PB_STRONG_FLOW Fixed 2R Target");return;
+  if(sign*(price-t.sl)<=0){closeFull(t,"ADAPTIVE Protected Stop");return;}
+  if(sign*(price-t.entry)>=(t.targetR||3.5)*t.initialSlDist){
+    closeFull(t,"ADAPTIVE Regime Target");return;
   }
-  if(now-new Date(t.entryTime).getTime()>=STRONG_FLOW_MAX_HOLD_MS){
-    closeFull(t,"PB_STRONG_FLOW 180m Time Exit");
+  if(now-new Date(t.entryTime).getTime()>=(t.maxHoldMs||180*60_000)){
+    closeFull(t,"ADAPTIVE Time Exit");
   }
 }
 export async function runProtectionCycle(){
@@ -390,6 +423,18 @@ export async function runProtectionCycle(){
       try{
         const q=await fetchExecutionQuote(t.symbol);
         protectTradeAtPrice(t,t.direction==="LONG"?q.bid:q.ask,q.time);
+        if(!t.exitTime && Date.now()-(t.lastFlowCheckAt||0)>=60_000){
+          t.lastFlowCheckAt=Date.now();
+          try{
+            const bars=await fetchClosedOneMinuteBars(t.symbol),recent=bars.slice(-5);
+            const volume=recent.reduce((sum,b)=>sum+b.quoteVolume,0);
+            const signed=recent.reduce((sum,b)=>sum+2*b.takerBuyQuote-b.quoteVolume,0);
+            const flow=volume>0?signed/volume:0,sign=t.direction==="LONG"?1:-1;
+            if(recent.length===5 && sign*flow< -0.22 && t.peak_r>=0.8 && t.profitR> -0.25){
+              closeFull(t,"ADAPTIVE Flow Reversal");
+            }
+          }catch{diagnostics.scanErrors++;}
+        }
       }catch{diagnostics.quoteErrors++;}
     }));
     diagnostics.protectionCycles++;diagnostics.lastProtectionAt=Date.now();
@@ -402,5 +447,5 @@ export function startEngine(){
   protectTimer=setInterval(()=>{void runProtectionCycle();},PROTECT_INTERVAL_MS);
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
-  addLog(STRONG_FLOW_STRATEGY_ID+" initialized. PAPER only; legacy execution retired.","success");
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized. PAPER only; trend, range, breakout and flow protection enabled.","success");
 }
