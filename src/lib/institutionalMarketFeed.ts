@@ -27,10 +27,15 @@ let seq=0,reconnects=0,frameCount=0,tradeEvents=0,liquidationEvents=0,invalidMes
 const emptyState=():State=>({buckets:[],forced:[],book:null,oi:null,taker:null,top:null,
   bookFetch:0,ratioFetch:0,latestAgg:0});
 const streamNames=(symbol:string)=>[symbol.toLowerCase()+"@aggTrade",symbol.toLowerCase()+"@forceOrder"];
+// Some Binance USD-M instruments use CJK characters (exchangeInfo is the source of truth).
+// Validate stream-safe symbols without incorrectly excluding non-Latin listings.
+export function validMarketSymbol(s:unknown):s is string{
+  return typeof s==="string" && /^[\p{L}\p{N}_]{3,40}$/u.test(s);
+}
 /** Pure decoder for replay testing real Binance taker-side semantics. */
 export function decodeAggTrade(data:any,now=Date.now()){
   if(data?.e!=="aggTrade" || typeof data?.m!=="boolean" ||
-     !/^[A-Z0-9]{3,40}$/.test(String(data?.s||"")))return null;
+     !validMarketSymbol(data?.s))return null;
   const at=Number(data.T??data.E),price=Number(data.p),qty=Number(data.q);
   if(!Number.isFinite(at)||at>now+1000||now-at>10000||
      !(price>0&&qty>0&&Number.isFinite(price*qty)))return null;
@@ -122,7 +127,7 @@ function connect(now=Date.now()){
   }catch(e:any){errors++;lastError=String(e?.message||e);socket=null;}
 }
 export function syncInstitutionalSymbols(symbols:string[],enableWebsocket=true){
-  const desired=new Set(symbols.filter(s=>/^[A-Z0-9]{3,40}$/.test(s)).slice(0,MAX_TRACKED));
+  const desired=new Set(symbols.filter(validMarketSymbol).slice(0,MAX_TRACKED));
   const remove=[...tracked].filter(s=>!desired.has(s));
   const add=[...desired].filter(s=>!tracked.has(s));
   for(const s of remove){tracked.delete(s);state.delete(s);subscribed.delete(s);}
