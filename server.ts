@@ -38,6 +38,10 @@ async function startServer() {
       res.status(400).json({success:false,message:"Invalid trading schedule: use ALWAYS or SCHEDULED with HH:mm Libya times and different start/end."});
       return;
     }
+    if(req.body?.liveWebsocketEnabled!==undefined && typeof req.body.liveWebsocketEnabled!=="boolean"){
+      res.status(400).json({success:false,message:"liveWebsocketEnabled must be boolean"});
+      return;
+    }
     updateConfig(req.body.balance, req.body.maxTrades, {
       haltProfitEnabled: req.body.haltProfitEnabled,
       haltProfitTarget: req.body.haltProfitTarget,
@@ -47,8 +51,9 @@ async function startServer() {
       feeRate: req.body.feeRate,
       slippageRate: req.body.slippageRate,
       tradingSchedule: req.body.tradingSchedule,
+      liveWebsocketEnabled: req.body.liveWebsocketEnabled,
     });
-    res.json({success:true,strategy:"ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED_WITH_REVERSAL_WATCH"});
+    res.json({success:true,strategy:"ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED",liveWebsocketEnabled:getStats().liveWebsocketEnabled});
   });
   app.post("/api/predator/reset", (req, res) => {
     const ok = resetAccountState();

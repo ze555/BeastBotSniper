@@ -21,6 +21,7 @@ export const PredatorDashboard: React.FC = () => {
   const [scanBatchSize, setScanBatchSize] = useState('0');
   const [feeRateInput, setFeeRateInput] = useState('0.0004');
   const [slippageRateInput, setSlippageRateInput] = useState('0.0002');
+  const [liveWebsocketEnabled, setLiveWebsocketEnabled] = useState(true);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [tradingMode, setTradingMode] = useState<'SCHEDULED' | 'ALWAYS'>('SCHEDULED');
   const [tradingStart, setTradingStart] = useState('18:00');
@@ -64,6 +65,7 @@ export const PredatorDashboard: React.FC = () => {
             if (data.scanBatchSize !== undefined) setScanBatchSize(data.scanBatchSize.toString());
             if (data.feeRate !== undefined) setFeeRateInput(data.feeRate.toString());
             if (data.slippageRate !== undefined) setSlippageRateInput(data.slippageRate.toString());
+            if (typeof data.liveWebsocketEnabled === 'boolean') setLiveWebsocketEnabled(data.liveWebsocketEnabled);
         }
       }
       const tradesRes = await fetch('/api/trades/active');
@@ -117,6 +119,7 @@ export const PredatorDashboard: React.FC = () => {
                   feeRate: Number(feeRateInput),
                   slippageRate: Number(slippageRateInput),
                   tradingSchedule: {mode: tradingMode, startLocal: tradingStart, endLocal: tradingEnd},
+                  liveWebsocketEnabled,
               })
           });
           if (!result.ok) {
@@ -362,6 +365,27 @@ export const PredatorDashboard: React.FC = () => {
                    التداول الافتراضي طوال اليوم، ولا توجد ضمانة للربحية قبل اختبارات مستقلة.
                 </p>
                 <p className="text-xs text-amber-400">التداول ورقي (Paper) فقط. الوقت يتحكم في فتح الصفقات الجديدة، وتستمر حماية وإغلاق الصفقات المفتوحة خارج النافذة.</p>
+                <div className="border border-slate-700 rounded-lg p-4 space-y-2">
+                   <label className="flex items-center gap-3 text-sm text-white font-semibold">
+                     <input type="checkbox" checked={liveWebsocketEnabled}
+                       onChange={e=>{tradingSettingsDirty.current=true;setLiveWebsocketEnabled(e.target.checked);}}/>
+                     استعمال WebSocket الحي في قرارات التداول — مفعّل افتراضياً
+                   </label>
+                   <p className="text-xs text-slate-400">
+                     عند التشغيل: يؤكد تدفق aggTrade اللحظي دخول الاختراقات ويدعم كشف الانعكاس في الصفقات المفتوحة.
+                     يلزم وصول بيانات حديثة للاختراق؛ استمرار الاتجاه والتصحيح يحتفظان بقواعد دخولهما السابقة.
+                     عند الإيقاف: لا تؤثر بيانات WebSocket على الدخول أو الخروج، وتبقى قواعد السعر وREST والوقف والأهداف كما كانت.
+                   </p>
+                   <p className="text-xs text-sky-400">
+                     الحالة: {stats?.institutionalMonitor?.connected ? 'متصل' : 'غير متصل'}
+                     {' | '}تأكيد الاشتراكات: {stats?.institutionalMonitor?.subscriptionAcks ?? 0}
+                     {' | '}رسائل aggTrade: {stats?.institutionalMonitor?.aggTradeEvents ?? 0}
+                     {' | '}أخطاء الاشتراك: {stats?.institutionalMonitor?.subscriptionErrors ?? 0}
+                   </p>
+                   <p className="text-xs text-amber-400">
+                     التغيير يسري عند حفظ الإعدادات، ويعود الخيار إلى الافتراضي (مفعّل) عند إعادة تشغيل السيرفر؛ حالة الإعدادات غير محفوظة بتخزين دائم.
+                   </p>
+                </div>
                 <div className="border border-slate-700 rounded-lg p-4 space-y-3">
                    <label className="block text-sm font-bold text-white">وقت فتح الصفقات
                       <select value={tradingMode} onChange={e => {tradingSettingsDirty.current = true; setTradingMode(e.target.value as 'SCHEDULED'|'ALWAYS');}}
