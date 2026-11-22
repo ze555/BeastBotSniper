@@ -78,12 +78,13 @@ export function confirmNextClosedMinute(signal:AdaptiveSignal,rows:StrongFlowBar
   return {allowed:true,reason:"FOLLOW_THROUGH_CONFIRMED",details:{nextDelta:delta}};
 }
 
-/** Parse Binance /futures/data/openInterestHist 5m. Timestamps are END of period. */
+/** Parse Binance 5m OI. Ignore the most recent five minutes conservatively:
+ * some archive labels differ from documented REST end-of-period semantics. */
 export function parseOpenInterestHistory(raw:unknown,now=Date.now()):EntryOi|null{
   if(!Array.isArray(raw))return null;
   const valid=raw.map((x:any)=>({timestamp:Number(x?.timestamp),value:Number(x?.sumOpenInterest)}))
     .filter(x=>Number.isFinite(x.timestamp)&&Number.isFinite(x.value)&&x.value>0&&
-      x.timestamp<=now-15000&&x.timestamp>=now-20*60000)
+      x.timestamp<=now-5*60000&&x.timestamp>=now-20*60000)
     .sort((a,b)=>a.timestamp-b.timestamp);
   if(valid.length<2)return null;
   const latest=valid.at(-1)!,prev=valid.at(-2)!;
