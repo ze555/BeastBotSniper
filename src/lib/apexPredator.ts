@@ -10,6 +10,8 @@ import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
 import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
+import { evaluateReversal } from "./institutionalReversal.js";
+import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED";
 import {
   isStrongFlowTradingHour,
@@ -21,7 +23,7 @@ import {
 import {
   extractEntryTiming, extractMarketRegimeContext, formatCandles,
   registerTradeForDirectionTracking, updateDirectionTracking,
-  logTradeJourneySnapshot, logTradeDecision
+  logTradeJourneySnapshot, logTradeDecision, logInstitutionalEvidence
 } from "./researchLogger.js";
 
 const FAPI = "https://fapi.binance.com";
@@ -31,6 +33,8 @@ const SCAN_CONCURRENCY = 8; // bound parallel klines requests / Railway resource
 const PROTECT_INTERVAL_MS = 2_000;
 const MAX_DASHBOARD_TRADES = 150;
 const ADAPTIVE_RISK_FRACTION = 0.0035; // 0.35% paper position risk; 4% daily cap
+let institutionalMonitoringEnabled=false;
+const reversalDiagnostics={observations:0,warnings:0,earlyExits:0,incomplete:0};
 let active = true; // PAPER-only auto-start after deployment
 let scanning = false;
 let protecting = false;
@@ -133,6 +137,7 @@ export function getStats(){
     acceptedLongs:audits.filter(a=>a.allowed&&a.side==="LONG").length,
     acceptedShorts:audits.filter(a=>a.allowed&&a.side==="SHORT").length,
     rules:{},diagnostics,pendingCandidates:pendingSignals.size,
+    institutionalMonitor:{...institutionalHealth(),...reversalDiagnostics},
     balance:virtualBalance,initialBalance:initialVirtualBalance,
     maxOpenTrades,feeRate,slippageRate,scanBatchSize,
     haltProfitEnabled,haltProfitTarget,haltLossEnabled,haltLossTarget,
@@ -338,6 +343,7 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
     reasoning:{flow:{state:"VERIFIED_1M_5M_15M_TAKER_FLOW"},timingGate:{state:"FOLLOW_THROUGH_CONFIRMED"}}
   };
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
+  if(institutionalMonitoringEnabled)syncInstitutionalSymbols(activeTrades.map(t=>t.symbol));
   diagnostics.opened++;registerTradeForDirectionTracking(t);
   audit(symbol,signal.side,signal.setupType,true);
   addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+signal.targetR+"R","success");
@@ -431,6 +437,7 @@ function closeFull(t:any,reason:string){
   virtualBalance+=pnl;t.finalPnl=t.realizedPnl;t.pnl=t.finalPnl;
   t.exitTime=new Date().toISOString();t.exitReason=reason;t.pos=0;
   activeTrades.splice(activeTrades.indexOf(t),1);
+  if(institutionalMonitoringEnabled)syncInstitutionalSymbols(activeTrades.map(x=>x.symbol));
   closedTrades.unshift(t);if(closedTrades.length>MAX_DASHBOARD_TRADES)closedTrades.length=MAX_DASHBOARD_TRADES;
   today.count++;today.pnl+=t.finalPnl;
   if(t.finalPnl>0.15)today.wins++;
@@ -470,17 +477,42 @@ export async function runProtectionCycle(){
       try{
         const q=await fetchExecutionQuote(t.symbol);
         protectTradeAtPrice(t,t.direction==="LONG"?q.bid:q.ask,q.time);
-        if(!t.exitTime && Date.now()-(t.lastFlowCheckAt||0)>=60_000){
-          t.lastFlowCheckAt=Date.now();
-          try{
-            const bars=await fetchClosedOneMinuteBars(t.symbol),recent=bars.slice(-5);
-            const volume=recent.reduce((sum,b)=>sum+b.quoteVolume,0);
-            const signed=recent.reduce((sum,b)=>sum+2*b.takerBuyQuote-b.quoteVolume,0);
-            const flow=volume>0?signed/volume:0,sign=t.direction==="LONG"?1:-1;
-            if(recent.length===5 && sign*flow< -0.22 && t.peak_r>=0.8 && t.profitR> -0.25){
-              closeFull(t,"ADAPTIVE Flow Reversal");
+        if(!t.exitTime && institutionalMonitoringEnabled){
+          // Rate-limited market telemetry runs ONLY for open PAPER positions.
+          await refreshInstitutionalEvidence(t.symbol);
+          if(Date.now()-(t.lastFlowCheckAt||0)>=60_000){
+            t.lastFlowCheckAt=Date.now();
+            try{
+              const bars=await fetchClosedOneMinuteBars(t.symbol),now=Date.now();
+              const context=institutionalSnapshot(t.symbol,now);
+              const warning=evaluateReversal(t.direction,bars,context,{
+                entry:t.entry,initialSlDist:t.initialSlDist,price:t.currentPrice,
+                peakR:t.peak_r||0,entryMs:new Date(t.entryTime).getTime()
+              },now);
+              t.latestInstitutionalWarning=warning;
+              t.institutionalContext={
+                timestamp:new Date(now).toISOString(),liveAgg:context.agg,
+                book:context.book,openInterest:context.oi,takerRatio:context.taker,
+                topTraders:context.topTraders,liquidations:context.liquidations
+              };
+              reversalDiagnostics.observations++;
+              if(warning.decision==="INSUFFICIENT_DATA")reversalDiagnostics.incomplete++;
+              if(warning.decision==="WATCH")reversalDiagnostics.warnings++;
+              const record={timestamp:new Date(now).toISOString(),
+                trade_id:t.symbol+"_"+new Date(t.entryTime).getTime(),symbol:t.symbol,
+                side:t.direction,price:t.currentPrice,profitR:t.profitR,peakR:t.peak_r,
+                market:t.institutionalContext,warning};
+              logInstitutionalEvidence(record);
+              if(warning.decision==="EXIT" && !t.exitTime){
+                reversalDiagnostics.earlyExits++;
+                closeFull(t,"ADAPTIVE Confirmed Institutional Reversal");
+              }
+            }catch(e:any){
+              diagnostics.scanErrors++;
+              if(diagnostics.scanErrors%20===1)
+                addLog("Institutional monitor fetch skipped: "+String(e?.message||e).slice(0,110),"warn");
             }
-          }catch{diagnostics.scanErrors++;}
+          }
         }
       }catch(e:any){
         diagnostics.quoteErrors++;
@@ -495,10 +527,12 @@ export async function runProtectionCycle(){
 }
 export async function runApexLoop(){await scanEntries();}
 export function startEngine(){
+  institutionalMonitoringEnabled=true;
+  syncInstitutionalSymbols(activeTrades.map(x=>x.symbol));
   if(scanTimer)clearInterval(scanTimer);
   if(protectTimer)clearInterval(protectTimer);
   protectTimer=setInterval(()=>{void runProtectionCycle();},PROTECT_INTERVAL_MS);
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER only; closed MTF + next-minute acceptance + real OI and depth veto.","success");
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; market monitoring enabled for active positions (aggTrades, forceOrder, depth, OI, taker and large trader ratios).","success");
 }
