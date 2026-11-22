@@ -485,11 +485,15 @@ export async function runProtectionCycle(){
             try{
               const bars=await fetchClosedOneMinuteBars(t.symbol),now=Date.now();
               const context=institutionalSnapshot(t.symbol,now);
-              const warning=evaluateReversal(t.direction,bars,context,{
-                entry:t.entry,initialSlDist:t.initialSlDist,price:t.currentPrice,
-                peakR:t.peak_r||0,entryMs:new Date(t.entryTime).getTime()
-              },now);
+              const position={entry:t.entry,initialSlDist:t.initialSlDist,price:t.currentPrice,
+                peakR:t.peak_r||0,entryMs:new Date(t.entryTime).getTime()};
+              // Phase 1: repair WebSocket market collection WITHOUT changing exits.
+              // Compare its contribution in shadow; actual decisions see the same
+              // evidence as prior production (which received zero aggTrade events).
+              const warning=evaluateReversal(t.direction,bars,{...context,agg:null},position,now);
+              const shadowWarning=evaluateReversal(t.direction,bars,context,position,now);
               t.latestInstitutionalWarning=warning;
+              t.latestShadowReversalWarning=shadowWarning;
               t.institutionalContext={
                 timestamp:new Date(now).toISOString(),liveAgg:context.agg,
                 book:context.book,openInterest:context.oi,takerRatio:context.taker,
@@ -501,7 +505,7 @@ export async function runProtectionCycle(){
               const record={timestamp:new Date(now).toISOString(),
                 trade_id:t.symbol+"_"+new Date(t.entryTime).getTime(),symbol:t.symbol,
                 side:t.direction,price:t.currentPrice,profitR:t.profitR,peakR:t.peak_r,
-                market:t.institutionalContext,warning};
+                market:t.institutionalContext,warning,shadowWarning};
               logInstitutionalEvidence(record);
               if(warning.decision==="EXIT" && !t.exitTime){
                 reversalDiagnostics.earlyExits++;
