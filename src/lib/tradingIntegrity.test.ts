@@ -7,7 +7,7 @@ import {closedCandles,validQuote,waveEvidence} from "./tradingIntegrity.js";
 import {ADAPTIVE_STRATEGY_ID} from "./adaptiveRegimeStrategy.js";
 process.env.BEAST_RESEARCH_DIR=mkdtempSync(join(tmpdir(),"beast-fixed2-test-"));
 const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState}=await import("./apexPredator.js");
-assert.equal(getStats().strategyMode,"ADAPTIVE_TREND_RANGE_BREAKOUT");
+assert.equal(getStats().strategyMode,"ADAPTIVE_VERIFIED_ENTRY_V2");
 assert.equal(getStats().legacyEnginesEnabled,false);
 assert.equal(getStats().executionMode,"PAPER");
 const now=Date.now();

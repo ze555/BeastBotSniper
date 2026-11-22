@@ -1,14 +1,16 @@
 /**
- * BeastBotSniper paper runtime — PB_STRONG_FLOW_FIXED2_1M_V1 ONLY.
- * Legacy scoring, pullback sniper, tri-regime entry, layered partial exits,
- * BTC veto, adaptive trailing, and legacy reversal execution are retired.
- * Existing historical research modules remain available for offline analysis.
+ * BeastBotSniper PAPER runtime — adaptive verified-entry engine.
+ * Signal -> next fully closed minute -> 5m/15m confirmation -> Binance
+ * executable quote + real book + 5m OI history + net cost veto -> PAPER trade.
+ * No guarantee of profitable trades; all observations must be live/complete.
  */
 import axios from "axios";
 import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
-import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, ADAPTIVE_STRATEGY_ID, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
+import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
+import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
+const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED";
 import {
   isStrongFlowTradingHour,
   isValidStrongFlowTradingSchedule, STRONG_FLOW_DEFAULT_TRADING_SCHEDULE,
@@ -28,8 +30,7 @@ const SCAN_INTERVAL_MS = 15_000;
 const SCAN_CONCURRENCY = 8; // bound parallel klines requests / Railway resource use
 const PROTECT_INTERVAL_MS = 2_000;
 const MAX_DASHBOARD_TRADES = 150;
-const ADAPTIVE_RISK_FRACTION = 0.005; // 0.5% per position, 4% daily cap
-const openInterestSamples = new Map<string,{value:number,time:number}>();
+const ADAPTIVE_RISK_FRACTION = 0.0035; // 0.35% paper position risk; 4% daily cap
 let active = true; // PAPER-only auto-start after deployment
 let scanning = false;
 let protecting = false;
@@ -65,8 +66,12 @@ const closedTrades: any[] = [];
 const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
+const pendingSignals = new Map<string,AdaptiveSignal>();
 const cooldownUntil = new Map<string,number>();
-const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{} as Record<string,number>};
+const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,
+  rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",
+  reasons:{} as Record<string,number>,quoteErrorReasons:{} as Record<string,number>,
+  candidatesStaged:0,candidatesConfirmed:0};
 
 export function addLog(message: string, type: "info"|"warn"|"success"|"error"="info") {
   logs.unshift({time:new Date().toISOString(),msg:message,type});
@@ -119,7 +124,7 @@ function entryBlocked(){
 export function getStats(){
   return {
     strategyRevision:ADAPTIVE_STRATEGY_ID,
-    strategyMode:"ADAPTIVE_TREND_RANGE_BREAKOUT",
+    strategyMode:"ADAPTIVE_VERIFIED_ENTRY_V2",
     executionMode:"PAPER",
     legacyEnginesEnabled:false,
     totalEvaluations:audits.length,
@@ -127,7 +132,7 @@ export function getStats(){
     totalShortScanned:audits.filter(a=>a.side==="SHORT").length,
     acceptedLongs:audits.filter(a=>a.allowed&&a.side==="LONG").length,
     acceptedShorts:audits.filter(a=>a.allowed&&a.side==="SHORT").length,
-    rules:{},diagnostics,
+    rules:{},diagnostics,pendingCandidates:pendingSignals.size,
     balance:virtualBalance,initialBalance:initialVirtualBalance,
     maxOpenTrades,feeRate,slippageRate,scanBatchSize,
     haltProfitEnabled,haltProfitTarget,haltLossEnabled,haltLossTarget,
@@ -152,7 +157,7 @@ export function getStats(){
     isSleeping:!isStrongFlowTradingHour(new Date(), tradingSchedule),
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
-    strategySettings:{tradingSchedule:{...tradingSchedule},timeframe:"1m closed + 15m/60m context",stopAtr:"adaptive",targetR:"adaptive",
+    strategySettings:{tradingSchedule:{...tradingSchedule},timeframe:"1m closed + confirmed 5m/15m",stopAtr:"adaptive",targetR:"adaptive",
       riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
@@ -190,7 +195,8 @@ export function resetAccountState(){
   if(activeTrades.length){addLog("Reset rejected: open paper positions must be closed first.","warn");return false;}
   virtualBalance=initialVirtualBalance=1000;
   today={count:0,wins:0,losses:0,pnl:0,sumR:0};closedTrades.length=0;
-  cooldownUntil.clear();lastSignalTime.clear();addLog("Paper account reset to $1000.","success");return true;
+  cooldownUntil.clear();lastSignalTime.clear();pendingSignals.clear();
+  addLog("Paper account reset to $1000.","success");return true;
 }
 async function updateUniverse(){
   if(lastUniverseUpdate && Date.now()-lastUniverseUpdate<300_000)return;
@@ -249,36 +255,51 @@ async function fetchClosedOneMinuteBars(symbol:string):Promise<StrongFlowBar[]>{
   // Binance includes a still-forming final candle: using it suppresses valid closed-bar signals.
   return closedCandles(bars);
 }
-/** Read-only Binance depth and OI. No fallback to invented market data. */
-async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"){
+/** Two independent real Binance observations; absence of OI/history rejects new entries. */
+async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"):
+  Promise<{depth:EntryDepth;oi:EntryOi}|null>{
   const [depthResult,oiResult]=await Promise.allSettled([
     axios.get(FAPI+"/fapi/v1/depth",{params:{symbol,limit:20},timeout:3500}),
-    axios.get(FAPI+"/fapi/v1/openInterest",{params:{symbol},timeout:3500})
+    axios.get(FAPI+"/futures/data/openInterestHist",{params:{symbol,period:"5m",limit:4},timeout:3500})
   ]);
-  if(depthResult.status!=="fulfilled"){diagnostics.depthErrors++;audit(symbol,side,"DEPTH_UNAVAILABLE",false);return null;}
-  const depth=assessOrderBook(side,depthResult.value.data?.bids,depthResult.value.data?.asks);
+  if(depthResult.status!=="fulfilled"){
+    diagnostics.depthErrors++;audit(symbol,side,"DEPTH_UNAVAILABLE",false);return null;
+  }
+  const d=depthResult.value.data;
+  const book=assessOrderBook(side,d?.bids,d?.asks);
+  const depth:EntryDepth={...book,bestBid:Number(d?.bids?.[0]?.[0]),bestAsk:Number(d?.asks?.[0]?.[0]),
+    time:Number(d?.T||d?.E)};
   if(!depth.allowed){audit(symbol,side,depth.reason,false);return null;}
-  let oiDelta:number|null=null;
-  if(oiResult.status==="fulfilled"){
-    const oi=Number(oiResult.value.data?.openInterest),prev=openInterestSamples.get(symbol),now=Date.now();
-    if(Number.isFinite(oi)&&oi>0){
-      if(prev&&now-prev.time>=60_000&&now-prev.time<=30*60_000&&prev.value>0)oiDelta=oi/prev.value-1;
-      openInterestSamples.set(symbol,{value:oi,time:now});
-    }
-  }else diagnostics.openInterestErrors++;
-  // OI changes do not identify the direction of positions, so never invent directional OI evidence.
-  return {bookImbalance:depth.imbalance,bookSpread:depth.spread,depthNotional:depth.depthNotional,openInterestDelta:oiDelta};
+  if(oiResult.status!=="fulfilled"){
+    diagnostics.openInterestErrors++;audit(symbol,side,"OI_HISTORY_FETCH_FAILED",false);return null;
+  }
+  const oi=parseOpenInterestHistory(oiResult.value.data);
+  if(!oi){diagnostics.openInterestErrors++;audit(symbol,side,"OI_HISTORY_INCOMPLETE",false);return null;}
+  return {depth,oi};
 }
 
 async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlowBar[]){
   if(entryBlocked()||activeTrades.some(t=>t.symbol===symbol)||isSymbolInCooldown(symbol)
     ||lastSignalTime.get(symbol)===signal.signalCloseTime)return;
+  if(Date.now()-signal.signalCloseTime>180_000)return;
+  const follow=confirmNextClosedMinute(signal,bars);
+  if(!follow.allowed){audit(symbol,signal.side,follow.reason,false);return;}
+  const mtf=confirmEntryContext(signal,bars);
+  if(!mtf.allowed){audit(symbol,signal.side,mtf.reason,false);return;}
+  const evidence=await confirmMarketEvidence(symbol,signal.side);
+  if(!evidence||entryBlocked()||Date.now()-signal.signalCloseTime>180_000)return;
+  // Fetch LAST so the executable quote is younger than the depth and OI reads.
   let quote;
   try{quote=await fetchExecutionQuote(symbol);}
-  catch{diagnostics.quoteErrors++;audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return;}
-  if(entryBlocked()||Date.now()-signal.signalCloseTime>90_000)return;
-  const micro=await confirmMarketEvidence(symbol,signal.side);
-  if(!micro||entryBlocked()||Date.now()-signal.signalCloseTime>90_000)return;
+  catch(e:any){
+    diagnostics.quoteErrors++;
+    const reason=String(e?.message||"QUOTE_UNAVAILABLE").slice(0,160);
+    diagnostics.quoteErrorReasons[reason]=(diagnostics.quoteErrorReasons[reason]||0)+1;
+    audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return;
+  }
+  const gate=verifyExecutableEntry(signal,bars,quote,evidence.depth,evidence.oi,feeRate,slippageRate);
+  if(!gate.allowed){audit(symbol,signal.side,gate.reason,false);return;}
+  if(entryBlocked() || activeTrades.some(t=>t.symbol===symbol))return;
   const sign=signal.side==="LONG"?1:-1;
   const entry=(signal.side==="LONG"?quote.ask:quote.bid)*(1+sign*slippageRate);
   const dist=signal.atr14*signal.stopAtr;
@@ -308,9 +329,13 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
     marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR:signal.targetR,
     atr:signal.atr14,highestPrice:entry,lowestPrice:entry,currentPrice:entry,
     candlesBeforeEntry:formatCandles(bars,40),
-    priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow5:signal.flow5,flow15:signal.flow15,trend15:signal.trend15,trend60:signal.trend60,...micro},
-    whaleData:{scenario:"BINANCE_EXECUTED_TAKER_QUOTE_PLUS_REST_BOOK_AND_OI"},
-    reasoning:{flow:{state:"EXECUTED_TAKER_CANDLE_FLOW"},timingGate:{state:"CONFIRMED"}}
+    priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow5:signal.flow5,flow15:signal.flow15,
+      trend15:signal.trend15,trend60:signal.trend60,
+      bookImbalance:evidence.depth.imbalance,bookSpread:evidence.depth.spread,
+      depthNotional:evidence.depth.depthNotional,openInterestDelta:evidence.oi.delta,
+      entryEvidence:gate.details},
+    whaleData:{scenario:"BINANCE_CLOSED_MTF_TAKER_FLOW_BOOK_AND_REAL_OI_HISTORY"},
+    reasoning:{flow:{state:"VERIFIED_1M_5M_15M_TAKER_FLOW"},timingGate:{state:"FOLLOW_THROUGH_CONFIRMED"}}
   };
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
   diagnostics.opened++;registerTradeForDirectionTracking(t);
@@ -319,6 +344,9 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
 }
 async function scanEntries(){
   if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
+  for(const [symbol,signal] of pendingSignals) {
+    if(Date.now()-signal.signalCloseTime>180_000)pendingSignals.delete(symbol);
+  }
   scanning=true;
   try{
     resetDailyStatsIfNeeded();
@@ -346,9 +374,28 @@ async function scanEntries(){
           scanPassAttempted.add(symbol);attempted++;
           if(result.status==="fulfilled"&&result.value.bars.length>=64){scanPassSucceeded.add(symbol);succeeded++;}
         }
-        if(result.status==="fulfilled"&&result.value.signal) {
-          // Risk gates apply to placing orders, not the surveillance of the full market.
-          await executeSignal(result.value.symbol,result.value.signal,result.value.bars);
+        if(result.status==="fulfilled") {
+          const previous=pendingSignals.get(symbol),bars=result.value.bars;
+          const last=bars.at(-1),now=Date.now();
+          if(previous) {
+            if(now-previous.signalCloseTime>180_000 ||
+              (last && last.closeTime>previous.signalCloseTime+60000)){
+              pendingSignals.delete(symbol);
+              audit(symbol,previous.side,"FOLLOW_THROUGH_EXPIRED",false);
+            }else if(last && last.closeTime>previous.signalCloseTime){
+              pendingSignals.delete(symbol);
+              const follow=confirmNextClosedMinute(previous,bars,now);
+              if(follow.allowed) {
+                diagnostics.candidatesConfirmed++;
+                await executeSignal(symbol,previous,bars);
+              } else audit(symbol,previous.side,follow.reason,false);
+            }
+          }else if(result.value.signal &&
+            !activeTrades.some(t=>t.symbol===symbol) && !isSymbolInCooldown(symbol)){
+            pendingSignals.set(symbol,result.value.signal);
+            diagnostics.candidatesStaged++;
+            audit(symbol,result.value.signal.side,"WAIT_NEXT_CLOSED_MINUTE",false);
+          }
         } else if(result.status==="rejected") diagnostics.scanErrors++;
       }
     }
@@ -435,7 +482,13 @@ export async function runProtectionCycle(){
             }
           }catch{diagnostics.scanErrors++;}
         }
-      }catch{diagnostics.quoteErrors++;}
+      }catch(e:any){
+        diagnostics.quoteErrors++;
+        const reason=String(e?.message||"QUOTE_UNAVAILABLE").slice(0,160);
+        diagnostics.quoteErrorReasons[reason]=(diagnostics.quoteErrorReasons[reason]||0)+1;
+        if(diagnostics.quoteErrors===1 || diagnostics.quoteErrors%50===0)
+          addLog("Quote failures "+diagnostics.quoteErrors+"; sample="+reason,"warn");
+      }
     }));
     diagnostics.protectionCycles++;diagnostics.lastProtectionAt=Date.now();
   }finally{protecting=false;}
@@ -447,5 +500,5 @@ export function startEngine(){
   protectTimer=setInterval(()=>{void runProtectionCycle();},PROTECT_INTERVAL_MS);
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized. PAPER only; trend, range, breakout and flow protection enabled.","success");
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER only; closed MTF + next-minute acceptance + real OI and depth veto.","success");
 }
