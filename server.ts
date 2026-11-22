@@ -7,7 +7,7 @@ import { isValidStrongFlowTradingSchedule } from "./src/lib/strongFlowStrategy.j
 import { 
   getTradingDecisionsData, 
   getRejectedSignalsData, 
-  getTradeJourneysData, 
+  getTradeJourneysData, getInstitutionalEvidenceData,
   getPerformanceSummaryData, 
   getFullExportBundle 
 } from "./src/lib/researchLogger.js";
@@ -48,7 +48,7 @@ async function startServer() {
       slippageRate: req.body.slippageRate,
       tradingSchedule: req.body.tradingSchedule,
     });
-    res.json({success:true,strategy:"ADAPTIVE_REGIME_ORDERFLOW_V1"});
+    res.json({success:true,strategy:"ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED_WITH_REVERSAL_WATCH"});
   });
   app.post("/api/predator/reset", (req, res) => {
     const ok = resetAccountState();
@@ -73,6 +73,10 @@ async function startServer() {
   app.get("/api/research/journeys", (req, res) => {
     const limit = Number(req.query.limit) || 100;
     res.json(getTradeJourneysData(limit));
+  });
+  app.get("/api/research/institutional", (req, res) => {
+    const limit = Number(req.query.limit) || 100;
+    res.json(getInstitutionalEvidenceData(limit));
   });
 
   app.get("/api/research/performance", (req, res) => {

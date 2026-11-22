@@ -44,12 +44,24 @@ const RESEARCH_DIR = getWritableResearchDir();
 const TRADING_DECISIONS_FILE = path.join(RESEARCH_DIR, "trading_decisions.jsonl");
 const REJECTED_SIGNALS_FILE = path.join(RESEARCH_DIR, "rejected_signals.jsonl");
 const TRADE_JOURNEYS_FILE = path.join(RESEARCH_DIR, "trade_journeys.jsonl");
+const INSTITUTIONAL_EVIDENCE_FILE = path.join(RESEARCH_DIR, "institutional_evidence.jsonl");
 const PERFORMANCE_SUMMARY_FILE = path.join(RESEARCH_DIR, "performance_summary.json");
 const DAILY_SUMMARY_FILE = path.join(RESEARCH_DIR, "daily_summary.jsonl");
 
 const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];
 const memoryJourneys: any[] = [];
+const memoryInstitutional: any[] = [];
+/** Bounded per-trade periodic evidence, including warning and stale-data status. */
+export function logInstitutionalEvidence(record:any){
+  if(!record||!record.trade_id||!record.timestamp)return;
+  memoryInstitutional.unshift(record);
+  if(memoryInstitutional.length>700)memoryInstitutional.length=700;
+  appendJsonlSafe(INSTITUTIONAL_EVIDENCE_FILE,record);
+}
+export function getInstitutionalEvidenceData(limit=100){
+  return memoryInstitutional.slice(0,Math.max(0,Math.min(700,Math.floor(limit)||100)));
+}
 
 // Passive tracking maps (Zero Extra API Requests)
 const pendingRejectedMap = new Map<string, any>();
@@ -801,6 +813,8 @@ export function logTradeDecision(trade: any, exitContext: {
          holding_time_seconds: holdingSeconds,
          result,
          exit_reason: exitContext.exitReason,
+         institutional_exit_evidence:trade.latestInstitutionalWarning||null,
+         last_institutional_market_snapshot:trade.institutionalContext||null,
          confidence_score: trade.score,
 
          // ═══ EXCURSION METRICS ═══
@@ -861,6 +875,9 @@ export function logTradeDecision(trade: any, exitContext: {
 export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: number) {
    try {
       const now = Date.now();
+      // Avoid frequent disk writes: retain a periodic snapshot only.
+      if(now-(trade.__journeySnapshotAt||0)<30000)return;
+      trade.__journeySnapshotAt=now;
       const entry = trade.entry || currentPrice;
       if (trade.highestPrice === undefined) {
          trade.highestPrice = entry;
@@ -890,7 +907,8 @@ export function logTradeJourneySnapshot(trade: any, currentPrice: number, pnl: n
          profit_r: Number((trade.profitR || 0).toFixed(2)),
          distance_to_sl: Math.abs(currentPrice - trade.sl),
          distance_to_tp1: Math.abs(currentPrice - trade.tp1),
-         be_done: trade.be_done || false
+         be_done: trade.be_done || false,
+         institutional_warning:trade.latestInstitutionalWarning||null
       };
 
       memoryJourneys.unshift(journeyItem);
@@ -1165,6 +1183,7 @@ export function getFullExportBundle() {
       performance_summary: getPerformanceSummaryData(),
       trading_decisions: memoryDecisions,
       rejected_signals: memoryRejected,
-      trade_journeys: memoryJourneys
+      trade_journeys: memoryJourneys,
+      institutional_evidence: memoryInstitutional
    };
 }
