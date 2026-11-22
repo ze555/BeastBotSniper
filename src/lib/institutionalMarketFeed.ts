@@ -8,6 +8,8 @@ import WebSocket from "ws";
 import {parseOpenInterestHistory} from "./entryValidation.js";
 import type {MarketContext,LiveAggWindow} from "./institutionalReversal.js";
 const BASE="https://fapi.binance.com";
+/** Binance routed USD-M MARKET endpoint (aggTrade and forceOrder). */
+export const MARKET_WS_ENDPOINT="wss://fstream.binance.com/market/ws";
 type Agg={at:number;notional:number;signed:number};
 type Forced={at:number;side:string;notional:number};
 type State={aggs:Agg[];forced:Forced[];book:MarketContext["book"];
@@ -16,6 +18,7 @@ type State={aggs:Agg[];forced:Forced[];book:MarketContext["book"];
 const state=new Map<string,State>();
 const tracked=new Set<string>();
 let socket:WebSocket|null=null,connectAttempt=0,seq=0,wireMessages=0,invalidMessages=0,errors=0;
+let subscriptionAcks=0,subscriptionErrors=0,receivedFrames=0,lastFrameAt=0,lastSubscriptionError="";
 const make=():State=>({aggs:[],forced:[],book:null,oi:null,taker:null,top:null,bookFetch:0,ratioFetch:0,latestAgg:0});
 const sym=(x:string)=>x.toLowerCase().replace(/[^a-z0-9]/g,"");
 const streams=(s:string)=>[sym(s)+"@aggTrade",sym(s)+"@forceOrder"];
@@ -27,12 +30,20 @@ function connect(){
   if(!tracked.size||socket||Date.now()-connectAttempt<15000)return;
   connectAttempt=Date.now();
   try{
-    const ws=new WebSocket("wss://fstream.binance.com/ws");
+    const ws=new WebSocket(MARKET_WS_ENDPOINT);
     socket=ws;
     ws.on("open",()=>{push("SUBSCRIBE",[...tracked]);});
     ws.on("message",(raw)=>{
       try{
-        const frame=JSON.parse(String(raw)),e=frame?.data||frame;
+        const frame=JSON.parse(String(raw));
+        receivedFrames++;lastFrameAt=Date.now();
+        // An open WebSocket alone is NOT proof that Binance accepted subscriptions.
+        if(frame?.id!==undefined && (Object.prototype.hasOwnProperty.call(frame,"result") || frame?.error)){
+          if(frame.result===null)subscriptionAcks++;
+          if(frame.error){subscriptionErrors++;lastSubscriptionError=String(frame.error?.msg||frame.error?.code||"SUBSCRIBE_REJECTED").slice(0,140);}
+          return;
+        }
+        const e=frame?.data||frame;
         const symbol=String(e?.s||e?.o?.s||"").toUpperCase(),st=state.get(symbol);
         if(!st)return;
         const eventTime=Number(e?.T||e?.E||0),now=Date.now();
@@ -144,5 +155,7 @@ export function institutionalSnapshot(symbol:string,now=Date.now()):MarketContex
 export function institutionalHealth(){
   return {connected:socket?.readyState===WebSocket.OPEN,trackedSymbols:[...tracked],
     events:wireMessages,invalidMessages,errors,activeFeeds:state.size,
+    subscriptionAcks,subscriptionErrors,receivedFrames,lastFrameAt:lastFrameAt||null,
+    lastSubscriptionError:lastSubscriptionError||null,marketEndpoint:MARKET_WS_ENDPOINT,
     lastAggTradeAt:Math.max(0,...[...state.values()].map(x=>x.latestAgg))||null};
 }

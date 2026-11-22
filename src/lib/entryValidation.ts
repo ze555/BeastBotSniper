@@ -115,6 +115,8 @@ export function confirmEntryContext(signal:AdaptiveSignal,rows:StrongFlowBar[],n
     if(sign*a5.flow< -0.035 || sign*a15.flow< -0.035)return fail("MTF_TAKER_OPPOSES");
     if(Math.abs(signal.trend60)>0.045 || Math.abs(signal.trend15)>0.026)return fail("LATE_TREND_EXHAUSTION");
   } else if(signal.setupType==="VOLATILITY_BREAKOUT"){
+    const pressure=confirmBreakoutTakerFlow(signal.side,signal.flow5,signal.flow15);
+    if(!pressure.allowed)return pressure;
     if(sign*ret15< -0.003 || sign*ret5< -0.0015)return fail("BREAKOUT_AGAINST_MTF");
     if(sign*a5.flow< -0.015)return fail("BREAKOUT_FLOW_NOT_CONFIRMED");
     if(sign*signal.trend60< -0.018)return fail("BREAKOUT_COUNTERTREND_TRAP");
@@ -124,6 +126,20 @@ export function confirmEntryContext(signal:AdaptiveSignal,rows:StrongFlowBar[],n
     if(sign*ret5< -0.0025)return fail("RANGE_COUNTERMOMENTUM");
   }
   return {allowed:true,reason:"MTF_CONFIRMED",details:{ret5,ret15,flow5m:a5.flow,flow15m:a15.flow}};
+}
+
+/**
+ * Additional gate only for the breakout setup, using the already-closed 1m
+ * executed-taker quote flow that was available when the signal formed.
+ * No threshold changes to trend, pullback, range, or any existing exit.
+ */
+export function confirmBreakoutTakerFlow(
+  side:"LONG"|"SHORT",flow5:number,flow15:number
+):EntryDecision{
+  if(!Number.isFinite(flow5)||!Number.isFinite(flow15))return fail("BREAKOUT_TAKER_FLOW_INVALID");
+  const sign=side==="LONG"?1:-1;
+  if(sign*flow5<0.12 || sign*flow15<0.06)return fail("BREAKOUT_MULTIFRAME_TAKER_WEAK");
+  return {allowed:true,reason:"BREAKOUT_MULTIFRAME_TAKER_CONFIRMED"};
 }
 
 /** The quote, depth, and historical open interest are independently observed. */
