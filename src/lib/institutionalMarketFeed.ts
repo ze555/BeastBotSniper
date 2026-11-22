@@ -24,7 +24,7 @@ const push=(method:"SUBSCRIBE"|"UNSUBSCRIBE",names:string[])=>{
   socket.send(JSON.stringify({method,params:names.flatMap(streams),id:++seq}));
 };
 function connect(){
-  if(!tracked.size||socket||Date.now()-connectAttempt<5000)return;
+  if(!tracked.size||socket||Date.now()-connectAttempt<15000)return;
   connectAttempt=Date.now();
   try{
     const ws=new WebSocket("wss://fstream.binance.com/ws");
@@ -85,6 +85,10 @@ const lastPublished=(raw:any,now:number)=>{
 export async function refreshInstitutionalEvidence(symbol:string,now=Date.now()){
   const st=state.get(symbol);
   if(!st)return;
+  // Reconnect from the existing protection loop after a Binance/WebSocket outage.
+  // Without this, existing positions would stop receiving aggTrades until
+  // another trade was opened or closed.
+  if(!socket || socket.readyState===WebSocket.CLOSED)connect();
   if(now-st.bookFetch>=60000){
     st.bookFetch=now;
     try{
@@ -139,5 +143,6 @@ export function institutionalSnapshot(symbol:string,now=Date.now()):MarketContex
 }
 export function institutionalHealth(){
   return {connected:socket?.readyState===WebSocket.OPEN,trackedSymbols:[...tracked],
-    events:wireMessages,invalidMessages,errors,activeFeeds:state.size};
+    events:wireMessages,invalidMessages,errors,activeFeeds:state.size,
+    lastAggTradeAt:Math.max(0,...[...state.values()].map(x=>x.latestAgg))||null};
 }
