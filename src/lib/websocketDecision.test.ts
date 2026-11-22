@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {liveBreakoutEntryDecision} from "./websocketDecision.js";
-import {USD_M_MARKET_WS,decodeAggTrade,recordMarketFrame,institutionalHealth,syncInstitutionalSymbols} from "./institutionalMarketFeed.js";
+import {USD_M_MARKET_WS,decodeAggTrade,recordMarketFrame,institutionalHealth,syncInstitutionalSymbols,validMarketSymbol} from "./institutionalMarketFeed.js";
 import {getStats,updateConfig} from "./apexPredator.js";
 
 const now=Date.parse("2026-11-22T20:00:00Z");
@@ -13,6 +13,11 @@ assert.equal(decodeAggTrade({...buy,T:now-20000},now),null);
 assert.equal(decodeAggTrade({...buy,m:"false"},now),null);
 assert.equal(decodeAggTrade({...buy,p:"0"},now),null);
 assert.equal(decodeAggTrade({...buy,s:""},now),null);
+assert.equal(validMarketSymbol("牛来USDT"),true);
+assert.equal(validMarketSymbol("龙虾USDT"),true);
+assert.equal(validMarketSymbol("BTCUSDT"),true);
+assert.equal(validMarketSymbol("BTC/USDT"),false);
+assert.deepEqual(decodeAggTrade({...buy,s:"牛来USDT"},now),{symbol:"牛来USDT",at:now-1000,notional:9000,signed:9000});
 const sample={delta:.25,notional:9000,count:44,asOf:now-1000,complete:true};
 for(const side of ["LONG","SHORT"] as const){
   // Turning the option OFF must restore original entry acceptance.
