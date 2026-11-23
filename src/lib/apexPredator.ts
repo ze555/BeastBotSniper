@@ -11,6 +11,7 @@ import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
 import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
 import { evaluateReversal } from "./institutionalReversal.js";
+import {persistSnapshot,persistenceStatus} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { liveBreakoutEntryDecision } from "./websocketDecision.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
@@ -105,7 +106,7 @@ export function getLogs(){return logs;}
 export function getTrades(){return activeTrades;}
 export function getClosedTrades(){return closedTrades;}
 export function isActive(){return active;}
-export function setActive(value:boolean){active=Boolean(value);addLog("BOT ACTIVE: "+active);}
+export function setActive(value:boolean){active=Boolean(value);addLog("BOT ACTIVE: "+active);persistEngineSnapshot();}
 export function isSymbolInCooldown(symbol:string) {
   const until=cooldownUntil.get(symbol)||0;
   if(Date.now()>=until){cooldownUntil.delete(symbol);return false;}
@@ -137,8 +138,59 @@ function entryBlocked(){
   if(haltLossEnabled&&net<=-haltLossTarget)return true;
   return false;
 }
+/** Storage-only snapshot. This does not inspect or alter trading decisions. */
+export function engineStateSnapshot(){
+  return {schemaVersion:1,revision:ADAPTIVE_STRATEGY_ID,savedAt:new Date().toISOString(),
+    active,virtualBalance,initialVirtualBalance,balance:virtualBalance,
+    maxOpenTrades,scanBatchSize,feeRate,slippageRate,liveWebsocketEnabled,
+    tradingSchedule:{...tradingSchedule},haltProfitEnabled,haltProfitTarget,
+    haltLossEnabled,haltLossTarget,dayKey,today:{...today},
+    activeTrades,closedTrades,logs:logs.slice(0,200),audits:audits.slice(0,200),
+    lastSignalTime:[...lastSignalTime],pendingSignals:[...pendingSignals],
+    cooldownUntil:[...cooldownUntil],diagnostics:{...diagnostics},
+    reversalDiagnostics:{...reversalDiagnostics}};
+}
+export function persistEngineSnapshot(){persistSnapshot(engineStateSnapshot());}
+export function restoreEngineState(s:any){
+  if(!s || s.schemaVersion!==1)throw Error("Unsupported durable PAPER snapshot");
+  if(!(Number.isFinite(s.virtualBalance)&&s.virtualBalance>=0&&
+       Number.isFinite(s.initialVirtualBalance)&&s.initialVirtualBalance>0)||
+     !Array.isArray(s.activeTrades)||!Array.isArray(s.closedTrades))
+    throw Error("Invalid PAPER balance or trade collection in durable snapshot");
+  virtualBalance=s.virtualBalance;initialVirtualBalance=s.initialVirtualBalance;
+  active=typeof s.active==="boolean"?s.active:true;
+  activeTrades.splice(0,activeTrades.length,...s.activeTrades);
+  closedTrades.splice(0,closedTrades.length,...s.closedTrades.slice(0,MAX_DASHBOARD_TRADES));
+  if(Array.isArray(s.logs))logs.splice(0,logs.length,...s.logs.slice(0,200));
+  if(Array.isArray(s.audits))audits.splice(0,audits.length,...s.audits.slice(0,200));
+  lastSignalTime.clear();
+  for(const pair of s.lastSignalTime||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))lastSignalTime.set(pair[0],pair[1]);}
+  pendingSignals.clear();
+  for(const pair of s.pendingSignals||[]){if(Array.isArray(pair)&&pair.length===2&&pair[1]?.signalCloseTime>0)
+    pendingSignals.set(pair[0],pair[1]);}
+  cooldownUntil.clear();
+  for(const pair of s.cooldownUntil||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))cooldownUntil.set(pair[0],pair[1]);}
+  if(s.diagnostics&&typeof s.diagnostics==="object")Object.assign(diagnostics,s.diagnostics);
+  if(s.reversalDiagnostics&&typeof s.reversalDiagnostics==="object")Object.assign(reversalDiagnostics,s.reversalDiagnostics);
+  if(typeof s.liveWebsocketEnabled==="boolean")liveWebsocketEnabled=s.liveWebsocketEnabled;
+  if(Number.isFinite(s.maxOpenTrades))maxOpenTrades=s.maxOpenTrades;
+  if(Number.isFinite(s.scanBatchSize))scanBatchSize=s.scanBatchSize;
+  if(Number.isFinite(s.feeRate))feeRate=s.feeRate;
+  if(Number.isFinite(s.slippageRate))slippageRate=s.slippageRate;
+  if(s.tradingSchedule&&isValidStrongFlowTradingSchedule(s.tradingSchedule))tradingSchedule={...s.tradingSchedule};
+  if(typeof s.haltProfitEnabled==="boolean")haltProfitEnabled=s.haltProfitEnabled;
+  if(Number.isFinite(s.haltProfitTarget))haltProfitTarget=s.haltProfitTarget;
+  if(typeof s.haltLossEnabled==="boolean")haltLossEnabled=s.haltLossEnabled;
+  if(Number.isFinite(s.haltLossTarget))haltLossTarget=s.haltLossTarget;
+  if(typeof s.dayKey==="string")dayKey=s.dayKey;
+  if(s.today&&typeof s.today==="object"&&Number.isFinite(s.today.pnl))today={...s.today};
+  resetDailyStatsIfNeeded();
+  for(const t of activeTrades)registerTradeForDirectionTracking(t);
+  addLog("Restored "+activeTrades.length+" open, "+closedTrades.length+
+    " recent closed PAPER positions and balance $"+virtualBalance.toFixed(2)+" from durable volume","success");
+}
 export function getStats(){
-  return {
+  return {persistence:persistenceStatus(),
     strategyRevision:ADAPTIVE_STRATEGY_ID,
     strategyMode:"ADAPTIVE_VERIFIED_ENTRY_V2",
     executionMode:"PAPER",
@@ -214,13 +266,14 @@ export function updateConfig(balance:number,maxTrades:number,opts:any={}){
     tradingSchedule = {...opts.tradingSchedule};
     addLog("Entry hours updated: "+(tradingSchedule.mode==="ALWAYS"?"24/7":tradingSchedule.startLocal+"–"+tradingSchedule.endLocal+" Africa/Tripoli"),"info");
   }
+  persistEngineSnapshot();
 }
 export function resetAccountState(){
   if(activeTrades.length){addLog("Reset rejected: open paper positions must be closed first.","warn");return false;}
   virtualBalance=initialVirtualBalance=1000;
   today={count:0,wins:0,losses:0,pnl:0,sumR:0};closedTrades.length=0;
   cooldownUntil.clear();lastSignalTime.clear();pendingSignals.clear();
-  addLog("Paper account reset to $1000.","success");return true;
+  addLog("Paper account reset to $1000.","success");persistEngineSnapshot();return true;
 }
 async function updateUniverse(){
   if(lastUniverseUpdate && Date.now()-lastUniverseUpdate<300_000)return;
@@ -374,6 +427,7 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
   diagnostics.opened++;registerTradeForDirectionTracking(t);
   audit(symbol,signal.side,signal.setupType,true);
   addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+signal.targetR+"R","success");
+  persistEngineSnapshot();
 }
 async function scanEntries(){
   if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
@@ -453,6 +507,7 @@ async function scanEntries(){
     // Newly staged symbols get a fresh trade stream before next-minute confirmation.
     if(institutionalMonitoringEnabled)syncMarketSubscriptions();
     scanning=false;
+    persistEngineSnapshot();
   }
 }
 function closeFull(t:any,reason:string){
@@ -477,6 +532,7 @@ function closeFull(t:any,reason:string){
   setSymbolCooldown(t.symbol,t.finalPnl>0);
   logTradeDecision(t,{exitPrice:price,exitReason:reason,finalPnl:t.finalPnl,fees:t.totalFees});
   addLog(t.symbol+" "+reason+" net $"+t.finalPnl.toFixed(2),t.finalPnl>=0?"success":"warn");
+  persistEngineSnapshot();
 }
 /** Regime-specific target + monotonic ATR/R profit protection + bounded time exit. */
 export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
@@ -575,6 +631,7 @@ export async function runProtectionCycle(){
       }
     }));
     diagnostics.protectionCycles++;diagnostics.lastProtectionAt=Date.now();
+    persistEngineSnapshot();
   }finally{protecting=false;}
 }
 export async function runApexLoop(){await scanEntries();}
@@ -586,6 +643,7 @@ export function startEngine(){
   protectTimer=setInterval(()=>{void runProtectionCycle();},PROTECT_INTERVAL_MS);
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
+  persistEngineSnapshot();
   addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; anti-exhaustion 0.55ATR and cost-aware +1R profit-lock; live Binance WebSocket "+
     (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
 }
