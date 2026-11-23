@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {initializePersistence,restoreSnapshot,persistSnapshot,persistEvent,
-  historicalEvents,flushPersistence,persistenceStatus,closePersistence} from "./durableStore.js";
+  historicalEvents,flushPersistence,persistenceStatus,closePersistence,
+  persistReplayEvent,replayEvents,replayCoverage,REPLAY_SCHEMA_VERSION} from "./durableStore.js";
 import {engineStateSnapshot,restoreEngineState,getStats,getTrades,getClosedTrades} from "./apexPredator.js";
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),"beast-persistence-test-"));
@@ -26,7 +27,34 @@ const payload={...original,virtualBalance:937.31,balance:937.31,initialVirtualBa
 persistSnapshot(payload);
 persistEvent("trading_decisions",{trade_id:"RESTOREDONEUSDT",timestamp:now,finalPnl:3.25},"V3");
 persistEvent("institutional_evidence",{trade_id:"RESTORELONGUSDT",timestamp:now,flow:.27},"V3");
+const tradeId="RESTORELONGUSDT_"+Date.parse(now);
+persistReplayEvent("signal_candidate",{symbol:"RESTORELONGUSDT",revision:"V2",sourceMs:Date.parse(now)-60000,
+  data:{signal:{side:"LONG"},bars:Array.from({length:85},(_,i)=>({openTime:i*60000,close:100+i/100}))}});
+persistReplayEvent("entry_book_oi",{symbol:"RESTORELONGUSDT",revision:"V3",sourceMs:Date.parse(now)-10000,
+  data:{rawDepth:{bids:[["99.9","100"]],asks:[["100.1","100"]]},
+    rawOiHistory:[{sumOpenInterest:"1234",timestamp:Date.parse(now)-300000}]}});
+persistReplayEvent("paper_trade_open",{symbol:"RESTORELONGUSDT",tradeId,revision:"V3",
+  sourceMs:Date.parse(now),data:{trade:active}});
+persistReplayEvent("market_flow_10s",{symbol:"RESTORELONGUSDT",revision:"BINANCE",
+  sourceMs:Date.parse(now)+10000,data:{buyNotional:450,sellNotional:320,count:20}});
+persistReplayEvent("price_quote",{symbol:"RESTORELONGUSDT",tradeId,revision:"V3",
+  sourceMs:Date.parse(now)+15000,data:{price:102.45,stopBefore:97}});
+persistReplayEvent("paper_trade_close",{symbol:"RESTOREDONEUSDT",revision:"V3",
+  data:{trade:finished,finalPnl:3.25}});
 await flushPersistence();
+const first=await replayEvents({symbol:"RESTORELONGUSDT",limit:2});
+assert.equal(first.events.length,2);
+assert.equal(first.events[0].kind,"signal_candidate");
+assert.equal(first.events[0].schemaVersion,REPLAY_SCHEMA_VERSION);
+assert.equal(first.events[0].data.bars.length,85,"full 1m bars not truncated");
+assert.equal(first.hasMore,true);
+const second=await replayEvents({symbol:"RESTORELONGUSDT",afterId:first.nextCursor!,limit:10});
+assert.equal(second.events.length,3);
+assert.equal(second.events.at(-1)?.kind,"price_quote");
+assert.equal(second.hasMore,false);
+const byTrade=await replayEvents({tradeId});
+assert.deepEqual(byTrade.events.map(x=>x.kind),["paper_trade_open","price_quote"]);
+assert.equal((await replayCoverage()).total,6);
 let state=await restoreSnapshot();
 assert.equal(state?.balance,937.31);
 assert.equal(state?.activeTrades.length,1);
@@ -41,6 +69,10 @@ state=await restoreSnapshot();
 assert.equal(state?.balance,937.31);
 assert.equal(state?.activeTrades[0]?.sl,97);
 assert.equal((await historicalEvents("trading_decisions")).total,1);
+const persisted=await replayEvents({kind:"entry_book_oi"});
+assert.equal(persisted.events[0]?.data.rawDepth.bids[0][0],"99.9");
+assert.equal(persisted.events[0]?.revision,"V3");
+assert.equal((await replayCoverage()).total,6);
 restoreEngineState(state);
 assert.equal(getStats().balance,937.31);
 assert.equal(getStats().liveWebsocketEnabled,false);

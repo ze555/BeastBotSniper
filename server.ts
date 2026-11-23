@@ -3,7 +3,8 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 import { startEngine, getCandidateAudit, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState,restoreEngineState,persistEngineSnapshot } from "./src/lib/apexPredator.js";
-import {initializePersistence,restoreSnapshot,flushPersistence,historicalEvents,persistenceStatus} from "./src/lib/durableStore.js";
+import {initializePersistence,restoreSnapshot,flushPersistence,historicalEvents,persistenceStatus,
+  replayEvents,replayCoverage,type ReplayKind} from "./src/lib/durableStore.js";
 import { isValidStrongFlowTradingSchedule } from "./src/lib/strongFlowStrategy.js";
 import { 
   getTradingDecisionsData, 
@@ -114,6 +115,27 @@ async function startServer() {
     ...persistenceStatus(),research:researchStorageInfo(),
     note:"SQLite append-only archive plus on-volume JSONL. Export is memory-limited; use paged archive for complete history."
   }));
+  // Replay archive is strictly read-only. Cursor order is DB ingestion order,
+  // while sourceMs and observedMs remain distinct to prevent lookahead bias.
+  app.get("/api/research/replay/coverage",async(_req,res)=>{
+    try{res.json({...await replayCoverage(),
+      description:"Observed live inputs only. No synthetic missing ticks, book history, or funding; historical exactness depends on recorded fields."});}
+    catch(e:any){res.status(500).json({error:String(e?.message||e)});}
+  });
+  app.get("/api/research/replay",async(req,res)=>{
+    try{
+      const kind=req.query.kind?String(req.query.kind) as ReplayKind:undefined;
+      const symbol=req.query.symbol?String(req.query.symbol):undefined;
+      const tradeId=req.query.tradeId?String(req.query.tradeId):undefined;
+      if(symbol&&(!/^[\p{L}\p{N}_]{3,40}$/u.test(symbol)))return res.status(400).json({error:"Invalid symbol"});
+      if(tradeId&&(tradeId.length>150||!/^\S+$/.test(tradeId)))return res.status(400).json({error:"Invalid tradeId"});
+      const limit=Math.max(1,Math.min(200,Number(req.query.limit)||100));
+      const afterId=Math.max(0,Number(req.query.afterId)||0);
+      const afterMs=req.query.afterMs?Number(req.query.afterMs):undefined;
+      const beforeMs=req.query.beforeMs?Number(req.query.beforeMs):undefined;
+      res.json(await replayEvents({kind,symbol,tradeId,limit,afterId,afterMs,beforeMs}));
+    }catch(e:any){res.status(400).json({error:String(e?.message||e)});}
+  });
   // Paged, read-only durable archive: no scan/trading mutations.
   app.get("/api/research/archive", async (req,res)=>{
     try{
