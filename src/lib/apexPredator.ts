@@ -11,11 +11,18 @@ import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
 import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
 import { evaluateReversal } from "./institutionalReversal.js";
-import {persistSnapshot,persistenceStatus} from "./durableStore.js";
+import {persistSnapshot,persistenceStatus,persistReplayEvent,type ReplayKind} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { liveBreakoutEntryDecision } from "./websocketDecision.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK";
+// Passive, time-stamped evidence storage. Never feeds values back into decisions.
+function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
+  persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data});
+}
+function tradeArchiveId(t:{symbol:string;entryTime:string}){
+  return t.symbol+"_"+new Date(t.entryTime).getTime();
+}
 import {
   isStrongFlowTradingHour,
   isValidStrongFlowTradingSchedule, STRONG_FLOW_DEFAULT_TRADING_SCHEDULE,
@@ -339,6 +346,15 @@ async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"):
     axios.get(FAPI+"/fapi/v1/depth",{params:{symbol,limit:20},timeout:3500}),
     axios.get(FAPI+"/futures/data/openInterestHist",{params:{symbol,period:"5m",limit:4},timeout:3500})
   ]);
+  // Preserve the exact raw REST payloads (or explicit failure) before evaluating
+  // the existing gates. This archive cannot change either gate's result.
+  archive("entry_book_oi",symbol,{side,observedAt:Date.now(),
+    rawDepth:depthResult.status==="fulfilled"?depthResult.value.data:null,
+    rawOiHistory:oiResult.status==="fulfilled"?oiResult.value.data:null,
+    errors:{
+      depth:depthResult.status==="rejected"?String(depthResult.reason):null,
+      oi:oiResult.status==="rejected"?String(oiResult.reason):null
+    }});
   if(depthResult.status!=="fulfilled"){
     diagnostics.depthErrors++;audit(symbol,side,"DEPTH_UNAVAILABLE",false);return null;
   }
@@ -375,11 +391,19 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
     audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return;
   }
   const gate=verifyExecutableEntry(signal,bars,quote,evidence.depth,evidence.oi,feeRate,slippageRate);
-  if(!gate.allowed){audit(symbol,signal.side,gate.reason,false);return;}
+  if(!gate.allowed){
+    archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
+      depth:evidence.depth,oi:evidence.oi,gate,liveWebsocketEnabled,
+      feeRate,slippageRate,decision:"REJECTED"});
+    audit(symbol,signal.side,gate.reason,false);return;
+  }
+  const liveAgg=liveWebsocketEnabled?institutionalSnapshot(symbol).agg:null;
   const liveEntry=liveBreakoutEntryDecision(
-    liveWebsocketEnabled,signal.setupType,signal.side,
-    liveWebsocketEnabled?institutionalSnapshot(symbol).agg:null
+    liveWebsocketEnabled,signal.setupType,signal.side,liveAgg
   );
+  archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
+    depth:evidence.depth,oi:evidence.oi,gate,liveAgg,liveEntry,liveWebsocketEnabled,
+    feeRate,slippageRate,decision:liveEntry.allowed?"LIVE_GATE_PASS":"LIVE_GATE_REJECTED"});
   if(!liveEntry.allowed){audit(symbol,signal.side,liveEntry.reason,false);return;}
   if(entryBlocked() || activeTrades.some(t=>t.symbol===symbol))return;
   const sign=signal.side==="LONG"?1:-1;
@@ -427,6 +451,9 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
   diagnostics.opened++;registerTradeForDirectionTracking(t);
   audit(symbol,signal.side,signal.setupType,true);
   addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+signal.targetR+"R","success");
+  archive("paper_trade_open",symbol,{trade:{...t},feeRate,slippageRate,
+    accountBalance:virtualBalance,initialAccountBalance:initialVirtualBalance,
+    sourceSignalTime:signal.signalCloseTime},tradeArchiveId(t),Date.parse(t.entryTime));
   persistEngineSnapshot();
 }
 async function scanEntries(){
@@ -472,6 +499,8 @@ async function scanEntries(){
             }else if(last && last.closeTime>previous.signalCloseTime){
               pendingSignals.delete(symbol);
               const follow=confirmNextClosedMinute(previous,bars,now);
+              archive("signal_followthrough",symbol,{signal:previous,bars,follow,
+                observedAt:now,liveWebsocketEnabled},undefined,last?.closeTime);
               if(follow.allowed) {
                 diagnostics.candidatesConfirmed++;
                 await executeSignal(symbol,previous,bars);
@@ -480,6 +509,9 @@ async function scanEntries(){
           }else if(result.value.signal &&
             !activeTrades.some(t=>t.symbol===symbol) && !isSymbolInCooldown(symbol)){
             pendingSignals.set(symbol,result.value.signal);
+            archive("signal_candidate",symbol,{signal:result.value.signal,bars,
+              observedAt:now,stage:"WAIT_NEXT_CLOSED_MINUTE"},
+              undefined,result.value.signal.signalCloseTime);
             diagnostics.candidatesStaged++;
             audit(symbol,result.value.signal.side,"WAIT_NEXT_CLOSED_MINUTE",false);
           }
@@ -532,6 +564,9 @@ function closeFull(t:any,reason:string){
   setSymbolCooldown(t.symbol,t.finalPnl>0);
   logTradeDecision(t,{exitPrice:price,exitReason:reason,finalPnl:t.finalPnl,fees:t.totalFees});
   addLog(t.symbol+" "+reason+" net $"+t.finalPnl.toFixed(2),t.finalPnl>=0?"success":"warn");
+  archive("paper_trade_close",t.symbol,{trade:{...t},reason,exitMarketPrice:price,
+    executionPrice,gross,fees,netPnl:pnl,feeRate,slippageRate,
+    accountBalanceAfter:virtualBalance},tradeArchiveId(t),Date.parse(t.exitTime));
   persistEngineSnapshot();
 }
 /** Regime-specific target + monotonic ATR/R profit protection + bounded time exit. */
@@ -541,7 +576,13 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   if(!activeTrades.includes(t)||t.exitTime||!(t.pos>0)||!(t.initialSlDist>0))return;
   if(!(Number.isFinite(price)&&price>0))return;
   t.lastQuoteTime=quoteTime;
+  const stopBefore=t.sl,peakBefore=t.peak_r;
   const stopped=markTrade(t,price,feeRate,slippageRate);
+  archive("price_quote",t.symbol,{receivedAt:now,quoteTime,price,
+    quoteSide:t.direction==="LONG"?"BID":"ASK",
+    stopBefore,peakBefore,markStopped:stopped,
+    postMark:{sl:t.sl,peakR:t.peak_r,profitR:t.profitR,pnl:t.pnl},
+    feeRate,slippageRate},tradeArchiveId(t),quoteTime);
   updateDirectionTracking(t.symbol,price);
   logTradeJourneySnapshot(t,price,t.pnl);
   if(stopped){
@@ -580,7 +621,13 @@ export async function runProtectionCycle(){
           const newMinute=now-(t.lastFlowCheckAt||0)>=60_000;
           if(newMinute){
             t.lastFlowCheckAt=now;
-            try{t.reversalBars=await fetchClosedOneMinuteBars(t.symbol);}
+            try{
+              t.reversalBars=await fetchClosedOneMinuteBars(t.symbol);
+              archive("closed_bars",t.symbol,{bars:t.reversalBars,
+                receivedAt:Date.now(),purpose:"POSITION_REVERSAL_EVALUATION",
+                source:"BINANCE_USDM_FAPI_V1_KLINES_1M_CLOSED"},
+                tradeArchiveId(t),t.reversalBars.at(-1)?.closeTime);
+            }
             catch(e:any){
               diagnostics.scanErrors++;
               if(diagnostics.scanErrors%20===1)
@@ -599,6 +646,13 @@ export async function runProtectionCycle(){
               entry:t.entry,initialSlDist:t.initialSlDist,price:t.currentPrice,
               peakR:t.peak_r||0,entryMs:new Date(t.entryTime).getTime()
             },now);
+            archive("reversal_evaluation",t.symbol,{
+              observedAt:now,direction:t.direction,entry:t.entry,
+              stop:t.sl,initialStopDistance:t.initialSlDist,
+              price:t.currentPrice,peakR:t.peak_r,profitR:t.profitR,
+              closedBars:t.reversalBars,context:decisionContext,
+              warning,feeRate,slippageRate,liveWebsocketEnabled
+            },tradeArchiveId(t),now);
             t.latestInstitutionalWarning=warning;
             t.institutionalContext={
               timestamp:new Date(now).toISOString(),liveAgg:context.agg,

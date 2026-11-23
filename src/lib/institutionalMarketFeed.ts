@@ -7,6 +7,7 @@ import axios from "axios";
 import WebSocket from "ws";
 import {parseOpenInterestHistory} from "./entryValidation.js";
 import type {MarketContext,LiveAggWindow} from "./institutionalReversal.js";
+import {persistReplayEvent} from "./durableStore.js";
 export const USD_M_MARKET_WS="wss://fstream.binance.com/market/stream";
 const REST="https://fapi.binance.com";
 const MAX_TRACKED=40;
@@ -19,6 +20,40 @@ type State={
  bookFetch:number;ratioFetch:number;latestAgg:number;
 };
 const state=new Map<string,State>();
+// Archive bounded 10-second taker-execution summaries, not every tick.
+// Decisions still use the unmodified 1-second in-memory trade buckets.
+const FLOW_ARCHIVE_REVISION="BINANCE_USDM_MARKET_STREAM_V1";
+type ArchivedFlow={windowStartMs:number;firstTradeMs:number;lastTradeMs:number;
+  buyNotional:number;sellNotional:number;count:number;open:number;high:number;low:number;close:number};
+const archiveFlows=new Map<string,ArchivedFlow>();
+function flushArchivedFlow(symbol:string,observedMs=Date.now()){
+  const b=archiveFlows.get(symbol);
+  if(!b)return;
+  archiveFlows.delete(symbol);
+  persistReplayEvent("market_flow_10s",{symbol,sourceMs:b.lastTradeMs,observedMs,
+    revision:FLOW_ARCHIVE_REVISION,data:{...b,windowEndMs:b.windowStartMs+10_000,
+      signedNotional:b.buyNotional-b.sellNotional,
+      totalNotional:b.buyNotional+b.sellNotional,
+      source:"BINANCE_USDM_AGGTRADE",sampling:"10_SECOND_AGGREGATED_NOT_RAW_TICKS"}});
+}
+function observeArchivedFlow(symbol:string,tradeMs:number,receivedMs:number,
+  price:number,notional:number,signedNotional:number){
+  const slot=Math.floor(tradeMs/10_000)*10_000;
+  const current=archiveFlows.get(symbol);
+  if(current&&current.windowStartMs!==slot)flushArchivedFlow(symbol,receivedMs);
+  const b=archiveFlows.get(symbol);
+  if(!b){
+    archiveFlows.set(symbol,{windowStartMs:slot,firstTradeMs:tradeMs,lastTradeMs:tradeMs,
+      buyNotional:signedNotional>0?notional:0,sellNotional:signedNotional<0?notional:0,
+      count:1,open:price,high:price,low:price,close:price});
+  }else{
+    b.lastTradeMs=tradeMs;b.close=price;b.high=Math.max(b.high,price);b.low=Math.min(b.low,price);
+    b.buyNotional+=signedNotional>0?notional:0;
+    b.sellNotional+=signedNotional<0?notional:0;
+    b.count++;
+  }
+}
+
 const tracked=new Set<string>(),subscribed=new Set<string>();
 const outstanding=new Map<number,{method:"SUBSCRIBE"|"UNSUBSCRIBE";symbols:string[]}>();
 let socket:WebSocket|null=null,attemptAt=0,connectedAt=0,lastReceivedAt=0,lastAggAt=0;
@@ -88,12 +123,16 @@ export function recordMarketFrame(raw:unknown,now=Date.now()):void{
     else st.buckets.push({second:sec,notional:n,signed:decoded.signed,count:1,at:t});
     while(st.buckets.length>75 || (st.buckets[0]&&st.buckets[0].second*1000<now-90000))st.buckets.shift();
     st.latestAgg=t;lastAggAt=t;tradeEvents++;
+    observeArchivedFlow(symbol,t,now,Number(data.p),decoded.notional,decoded.signed);
   }else if(event==="forceOrder"){
     const order=data?.o,p=Number(order?.ap||order?.p),q=Number(order?.q);
     if(!(p>0&&q>0))return;
     st.forced.push({at:t,side:String(order.S),notional:p*q});
     while(st.forced.length>100 || (st.forced[0]&&st.forced[0].at<now-180000))st.forced.shift();
     liquidationEvents++;
+    persistReplayEvent("liquidation",{symbol,sourceMs:t,observedMs:now,
+      revision:FLOW_ARCHIVE_REVISION,data:{source:"BINANCE_USDM_FORCE_ORDER",
+        order,receivedAt:now,exchangeEventTime:t}});
   }
 }
 function connect(now=Date.now()){
@@ -121,6 +160,7 @@ function connect(now=Date.now()){
     ws.on("close",(code:number)=>{
       if(socket!==ws)return;
       socket=null;subscribed.clear();outstanding.clear();connectedAt=0;
+      for(const s of [...archiveFlows.keys()])flushArchivedFlow(s);
       for(const st of state.values()){st.buckets=[];st.latestAgg=0;}
       if(code!==1000){lastError="WS_CLOSED_"+code;errors++;}
     });
@@ -130,9 +170,12 @@ export function syncInstitutionalSymbols(symbols:string[],enableWebsocket=true){
   const desired=new Set(symbols.filter(validMarketSymbol).slice(0,MAX_TRACKED));
   const remove=[...tracked].filter(s=>!desired.has(s));
   const add=[...desired].filter(s=>!tracked.has(s));
-  for(const s of remove){tracked.delete(s);state.delete(s);subscribed.delete(s);}
+  for(const s of remove){
+    flushArchivedFlow(s);tracked.delete(s);state.delete(s);subscribed.delete(s);
+  }
   for(const s of add){tracked.add(s);state.set(s,emptyState());}
   if(!enableWebsocket){
+    for(const s of [...archiveFlows.keys()])flushArchivedFlow(s);
     if(socket){const ws=socket;socket=null;try{ws.close(1000,"WebSocket setting disabled");}catch{}}
     subscribed.clear();outstanding.clear();connectedAt=0;
     for(const st of state.values()){st.buckets=[];st.latestAgg=0;}
@@ -142,6 +185,7 @@ export function syncInstitutionalSymbols(symbols:string[],enableWebsocket=true){
     send("UNSUBSCRIBE",remove);send("SUBSCRIBE",add);
   }
   if(!tracked.size){
+    for(const s of [...archiveFlows.keys()])flushArchivedFlow(s);
     if(socket){const ws=socket;socket=null;try{ws.close(1000,"No PAPER market symbols");}catch{}}
     subscribed.clear();outstanding.clear();
     return;
@@ -175,6 +219,9 @@ export async function refreshInstitutionalEvidence(symbol:string,now=Date.now(),
       const A=a.reduce((v:any,x:any)=>v+Number(x[0])*Number(x[1]),0);
       if(!Number.isFinite(B)||!Number.isFinite(A)||B+A<=0)throw Error("INVALID_DEPTH");
       st.book={imbalance:(B-A)/(B+A),depth:B+A,spread:(ask-bid)/((ask+bid)/2),at:t};
+      persistReplayEvent("institutional_book",{symbol,sourceMs:t,observedMs:Date.now(),
+        revision:FLOW_ARCHIVE_REVISION,data:{source:"BINANCE_USDM_DEPTH_20",
+          bids:b,asks:a,lastUpdateId:d?.lastUpdateId,exchangeTime:t,computed:st.book}});
     }catch{st.book=null;errors++;}
   }
   if(now-st.ratioFetch>=300000){
@@ -192,10 +239,21 @@ export async function refreshInstitutionalEvidence(symbol:string,now=Date.now(),
     const top=results[2].status==="fulfilled"?lastPublished(results[2].value.data,Date.now()):null;
     const share=top?Number(top.longAccount):NaN;
     st.top=top&&Number.isFinite(share)&&share>=0&&share<=1?{longShare:share,at:Number(top.timestamp)}:null;
+    persistReplayEvent("institutional_ratios",{symbol,observedMs:Date.now(),
+      revision:FLOW_ARCHIVE_REVISION,data:{
+        source:"BINANCE_USDM_FUTURES_DATA_5M",period:"5m",
+        rawOpenInterest:results[0].status==="fulfilled"?results[0].value.data:null,
+        rawTakerLongShortRatio:results[1].status==="fulfilled"?results[1].value.data:null,
+        rawTopLongShortPositionRatio:results[2].status==="fulfilled"?results[2].value.data:null,
+        computed:{oi:st.oi,taker:st.taker,topTraders:st.top},
+        errors:results.map(x=>x.status==="rejected"?String(x.reason).slice(0,140):null)
+      }});
     errors+=results.filter(x=>x.status==="rejected").length;
   }
 }
 export function institutionalSnapshot(symbol:string,now=Date.now()):MarketContext{
+  const archive=archiveFlows.get(symbol);
+  if(archive&&now-archive.windowStartMs>=20_000)flushArchivedFlow(symbol,now);
   const st=state.get(symbol);
   if(st){while(st.buckets.length&&st.buckets[0].second*1000<now-45000)st.buckets.shift();
     while(st.forced.length&&st.forced[0].at<now-180000)st.forced.shift();}

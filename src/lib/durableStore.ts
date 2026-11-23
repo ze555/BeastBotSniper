@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import sqlite3 from "sqlite3";
+import {deflateRawSync,inflateRawSync} from "node:zlib";
 
 type SqlDatabase=sqlite3.Database;
 let database:SqlDatabase|null=null,storagePath:string|null=null;
@@ -57,7 +58,14 @@ export async function initializePersistence():Promise<boolean>{
       "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;"+
       "CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL);"+
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, at TEXT NOT NULL, revision TEXT NOT NULL, payload TEXT NOT NULL);"+
-      "CREATE INDEX IF NOT EXISTS idx_events_type_id ON events(type,id DESC);",
+      "CREATE INDEX IF NOT EXISTS idx_events_type_id ON events(type,id DESC);"+
+      "CREATE TABLE IF NOT EXISTS replay_events ("+
+      "id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, symbol TEXT NOT NULL,"+
+      "trade_id TEXT, source_ms INTEGER, observed_ms INTEGER NOT NULL,"+
+      "revision TEXT NOT NULL, schema_version INTEGER NOT NULL, codec TEXT NOT NULL, payload BLOB NOT NULL);"+
+      "CREATE INDEX IF NOT EXISTS idx_replay_kind_id ON replay_events(kind,id);"+
+      "CREATE INDEX IF NOT EXISTS idx_replay_trade_id ON replay_events(trade_id,id);"+
+      "CREATE INDEX IF NOT EXISTS idx_replay_symbol_id ON replay_events(symbol,id);",
       err=>err?reject(err):resolve()));
     storagePath=dbFile;lastError=null;
     console.log("[PERSISTENCE] SQLite ready on persistent volume");
@@ -109,4 +117,79 @@ export async function closePersistence(){
   await writeQueue;
   const current=database;database=null;
   if(current)await new Promise<void>((resolve,reject)=>current.close(err=>err?reject(err):resolve()));
+}
+
+/** Immutable replay material: stored directly in the existing persistent SQLite database.
+ * Source timestamps are NEVER substituted for reception timestamps. Missing source
+ * data remains missing: no backfilled synthetic L2 or institutional readings.
+ * High-volume payloads are compressed as zlib raw deflate, not lost or truncated.
+ */
+export type ReplayKind=
+  "signal_candidate"|"signal_followthrough"|"entry_book_oi"|"entry_decision_inputs"|
+  "paper_trade_open"|"paper_trade_close"|"price_quote"|"closed_bars"|
+  "market_flow_10s"|"liquidation"|"institutional_book"|
+  "institutional_ratios"|"reversal_evaluation";
+export const REPLAY_SCHEMA_VERSION=1;
+const supportedReplayKinds=new Set<ReplayKind>([
+  "signal_candidate","signal_followthrough","entry_book_oi","entry_decision_inputs",
+  "paper_trade_open","paper_trade_close","price_quote","closed_bars",
+  "market_flow_10s","liquidation","institutional_book",
+  "institutional_ratios","reversal_evaluation"]);
+export interface ReplayEventInput{
+  symbol:string;tradeId?:string|null;sourceMs?:number|null;observedMs?:number;
+  revision:string;data:unknown;
+}
+export function persistReplayEvent(kind:ReplayKind,input:ReplayEventInput):void{
+  if(!database)return;
+  if(!supportedReplayKinds.has(kind))throw new Error("Unknown replay kind");
+  if(!input.symbol||!input.revision)throw new Error("Replay event must identify symbol/revision");
+  const observedMs=Number.isFinite(input.observedMs)?input.observedMs!:Date.now();
+  const sourceMs=Number.isFinite(input.sourceMs)?input.sourceMs!:null;
+  const payload=Buffer.from(JSON.stringify(input.data));
+  const compressed=payload.length>=512;
+  const bytes=compressed?deflateRawSync(payload,{level:3}):payload;
+  enqueue(async()=>{
+    await sqlRun("INSERT INTO replay_events(kind,symbol,trade_id,source_ms,observed_ms,revision,schema_version,codec,payload) VALUES(?,?,?,?,?,?,?,?,?)",
+      [kind,input.symbol,input.tradeId||null,sourceMs,observedMs,input.revision,REPLAY_SCHEMA_VERSION,
+        compressed?"deflate":"json",bytes]);
+    lastSaveAt=new Date().toISOString();
+  });
+}
+export interface ReplayQuery{
+ kind?:ReplayKind;symbol?:string;tradeId?:string;afterId?:number;
+ limit?:number;beforeMs?:number;afterMs?:number;
+}
+export async function replayEvents(query:ReplayQuery={}){
+  if(!database)return {events:[],nextCursor:null,hasMore:false};
+  if(query.kind&&!supportedReplayKinds.has(query.kind))throw Error("Unknown replay kind");
+  const where=["id>?"],parameters:unknown[]=[Math.max(0,Math.floor(query.afterId||0))];
+  if(query.kind){where.push("kind=?");parameters.push(query.kind);}
+  if(query.symbol){where.push("symbol=?");parameters.push(query.symbol);}
+  if(query.tradeId){where.push("trade_id=?");parameters.push(query.tradeId);}
+  if(Number.isFinite(query.afterMs)){where.push("observed_ms>=?");parameters.push(query.afterMs!);}
+  if(Number.isFinite(query.beforeMs)){where.push("observed_ms<=?");parameters.push(query.beforeMs!);}
+  const limit=Math.max(1,Math.min(200,Math.floor(query.limit||100)));
+  await writeQueue;
+  const rows=await sqlAll<any>(
+    "SELECT id,kind,symbol,trade_id,source_ms,observed_ms,revision,schema_version,codec,payload "+
+    "FROM replay_events WHERE "+where.join(" AND ")+" ORDER BY id ASC LIMIT ?",
+    [...parameters,limit+1]);
+  const current=rows.slice(0,limit);
+  return {events:current.map(x=>({
+    id:x.id,kind:x.kind,symbol:x.symbol,tradeId:x.trade_id,
+    sourceMs:x.source_ms,observedMs:x.observed_ms,revision:x.revision,
+    schemaVersion:x.schema_version,
+    data:JSON.parse((x.codec==="deflate"?
+      inflateRawSync(Buffer.from(x.payload)):Buffer.from(x.payload)).toString("utf8"))
+  })),nextCursor:rows.length>limit?current.at(-1)!.id:null,hasMore:rows.length>limit};
+}
+export async function replayCoverage(){
+  if(!database)return {enabled:false,counts:[],first:null,last:null};
+  await writeQueue;
+  const counts=await sqlAll<{kind:string;total:number;firstMs:number;lastMs:number}>(
+    "SELECT kind,COUNT(*) AS total,MIN(observed_ms) AS firstMs,MAX(observed_ms) AS lastMs FROM replay_events GROUP BY kind ORDER BY kind");
+  const stats=await sqlGet<{total:number;firstMs:number;lastMs:number}>(
+    "SELECT COUNT(*) AS total,MIN(observed_ms) AS firstMs,MAX(observed_ms) AS lastMs FROM replay_events");
+  return {enabled:true,total:stats?.total||0,firstMs:stats?.firstMs||null,
+    lastMs:stats?.lastMs||null,counts};
 }
