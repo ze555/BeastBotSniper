@@ -6,11 +6,40 @@ import {join} from "node:path";
 import {closedCandles,validQuote,waveEvidence} from "./tradingIntegrity.js";
 import {ADAPTIVE_STRATEGY_ID} from "./adaptiveRegimeStrategy.js";
 process.env.BEAST_RESEARCH_DIR=mkdtempSync(join(tmpdir(),"beast-fixed2-test-"));
-const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState}=await import("./apexPredator.js");
+const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState,restoreEngineState,engineStateSnapshot}=await import("./apexPredator.js");
 assert.equal(getStats().strategyMode,"BIDIRECTIONAL_REGIME_REVERSAL_V4");
 assert.equal(getStats().strategyRevision,"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER");
 assert.equal(getStats().legacyEnginesEnabled,false);
 assert.equal(getStats().executionMode,"PAPER");
+// V4 deployment must never reinterpret historical V3 losses as new V4 daily risk.
+const originalState=engineStateSnapshot();
+const oldTrade={symbol:"OLDUSDT",strategyRevision:"ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK",
+  finalPnl:-38.17589132191527,profitR:-10,exitTime:new Date().toISOString()};
+const v4Trade={symbol:"V4TESTUSDT",strategyRevision:"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER",
+  finalPnl:-0.5,profitR:-0.2,exitTime:new Date().toISOString()};
+const priorState={...originalState,virtualBalance:961.3241086780848,
+  closedTrades:[oldTrade,v4Trade],today:{count:2,wins:0,losses:2,pnl:-38.67589132191527,sumR:-10.2}} as any;
+delete priorState.todayRiskStrategyRevision; // simulated pre-fix Railway snapshot.
+restoreEngineState(priorState);
+assert.equal(getStats().today.count,1,"migrate current-revision daily trade count only");
+assert.equal(getStats().today.pnl,-0.5,"legacy PnL excluded from new daily risk");
+assert.equal(getStats().balance,priorState.virtualBalance,"account cash must not reset");
+assert.equal(getClosedTrades().length,2,"legacy ledger preserved");
+assert.equal(getStats().strategyPerformance.legacyClosedCount,1);
+assert.equal(getStats().strategyPerformance.v4ClosedCount,1);
+assert.equal(getStats().entryReadiness.dailyRiskBudget,39.5,"daily risk budget reflects V4 only");
+assert.equal(getStats().entryReadiness.canOpenTrade,true,"valid V4 signal no longer blocked by old V3 loss");
+const restored=engineStateSnapshot();
+assert.equal(restored.todayRiskStrategyRevision,"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER");
+restoreEngineState(restored);
+assert.equal(getStats().today.pnl,-0.5,"migration idempotent after restart");
+const riskLocked={...restored,today:{...restored.today,pnl:-39}} as any;
+restoreEngineState(riskLocked);
+assert.equal(getStats().entryReadiness.canOpenTrade,false);
+assert(getStats().entryReadiness.blockedReasons.includes("INSUFFICIENT_RISK_BUDGET"),
+  "V4 losses must still enforce minimum risk budget");
+restoreEngineState(originalState);
+assert.equal(getClosedTrades().length,0,"fixture cleanup");
 const now=Date.now();
 assert(validQuote({bid:100,ask:100.02,time:now},now));
 assert(!validQuote({bid:100,ask:100.02,time:now-6000},now));
