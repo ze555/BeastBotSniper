@@ -8,6 +8,7 @@
 import type { StrongFlowBar } from "./strongFlowStrategy.js";
 import type { AdaptiveSignal, AdaptiveSetup } from "./adaptiveRegimeStrategy.js";
 import { validQuote, type Quote } from "./tradingIntegrity.js";
+import { followThroughExtension } from "./entryExitSafeguards.js";
 
 type Direction = "LONG" | "SHORT";
 export type EntryDecision = {allowed:boolean;reason:string;details?:Record<string,number|string>};
@@ -75,7 +76,13 @@ export function confirmNextClosedMinute(signal:AdaptiveSignal,rows:StrongFlowBar
   if(sign*(last.close-signal.signalClose)< -0.18*signal.atr14)return fail("FOLLOW_THROUGH_PRICE_FAILED");
   if(sign*delta< -0.12)return fail("FOLLOW_THROUGH_FLOW_REVERSED");
   if(sign*(last.close-last.open)< -0.45*signal.atr14)return fail("FOLLOW_THROUGH_CANDLE_REVERSAL");
-  return {allowed:true,reason:"FOLLOW_THROUGH_CONFIRMED",details:{nextDelta:delta}};
+  // A large second candle is often a late, exhausted entry rather than a
+  // continuation opportunity: require not to chase >0.55 ATR after signal.
+  const extension=followThroughExtension(signal.side,signal.signalClose,last.close,signal.atr14,signal.setupType);
+  if(!extension.allowed)return fail(extension.reason);
+  return {allowed:true,reason:"FOLLOW_THROUGH_CONFIRMED",details:{
+    nextDelta:delta,followThroughExtensionAtr:extension.extensionAtr!
+  }};
 }
 
 /** Parse Binance 5m OI. Ignore the most recent five minutes conservatively:
@@ -183,6 +190,6 @@ export function verifyExecutableEntry(
   if(drift< -signal.atr14*0.40)return fail("ENTRY_IMPULSE_INVALIDATED");
   return {allowed:true,reason:"REAL_MARKET_ENTRY_CONFIRMED",details:{
     driftAtr:drift/signal.atr14,oiDelta:oi.delta,bookImbalance:depth.imbalance,
-    costToRisk:fullCostPct/riskPct,...multi.details
+    costToRisk:fullCostPct/riskPct,...multi.details,...follow.details
   }};
 }

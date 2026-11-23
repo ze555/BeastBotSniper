@@ -43,6 +43,11 @@ for(const side of ["LONG","SHORT"] as const){
   const bad=rows.map(x=>({...x}));
   bad[n-1].takerBuyQuote=side==="LONG"?200:1800;
   assert.equal(confirmNextClosedMinute(s,bad,now).reason,"FOLLOW_THROUGH_FLOW_REVERSED");
+  const exhausted=rows.map(x=>({...x}));
+  exhausted[n-1].close=s.signalClose+d*.8*s.atr14;
+  exhausted[n-1].high=Math.max(exhausted[n-1].high,exhausted[n-1].close);
+  exhausted[n-1].low=Math.min(exhausted[n-1].low,exhausted[n-1].close);
+  assert.equal(confirmNextClosedMinute(s,exhausted,now).reason,"FOLLOW_THROUGH_OVEREXTENDED");
   const stale=confirmNextClosedMinute(s,rows,now+100000);
   assert.equal(stale.allowed,false);
   const same=rows.slice(0,-1);

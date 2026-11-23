@@ -47,6 +47,19 @@ for(const side of ["LONG","SHORT"] as const){
   assert.equal(getClosedTrades().length,count,"close idempotency");
   assert.equal(getStats().balance,bal,"no double-counted profit");
 }
+for(const side of ["LONG","SHORT"] as const){
+  const sign=side==="LONG"?1:-1;
+  const t:any=mk("R1LOCK"+side+"USDT",side);
+  getTrades().push(t);
+  protectTradeAtPrice(t,100+sign*8,Date.now());
+  assert.equal(t.sl,100-sign*10,"no protection below +1R");
+  protectTradeAtPrice(t,100+sign*10.5,Date.now());
+  assert(Math.abs(t.sl-(100+sign*3))<1e-8,"lock +0.30R after crossing +1R");
+  protectTradeAtPrice(t,100+sign*2,Date.now());
+  assert(!getTrades().includes(t),"protective stop closes instead of giving back to loss");
+  assert(t.finalPnl>0,"profit lock pays net fees on a timely observed quote");
+  assert.equal(t.exitReason,"ADAPTIVE Protected Stop");
+}
 const loss:any=mk("NEWLOSSUSDT","LONG");
 getTrades().push(loss);
 protectTradeAtPrice(loss,89,Date.now());
