@@ -145,16 +145,31 @@ function riskedDollars(){
     return sum+stopExposure+t.entry*t.pos*2*(feeRate+slippageRate);
   },0);
 }
-function entryBlocked(){
-  if(!active || !isStrongFlowTradingHour(new Date(), tradingSchedule))return true;
-  if(!Number.isFinite(virtualBalance)||virtualBalance<=0)return true;
-  if(activeTrades.length>=Math.min(maxOpenTrades,STRONG_FLOW_MAX_CONCURRENT))return true;
-  if(today.pnl+floatingPnl()<=-initialVirtualBalance*MAX_DAILY_LOSS)return true;
-  const net=netPnl();
-  if(haltProfitEnabled&&net>=haltProfitTarget)return true;
-  if(haltLossEnabled&&net<=-haltLossTarget)return true;
-  return false;
+/** New V4 daily risk is isolated; legacy cash losses and open exposure remain real. */
+function dailyRiskRemaining(){
+  return Math.max(0,initialVirtualBalance*MAX_DAILY_LOSS+Math.min(0,today.pnl)-riskedDollars());
 }
+function entryReadiness(){
+  const reasons:string[]=[];
+  if(!active)reasons.push("BOT_PAUSED");
+  if(!isStrongFlowTradingHour(new Date(),tradingSchedule))reasons.push("OUTSIDE_TRADING_HOURS");
+  if(!Number.isFinite(virtualBalance)||virtualBalance<=0)reasons.push("INVALID_ACCOUNT_BALANCE");
+  if(activeTrades.length>=Math.min(maxOpenTrades,STRONG_FLOW_MAX_CONCURRENT))reasons.push("MAX_CONCURRENT_TRADES");
+  if(today.pnl+floatingPnl()<=-initialVirtualBalance*MAX_DAILY_LOSS)reasons.push("DAILY_LOSS_LIMIT");
+  const cumulativeNetPnl=netPnl();
+  if(haltProfitEnabled&&cumulativeNetPnl>=haltProfitTarget)reasons.push("ACCOUNT_PROFIT_HALT");
+  if(haltLossEnabled&&cumulativeNetPnl<=-haltLossTarget)reasons.push("ACCOUNT_LOSS_HALT");
+  const dailyRiskBudget=dailyRiskRemaining();
+  const maxNewRiskDollars=Math.min(virtualBalance*ADAPTIVE_RISK_FRACTION,dailyRiskBudget);
+  const minNewRiskDollars=initialVirtualBalance*0.003;
+  if(maxNewRiskDollars<minNewRiskDollars)reasons.push("INSUFFICIENT_RISK_BUDGET");
+  return {canOpenTrade:reasons.length===0,blockedReasons:reasons,
+    strategyRevision:ADAPTIVE_STRATEGY_ID,
+    dailyPnl:today.pnl,dailyLossCapDollars:initialVirtualBalance*MAX_DAILY_LOSS,
+    dailyRiskBudget,maxNewRiskDollars,minNewRiskDollars,
+    accountNetPnl:cumulativeNetPnl,activeExposureDollars:riskedDollars()};
+}
+function entryBlocked(){return !entryReadiness().canOpenTrade;}
 /** Storage-only snapshot. This does not inspect or alter trading decisions. */
 export function engineStateSnapshot(){
   return {schemaVersion:1,revision:ADAPTIVE_STRATEGY_ID,savedAt:new Date().toISOString(),
@@ -162,6 +177,7 @@ export function engineStateSnapshot(){
     maxOpenTrades,scanBatchSize,feeRate,slippageRate,liveWebsocketEnabled,
     tradingSchedule:{...tradingSchedule},haltProfitEnabled,haltProfitTarget,
     haltLossEnabled,haltLossTarget,dayKey,today:{...today},
+    todayRiskStrategyRevision:ADAPTIVE_STRATEGY_ID,
     activeTrades,closedTrades,logs:logs.slice(0,200),audits:audits.slice(0,200),
     lastSignalTime:[...lastSignalTime],pendingSignals:[...pendingSignals],
     cooldownUntil:[...cooldownUntil],diagnostics:{...diagnostics},
@@ -202,6 +218,20 @@ export function restoreEngineState(s:any){
   if(typeof s.dayKey==="string")dayKey=s.dayKey;
   if(s.today&&typeof s.today==="object"&&Number.isFinite(s.today.pnl))today={...s.today};
   resetDailyStatsIfNeeded();
+  // One-time migration, including V4 snapshots created before the marker existed.
+  // Rebuild today's V4-only result from version-tagged closed trades, not old daily PnL.
+  if(s.todayRiskStrategyRevision!==ADAPTIVE_STRATEGY_ID){
+    const formatter=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Tripoli"});
+    const v4Today=closedTrades.filter(t=>t.strategyRevision===ADAPTIVE_STRATEGY_ID &&
+      typeof t.exitTime==="string" && !Number.isNaN(Date.parse(t.exitTime)) &&
+      formatter.format(new Date(t.exitTime))===dayKey);
+    today={count:v4Today.length,
+      wins:v4Today.filter(t=>Number(t.finalPnl)>0.15).length,
+      losses:v4Today.filter(t=>Number(t.finalPnl)<-0.15).length,
+      pnl:v4Today.reduce((a,t)=>a+(Number(t.finalPnl)||0),0),
+      sumR:v4Today.reduce((a,t)=>a+(Number(t.profitR)||0),0)};
+    addLog("V4 daily risk accounting migrated: legacy losses excluded from new daily risk; cash and ledger unchanged.","success");
+  }
   for(const t of activeTrades)registerTradeForDirectionTracking(t);
   addLog("Restored "+activeTrades.length+" open, "+closedTrades.length+
     " recent closed PAPER positions and balance $"+virtualBalance.toFixed(2)+" from durable volume","success");
@@ -217,6 +247,14 @@ export function getStats(){
     totalShortScanned:audits.filter(a=>a.side==="SHORT").length,
     acceptedLongs:audits.filter(a=>a.allowed&&a.side==="LONG").length,
     acceptedShorts:audits.filter(a=>a.allowed&&a.side==="SHORT").length,
+    entryReadiness:entryReadiness(),
+    strategyPerformance:(()=>{
+      const v4=closedTrades.filter(t=>t.strategyRevision===ADAPTIVE_STRATEGY_ID);
+      const legacy=closedTrades.filter(t=>t.strategyRevision!==ADAPTIVE_STRATEGY_ID);
+      return {v4ClosedCount:v4.length,v4ClosedPnl:v4.reduce((s,t)=>s+(Number(t.finalPnl)||0),0),
+        legacyClosedCount:legacy.length,legacyClosedPnl:legacy.reduce((s,t)=>s+(Number(t.finalPnl)||0),0),
+        note:"Retained trade ledger only; cash balance includes all trade history."};
+    })(),
     rules:{signalFamilies:["EXPLOSION_UP","COLLAPSE_DOWN","TREND_UP_CONTINUATION",
       "TREND_DOWN_CONTINUATION","UPTREND_CORRECTION_SHORT","DOWNTREND_CORRECTION_LONG",
       "FAILED_UP_BREAKOUT_SHORT","FAILED_DOWN_BREAKOUT_LONG","RANGE_LONG","RANGE_SHORT"],
@@ -430,7 +468,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
   }
   const stop=entry-sign*dist,target=entry+sign*signal.targetR*dist;
   if(!(stop>0&&target>0))return;
-  const riskBudget=Math.max(0,initialVirtualBalance*MAX_DAILY_LOSS+Math.min(0,today.pnl)-riskedDollars());
+  const riskBudget=dailyRiskRemaining();
   const dollars=Math.min(virtualBalance*ADAPTIVE_RISK_FRACTION,riskBudget);
   if(dollars<initialVirtualBalance*0.003){audit(symbol,signal.side,"INSUFFICIENT_RISK_BUDGET",false);return;}
   const notionalCap=Math.min(virtualBalance*10,virtualBalance*0.15*10);
