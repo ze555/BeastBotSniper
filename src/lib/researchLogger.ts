@@ -11,12 +11,15 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import {persistEvent} from "./durableStore.js";
 
 const SCHEMA_VERSION = "2.4.0";
 const BOT_VERSION = "BeastBot-Apex-v2.4";
 
 function getWritableResearchDir(): string {
-   const defaultPath = path.resolve(process.env.BEAST_RESEARCH_DIR || path.join(process.cwd(), "data", "research"));
+   const defaultPath = path.resolve(process.env.BEAST_RESEARCH_DIR ||
+      (process.env.BEAST_PERSIST_DIR?path.join(process.env.BEAST_PERSIST_DIR,"research"):
+        path.join(process.cwd(), "data", "research")));
    try {
       if (!fs.existsSync(defaultPath)) {
          fs.mkdirSync(defaultPath, { recursive: true });
@@ -25,7 +28,9 @@ function getWritableResearchDir(): string {
       fs.writeFileSync(testFile, "ok", "utf8");
       fs.unlinkSync(testFile);
       return defaultPath;
-   } catch {
+   } catch (e) {
+      // A configured durable mount must NEVER silently fall back to ephemeral storage.
+      if(process.env.BEAST_PERSIST_DIR)throw e;
       // In read-only container environments (e.g. Cloud Run, Hostless /app mount), fall back to /tmp
       const tmpPath = path.join(os.tmpdir(), "beastbot_research");
       try {
@@ -52,6 +57,53 @@ const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];
 const memoryJourneys: any[] = [];
 const memoryInstitutional: any[] = [];
+/** Hydrate bounded dashboard caches from the *durable* on-volume journal.
+ * JSONL files themselves are never truncated at restart.
+ */
+function readRecentJsonl(file:string,limit:number){
+  if(!fs.existsSync(file))return [];
+  const fd=fs.openSync(file,"r");
+  try{
+    const size=fs.fstatSync(fd).size;
+    const chunks:Buffer[]=[];
+    let position=size,lines=0,bytes=0;
+    while(position>0 && lines<limit+2 && bytes<32*1024*1024){
+      const n=Math.min(65536,position);position-=n;
+      const chunk=Buffer.allocUnsafe(n);
+      fs.readSync(fd,chunk,0,n,position);
+      chunks.unshift(chunk);bytes+=n;
+      lines+=chunk.toString("utf8").split("\n").length-1;
+    }
+    let content=Buffer.concat(chunks).toString("utf8");
+    if(position>0){content=content.substring(content.indexOf("\n")+1);}
+    const rows=content.split("\n").filter(Boolean).slice(-limit);
+    const parsed:any[]=[];
+    for(const line of rows){try{parsed.push(JSON.parse(line));}catch{}}
+    return parsed.reverse();
+  }finally{fs.closeSync(fd);}
+}
+export function restoreResearchCaches(){
+  const fields=[
+    [TRADING_DECISIONS_FILE,memoryDecisions,200],
+    [REJECTED_SIGNALS_FILE,memoryRejected,200],
+    [TRADE_JOURNEYS_FILE,memoryJourneys,300],
+    [INSTITUTIONAL_EVIDENCE_FILE,memoryInstitutional,700]
+  ] as const;
+  const counts:Record<string,number>={};
+  for(const [file,array,limit] of fields){
+    const entries=readRecentJsonl(file,limit);
+    array.splice(0,array.length,...entries);
+    counts[path.basename(file)]=entries.length;
+  }
+  cachedSummary=null;
+  return counts;
+}
+export function researchStorageInfo(){
+  return {directory:RESEARCH_DIR,files:[
+    TRADING_DECISIONS_FILE,REJECTED_SIGNALS_FILE,TRADE_JOURNEYS_FILE,
+    INSTITUTIONAL_EVIDENCE_FILE,DAILY_SUMMARY_FILE
+  ].map(file=>({name:path.basename(file),bytes:fs.existsSync(file)?fs.statSync(file).size:0}))};
+}
 /** Bounded per-trade periodic evidence, including warning and stale-data status. */
 export function logInstitutionalEvidence(record:any){
   if(!record||!record.trade_id||!record.timestamp)return;
@@ -73,6 +125,9 @@ let cachedSummary: any = null;
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
       const line = JSON.stringify(obj) + "\n";
+      // Append-only SQLite history survives deployment and is queryable by version.
+      persistEvent(path.basename(filePath,".jsonl"),obj,
+        String(obj?.strategy_revision||obj?.revision||obj?.strategyRevision||"unknown"));
       fs.appendFile(filePath, line, "utf8", (err) => {
          if (err && !hasLoggedWriteError) {
             hasLoggedWriteError = true;
