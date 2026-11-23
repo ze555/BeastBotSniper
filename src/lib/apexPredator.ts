@@ -486,7 +486,11 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   const stopped=markTrade(t,price,feeRate,slippageRate);
   updateDirectionTracking(t.symbol,price);
   logTradeJourneySnapshot(t,price,t.pnl);
-  if(stopped){closeFull(t,"ADAPTIVE Stop Loss");return;}
+  if(stopped){
+    const isProtected=t.direction==="LONG"?t.sl>t.entry:t.sl<t.entry;
+    closeFull(t,isProtected?"ADAPTIVE Protected Stop":"ADAPTIVE Stop Loss");
+    return;
+  }
   const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
   if(candidate!==null)tightenStop(t,candidate);
   const sign=t.direction==="LONG"?1:-1;

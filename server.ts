@@ -23,7 +23,7 @@ async function startServer() {
   startEngine();
 
   // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED", mode: "PAPER", legacyEnginesEnabled: false }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK", mode: "PAPER", legacyEnginesEnabled: false }));
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
