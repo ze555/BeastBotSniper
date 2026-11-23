@@ -11,9 +11,10 @@ import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
 import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
 import { evaluateReversal } from "./institutionalReversal.js";
+import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { liveBreakoutEntryDecision } from "./websocketDecision.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
-const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED";
+const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK";
 import {
   isStrongFlowTradingHour,
   isValidStrongFlowTradingSchedule, STRONG_FLOW_DEFAULT_TRADING_SCHEDULE,
@@ -361,7 +362,8 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
       trend15:signal.trend15,trend60:signal.trend60,
       bookImbalance:evidence.depth.imbalance,bookSpread:evidence.depth.spread,
       depthNotional:evidence.depth.depthNotional,openInterestDelta:evidence.oi.delta,
-      entryEvidence:gate.details,liveWebsocketEntry:{
+      entryEvidence:gate.details,followThroughExtensionAtr:gate.details?.followThroughExtensionAtr,
+      liveWebsocketEntry:{
         enabled:liveWebsocketEnabled,reason:liveEntry.reason,delta:liveEntry.delta
       }},
     whaleData:{scenario:"BINANCE_CLOSED_MTF_TAKER_FLOW_BOOK_AND_REAL_OI_HISTORY"},
@@ -493,6 +495,11 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   }
   const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
   if(candidate!==null)tightenStop(t,candidate);
+  // Cost-aware +1R profit lock only tightens, preserving the stronger trailing
+  // floor at +1.75R and above and the entire original target mechanism.
+  const costStop=costAwareProfitLock(t.direction,t.entry,t.initialSlDist,
+    t.peak_r||0,feeRate,slippageRate,t.setupType);
+  if(costStop!==null)tightenStop(t,costStop);
   const sign=t.direction==="LONG"?1:-1;
   if(sign*(price-t.sl)<=0){closeFull(t,"ADAPTIVE Protected Stop");return;}
   if(sign*(price-t.entry)>=(t.targetR||3.5)*t.initialSlDist){
@@ -579,6 +586,6 @@ export function startEngine(){
   protectTimer=setInterval(()=>{void runProtectionCycle();},PROTECT_INTERVAL_MS);
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; live Binance WebSocket "+
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; anti-exhaustion 0.55ATR and cost-aware +1R profit-lock; live Binance WebSocket "+
     (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
 }
