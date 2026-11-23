@@ -8,7 +8,8 @@ import type { StrongFlowBar } from "./strongFlowStrategy.js";
 
 export const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V1";
 export type MarketRegime = "TREND_UP" | "TREND_DOWN" | "RANGE" | "EXPANSION";
-export type AdaptiveSetup = "TREND_CONTINUATION" | "TREND_PULLBACK" | "RANGE_REVERSION" | "VOLATILITY_BREAKOUT";
+export type AdaptiveSetup = "TREND_CONTINUATION" | "TREND_PULLBACK" | "RANGE_REVERSION" | "VOLATILITY_BREAKOUT" |
+  "FAILED_BREAKOUT_REVERSAL" | "COUNTERTREND_CORRECTION";
 export interface AdaptiveSignal {
   side: "LONG" | "SHORT";
   signalOpenTime: number;

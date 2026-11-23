@@ -76,6 +76,17 @@ export function confirmNextClosedMinute(signal:AdaptiveSignal,rows:StrongFlowBar
   if(sign*(last.close-signal.signalClose)< -0.18*signal.atr14)return fail("FOLLOW_THROUGH_PRICE_FAILED");
   if(sign*delta< -0.12)return fail("FOLLOW_THROUGH_FLOW_REVERSED");
   if(sign*(last.close-last.open)< -0.45*signal.atr14)return fail("FOLLOW_THROUGH_CANDLE_REVERSAL");
+  // Require the FOLLOW-THROUGH candle to finish in its own trade direction
+  // when the market is already moving sharply. This checks a fully closed bar,
+  // not any future candle, and catches late chase/rejected-breakout entries.
+  const width=last.high-last.low;
+  if(Number.isFinite(width)&&width>0&&Number.isFinite(last.low)&&Number.isFinite(last.high)){
+    const quality=sign*(last.close-(sign>0?last.low:last.high))/width;
+    if(quality<.60 &&
+       (Math.abs(signal.trend60)>=.015 || signal.setupType==="FAILED_BREAKOUT_REVERSAL" ||
+        signal.setupType==="COUNTERTREND_CORRECTION"))
+      return fail("FOLLOW_THROUGH_WEAK_CLOSE");
+  }
   // A large second candle is often a late, exhausted entry rather than a
   // continuation opportunity: require not to chase >0.55 ATR after signal.
   const extension=followThroughExtension(signal.side,signal.signalClose,last.close,signal.atr14,signal.setupType);
@@ -127,6 +138,18 @@ export function confirmEntryContext(signal:AdaptiveSignal,rows:StrongFlowBar[],n
     if(sign*ret15< -0.003 || sign*ret5< -0.0015)return fail("BREAKOUT_AGAINST_MTF");
     if(sign*a5.flow< -0.015)return fail("BREAKOUT_FLOW_NOT_CONFIRMED");
     if(sign*signal.trend60< -0.018)return fail("BREAKOUT_COUNTERTREND_TRAP");
+  } else if(signal.setupType==="COUNTERTREND_CORRECTION"||
+            signal.setupType==="FAILED_BREAKOUT_REVERSAL"){
+    // These are deliberately opposite to the PRIOR trend; requiring the 15m
+    // trend to agree would block every recovery / short correction. Instead
+    // demand that the most recent closed 5m price + taker response is not
+    // decisively rejecting the new side.
+    // A countertrend trade must not be vetoed just because the PREVIOUS 5m
+    // or 15m candle belonged to the old trend. Only reject an unusually
+    // forceful, simultaneous price + execution acceleration against the new side.
+    if(sign*ret5< -.025 && sign*a5.flow< -.15)
+      return fail("REVERSAL_5M_OLD_TREND_STILL_ACCELERATING");
+    if(sign*signal.flow5< -.20)return fail("REVERSAL_1M_FLOW_OPPOSES");
   } else {
     // Mean reversion is valid only when the 15m structure is genuinely balanced.
     if(Math.abs(ret15)>0.0045 || Math.abs(signal.trend60)>0.009)return fail("RANGE_NOT_BALANCED");
@@ -171,7 +194,8 @@ export function verifyExecutableEntry(
   const minimumDepth=signal.setupType==="RANGE_REVERSION"?20000:12000;
   if(depth.depthNotional<minimumDepth)return fail("ENTRY_DEPTH_TOO_THIN");
   const imbalanceFloor=signal.setupType==="RANGE_REVERSION"?0.04:
-    signal.setupType==="VOLATILITY_BREAKOUT"?-0.10:-0.20;
+    signal.setupType==="VOLATILITY_BREAKOUT"?-0.10:
+    (signal.setupType==="FAILED_BREAKOUT_REVERSAL"||signal.setupType==="COUNTERTREND_CORRECTION")?-0.25:-0.20;
   if(sign*depth.imbalance<imbalanceFloor)return fail("ENTRY_OPPOSING_LIQUIDITY");
   if(!oi)return fail("OPEN_INTEREST_HISTORY_UNAVAILABLE");
   if(now-oi.timestamp>12*60000 || !Number.isFinite(oi.delta))return fail("OPEN_INTEREST_STALE");

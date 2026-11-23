@@ -43,7 +43,7 @@ async function startServer() {
   });
 
   // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK", mode: "PAPER", legacyEnginesEnabled: false }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok", strategy: "BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER", mode: "PAPER", legacyEnginesEnabled: false, bidirectional: true, status: isActive() ? "RUNNING" : "PAUSED" }));
   
   app.get("/api/bot/status", (req, res) => res.json({ active: isActive() }));
   app.post("/api/bot/toggle", (req, res) => {
