@@ -12,7 +12,7 @@ assert.equal(getStats().strategyRevision,"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER
 assert.equal(getStats().legacyEnginesEnabled,false);
 assert.equal(getStats().executionMode,"PAPER");
 // V4 deployment must never reinterpret historical V3 losses as new V4 daily risk.
-const originalState=engineStateSnapshot();
+const originalState=structuredClone(engineStateSnapshot());
 const oldTrade={symbol:"OLDUSDT",strategyRevision:"ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK",
   finalPnl:-38.17589132191527,profitR:-10,exitTime:new Date().toISOString()};
 const v4Trade={symbol:"V4TESTUSDT",strategyRevision:"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER",
