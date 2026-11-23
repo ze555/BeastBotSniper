@@ -6,7 +6,8 @@
  * Cost-aware protection activates only AFTER an observed 1R favorable move.
  */
 export type Direction="LONG"|"SHORT";
-export type Setup="VOLATILITY_BREAKOUT"|"TREND_CONTINUATION"|"TREND_PULLBACK"|"RANGE_REVERSION";
+export type Setup="VOLATILITY_BREAKOUT"|"TREND_CONTINUATION"|"TREND_PULLBACK"|"RANGE_REVERSION"|
+  "FAILED_BREAKOUT_REVERSAL"|"COUNTERTREND_CORRECTION";
 export const MAX_FOLLOW_THROUGH_EXTENSION_ATR=0.55;
 export function followThroughExtension(
   side:Direction,signalClose:number,followClose:number,atr14:number,setup:Setup

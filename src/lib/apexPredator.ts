@@ -8,14 +8,15 @@ import axios from "axios";
 import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
-import { evaluateAdaptiveSignal, assessOrderBook, adaptiveStopCandidate, type AdaptiveSignal } from "./adaptiveRegimeStrategy.js";
+import { assessOrderBook, adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
+import {evaluateBidirectionalSignal,bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
 import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
 import { evaluateReversal } from "./institutionalReversal.js";
 import {persistSnapshot,persistenceStatus,persistReplayEvent,type ReplayKind} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { liveBreakoutEntryDecision } from "./websocketDecision.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
-const ADAPTIVE_STRATEGY_ID = "ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK";
+const ADAPTIVE_STRATEGY_ID = BIDIRECTIONAL_REVISION;
 // Passive, time-stamped evidence storage. Never feeds values back into decisions.
 function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
   persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data});
@@ -90,7 +91,7 @@ const closedTrades: any[] = [];
 const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
-const pendingSignals = new Map<string,AdaptiveSignal>();
+const pendingSignals = new Map<string,BidirectionalSignal>();
 const cooldownUntil = new Map<string,number>();
 const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,
   rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",
@@ -114,10 +115,19 @@ export function getTrades(){return activeTrades;}
 export function getClosedTrades(){return closedTrades;}
 export function isActive(){return active;}
 export function setActive(value:boolean){active=Boolean(value);addLog("BOT ACTIVE: "+active);persistEngineSnapshot();}
+/** Prevent correlated exposure through the same asset's USDT/USDC contracts. */
+function underlying(symbol:string){return symbol.replace(/(?:USDT|USDC)$/,"");}
+function hasUnderlyingOpen(symbol:string){
+  return activeTrades.some(t=>underlying(String(t.symbol))===underlying(symbol));
+}
 export function isSymbolInCooldown(symbol:string) {
-  const until=cooldownUntil.get(symbol)||0;
-  if(Date.now()>=until){cooldownUntil.delete(symbol);return false;}
-  return true;
+  const key=underlying(symbol),now=Date.now();
+  let blocked=false;
+  for(const [contract,until] of cooldownUntil){
+    if(now>=until)cooldownUntil.delete(contract);
+    else if(underlying(contract)===key)blocked=true;
+  }
+  return blocked;
 }
 export function setSymbolCooldown(symbol:string,isWin:boolean,durationMs?:number) {
   cooldownUntil.set(symbol,Date.now()+(durationMs??(isWin?300_000:600_000)));
@@ -199,7 +209,7 @@ export function restoreEngineState(s:any){
 export function getStats(){
   return {persistence:persistenceStatus(),
     strategyRevision:ADAPTIVE_STRATEGY_ID,
-    strategyMode:"ADAPTIVE_VERIFIED_ENTRY_V2",
+    strategyMode:"BIDIRECTIONAL_REGIME_REVERSAL_V4",
     executionMode:"PAPER",
     legacyEnginesEnabled:false,
     totalEvaluations:audits.length,
@@ -207,7 +217,11 @@ export function getStats(){
     totalShortScanned:audits.filter(a=>a.side==="SHORT").length,
     acceptedLongs:audits.filter(a=>a.allowed&&a.side==="LONG").length,
     acceptedShorts:audits.filter(a=>a.allowed&&a.side==="SHORT").length,
-    rules:{},diagnostics,pendingCandidates:pendingSignals.size,
+    rules:{signalFamilies:["EXPLOSION_UP","COLLAPSE_DOWN","TREND_UP_CONTINUATION",
+      "TREND_DOWN_CONTINUATION","UPTREND_CORRECTION_SHORT","DOWNTREND_CORRECTION_LONG",
+      "FAILED_UP_BREAKOUT_SHORT","FAILED_DOWN_BREAKOUT_LONG","RANGE_LONG","RANGE_SHORT"],
+      uniqueUnderlyingExposure:true,existingRiskLimitUnchanged:true},
+    diagnostics,pendingCandidates:pendingSignals.size,
     institutionalMonitor:{...institutionalHealth(),...reversalDiagnostics,enabled:liveWebsocketEnabled},
     balance:virtualBalance,initialBalance:initialVirtualBalance,
     maxOpenTrades,feeRate,slippageRate,scanBatchSize,liveWebsocketEnabled,
@@ -234,7 +248,8 @@ export function getStats(){
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
     strategySettings:{tradingSchedule:{...tradingSchedule},liveWebsocketEnabled,
-      timeframe:"1m closed + confirmed 5m/15m",stopAtr:"adaptive",targetR:"adaptive",
+      timeframe:"1m closed + confirmed 5m/15m with bidirectional regime classification",
+      stopAtr:"setup-dependent",targetR:"setup-dependent",
       riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
@@ -371,8 +386,8 @@ async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"):
   return {depth,oi};
 }
 
-async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlowBar[]){
-  if(entryBlocked()||activeTrades.some(t=>t.symbol===symbol)||isSymbolInCooldown(symbol)
+async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:StrongFlowBar[]){
+  if(entryBlocked()||hasUnderlyingOpen(symbol)||isSymbolInCooldown(symbol)
     ||lastSignalTime.get(symbol)===signal.signalCloseTime)return;
   if(Date.now()-signal.signalCloseTime>180_000)return;
   const follow=confirmNextClosedMinute(signal,bars);
@@ -380,7 +395,8 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
   const mtf=confirmEntryContext(signal,bars);
   if(!mtf.allowed){audit(symbol,signal.side,mtf.reason,false);return;}
   const evidence=await confirmMarketEvidence(symbol,signal.side);
-  if(!evidence||entryBlocked()||Date.now()-signal.signalCloseTime>180_000)return;
+  if(!evidence||entryBlocked()||hasUnderlyingOpen(symbol)||
+     Date.now()-signal.signalCloseTime>180_000)return;
   // Fetch LAST so the executable quote is younger than the depth and OI reads.
   let quote;
   try{quote=await fetchExecutionQuote(symbol);}
@@ -405,7 +421,7 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
     depth:evidence.depth,oi:evidence.oi,gate,liveAgg,liveEntry,liveWebsocketEnabled,
     feeRate,slippageRate,decision:liveEntry.allowed?"LIVE_GATE_PASS":"LIVE_GATE_REJECTED"});
   if(!liveEntry.allowed){audit(symbol,signal.side,liveEntry.reason,false);return;}
-  if(entryBlocked() || activeTrades.some(t=>t.symbol===symbol))return;
+  if(entryBlocked() || hasUnderlyingOpen(symbol) || isSymbolInCooldown(symbol))return;
   const sign=signal.side==="LONG"?1:-1;
   const entry=(signal.side==="LONG"?quote.ask:quote.bid)*(1+sign*slippageRate);
   const dist=signal.atr14*signal.stopAtr;
@@ -431,6 +447,7 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
     entryTime:new Date().toISOString(),entrySignalTime:signal.signalCloseTime,
     entryTiming:extractEntryTiming(),marketRegimeContext:{...extractMarketRegimeContext({rvol:signal.rvol,atr14:signal.atr14,atr20:signal.atr14}),strategy_regime:signal.regime},
     strategyRevision:ADAPTIVE_STRATEGY_ID,executionMode:"PAPER",timeframe:"1m",
+    phase:signal.phase||"LEGACY_SIGNAL",signalEvidence:signal.evidence||null,
     setupType:signal.setupType,setupLabel:signal.regime+" / "+signal.setupType,grade:"EVIDENCE_CHECKED",
     marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR:signal.targetR,
     atr:signal.atr14,highestPrice:entry,lowestPrice:entry,currentPrice:entry,
@@ -443,7 +460,7 @@ async function executeSignal(symbol:string,signal:AdaptiveSignal,bars:StrongFlow
       liveWebsocketEntry:{
         enabled:liveWebsocketEnabled,reason:liveEntry.reason,delta:liveEntry.delta
       }},
-    whaleData:{scenario:"BINANCE_CLOSED_MTF_TAKER_FLOW_BOOK_AND_REAL_OI_HISTORY"},
+    whaleData:{scenario:"BINANCE_BIDIRECTIONAL_CLOSED_MTF_TAKER_FLOW_BOOK_REAL_OI"},
     reasoning:{flow:{state:"VERIFIED_1M_5M_15M_TAKER_FLOW"},timingGate:{state:"FOLLOW_THROUGH_CONFIRMED"}}
   };
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
@@ -480,7 +497,7 @@ async function scanEntries(){
       const group=symbols.slice(i,i+SCAN_CONCURRENCY);
       const rows=await Promise.allSettled(group.map(async symbol=>{
         const bars=await fetchClosedOneMinuteBars(symbol);
-        return {symbol,bars,signal:evaluateAdaptiveSignal(bars)};
+        return {symbol,bars,signal:evaluateBidirectionalSignal(bars)};
       }));
       for(let j=0;j<rows.length;j++){
         const symbol=group[j],result=rows[j];
@@ -507,7 +524,7 @@ async function scanEntries(){
               } else audit(symbol,previous.side,follow.reason,false);
             }
           }else if(result.value.signal &&
-            !activeTrades.some(t=>t.symbol===symbol) && !isSymbolInCooldown(symbol)){
+            !hasUnderlyingOpen(symbol) && !isSymbolInCooldown(symbol)){
             pendingSignals.set(symbol,result.value.signal);
             archive("signal_candidate",symbol,{signal:result.value.signal,bars,
               observedAt:now,stage:"WAIT_NEXT_CLOSED_MINUTE"},
@@ -592,6 +609,13 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   }
   const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
   if(candidate!==null)tightenStop(t,candidate);
+  // Apply new regime-specific trailing floors ONLY to V4 paper positions.
+  // Trades restored from V3 keep their historical protection unchanged.
+  if(t.strategyRevision===BIDIRECTIONAL_REVISION){
+    const regimeStop=bidirectionalProfitStop(t.direction,t.setupType,t.entry,
+      t.initialSlDist,t.peak_r||0);
+    if(regimeStop!==null)tightenStop(t,regimeStop);
+  }
   // Cost-aware +1R profit lock only tightens, preserving the stronger trailing
   // floor at +1.75R and above and the entire original target mechanism.
   const costStop=costAwareProfitLock(t.direction,t.entry,t.initialSlDist,
@@ -698,6 +722,6 @@ export function startEngine(){
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
   persistEngineSnapshot();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; anti-exhaustion 0.55ATR and cost-aware +1R profit-lock; live Binance WebSocket "+
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; explosion/collapse, countertrend corrections and failed-breakout reversals; conservative OI/depth/fee gates; live Binance WebSocket "+
     (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
 }
