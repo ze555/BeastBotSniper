@@ -18,7 +18,8 @@ import {persistSnapshot,persistenceStatus,persistReplayEvent,rotatePaperRun,type
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 import { FLEX_REVISION, evaluateFlex15m, flexTiming } from "./flexInstitutional15m.js";
-const ADAPTIVE_STRATEGY_ID = FLEX_REVISION;
+import {DIRECTION_REVISION,directionConfirmation,retryDirection} from "./directionConfirmation.js";
+const ADAPTIVE_STRATEGY_ID = DIRECTION_REVISION;
 // Passive, time-stamped evidence storage. Never feeds values back into decisions.
 function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
   persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data:{...(data as object),paperRunId:runId}});
@@ -103,6 +104,7 @@ const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
 const pendingSignals = new Map<string,BidirectionalSignal>();
+const directionRetries=new Map<string,{signalTime:number;attempts:number;nextAt:number}>();
 const evaluated15m=new Map<string,number>();
 const cooldownUntil = new Map<string,number>();
 const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,
@@ -219,7 +221,7 @@ export function restoreEngineState(s:any){
   lastSignalTime.clear();
   for(const pair of s.lastSignalTime||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))lastSignalTime.set(pair[0],pair[1]);}
   pendingSignals.clear();
-  for(const pair of (s.revision===FLEX_REVISION?s.pendingSignals:[])||[]){if(Array.isArray(pair)&&pair.length===2&&pair[1]?.signalCloseTime>0)
+  for(const pair of (s.revision===ADAPTIVE_STRATEGY_ID?s.pendingSignals:[])||[]){if(Array.isArray(pair)&&pair.length===2&&pair[1]?.signalCloseTime>0)
     pendingSignals.set(pair[0],pair[1]);}
   cooldownUntil.clear();
   for(const pair of s.cooldownUntil||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))cooldownUntil.set(pair[0],pair[1]);}
@@ -293,7 +295,7 @@ export function getStats(){
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
     strategySettings:{tradingSchedule:{...tradingSchedule},liveWebsocketEnabled,
-      timeframe:"15m closed + 5m execution timing",
+      timeframe:"15m closed + 5m timing + executable price direction confirmation",
       stopAtr:"breakout 1.7 / correction 1.35",targetR:"breakout 3 / correction 1.6",
       riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
@@ -375,7 +377,7 @@ async function completePaperRollover(){
       diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
       reversalDiagnostics:{observations:0,warnings:0,earlyExits:0,incomplete:0}};
     const boundaries=await rotatePaperRun(old,fresh);
-    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();
+    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();directionRetries.clear();
     addLog("Archived previous PAPER run; started "+id+" at $"+initialVirtualBalance,"success");
     if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   }catch(e:any){rolloverError=String(e?.message||e);addLog("Archive/reset failed; old account preserved: "+rolloverError,"error");}
@@ -496,7 +498,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     diagnostics.quoteErrors++;
     const reason=String(e?.message||"QUOTE_UNAVAILABLE").slice(0,160);
     diagnostics.quoteErrorReasons[reason]=(diagnostics.quoteErrorReasons[reason]||0)+1;
-    audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return;
+    audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return "RETRY" as const;
   }
   const gate=verifyExecutableEntry(signal,bars,quote,evidence.depth,evidence.oi,feeRate,slippageRate,Date.now(),"FLEX15");
   if(!gate.allowed){
@@ -505,6 +507,9 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
       feeRate,slippageRate,decision:"REJECTED"});
     audit(symbol,signal.side,gate.reason,false);return;
   }
+  const directionGate=directionConfirmation(signal.side,signal.signalClose,signal.atr14,quote);
+  archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,quote,directionGate,gate,decision:directionGate.allowed?"DIRECTION_CONFIRMED":"DIRECTION_WAIT"});
+  if(!directionGate.allowed){audit(symbol,signal.side,directionGate.reason,false);return directionGate.reason==="DIRECTION_WAIT_PRICE_CONFIRMATION"?"RETRY" as const:undefined;}
   const liveAgg=liveWebsocketEnabled?institutionalSnapshot(symbol).agg:null;
   // Non-blocking prospective comparison: record the actual executed tape for
   // EVERY setup. Missing or stale evidence is not interpreted as neutral.
@@ -564,7 +569,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
       trend15:signal.trend15,trend60:signal.trend60,
       bookImbalance:evidence.depth.imbalance,bookSpread:evidence.depth.spread,
       depthNotional:evidence.depth.depthNotional,openInterestDelta:evidence.oi.delta,
-      entryEvidence:gate.details,followThroughExtensionAtr:gate.details?.followThroughExtensionAtr,
+      entryEvidence:{...gate.details,directionConfirmation:directionGate.reason},followThroughExtensionAtr:gate.details?.followThroughExtensionAtr,
        entryTapeShadow,
       liveWebsocketEntry:{
         enabled:liveWebsocketEnabled,reason:liveEntry.reason,delta:liveEntry.delta
@@ -594,7 +599,7 @@ export function mayStageFollowupSignal(previousCloseMs:number|null,nextCloseMs:n
 async function scanEntries(){
   if(!active || rolloverPending || rolling || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
   for(const [symbol,signal] of pendingSignals) {
-    if(Date.now()-signal.signalCloseTime>300_000)pendingSignals.delete(symbol);
+    if(Date.now()-signal.signalCloseTime>300_000){pendingSignals.delete(symbol);directionRetries.delete(symbol);}
   }
   scanning=true;
   try{
@@ -648,12 +653,16 @@ async function scanEntries(){
           const candidate=pendingSignals.get(symbol);
           if(candidate){
             if(now-candidate.signalCloseTime>300000){pendingSignals.delete(symbol);audit(symbol,candidate.side,"FLEX_SIGNAL_EXPIRED",false);}
-            else if(!entryBlocked()){
+            else if(!entryBlocked()&&(!directionRetries.has(symbol)||now>=directionRetries.get(symbol)!.nextAt)){
               const timing=flexTiming(candidate,bars,now);
               if(timing.allowed){
                 pendingSignals.delete(symbol);
                 diagnostics.candidatesConfirmed++;
-                await executeSignal(symbol,candidate,bars);
+                const result=await executeSignal(symbol,candidate,bars);
+                const previous=directionRetries.get(symbol),attempts=(previous?.signalTime===candidate.signalCloseTime?previous.attempts:0)+1;
+                if(result==="RETRY"&&retryDirection(attempts,Date.now(),candidate.signalCloseTime)&&!hasUnderlyingOpen(symbol)){
+                  directionRetries.set(symbol,{signalTime:candidate.signalCloseTime,attempts,nextAt:Date.now()+20000});pendingSignals.set(symbol,candidate);
+                }else directionRetries.delete(symbol);
               }else if(timing.reason!=="FLEX_5M_MISSING"){
                 pendingSignals.delete(symbol);audit(symbol,candidate.side,timing.reason,false);
               }
@@ -736,7 +745,7 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
     closeFull(t,isProtected?"ADAPTIVE Protected Stop":"ADAPTIVE Stop Loss");
     return;
   }
-  if(t.strategyRevision!==FLEX_REVISION){
+  if(t.strategyRevision!==FLEX_REVISION&&t.strategyRevision!==DIRECTION_REVISION){
   const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
   if(candidate!==null)tightenStop(t,candidate);
   // Apply new regime-specific trailing floors ONLY to V4 paper positions.
@@ -825,7 +834,7 @@ export async function runProtectionCycle(){
                 side:t.direction,price:t.currentPrice,profitR:t.profitR,peakR:t.peak_r,
                 market:t.institutionalContext,warning});
             }
-            if(warning.decision==="EXIT" && !t.exitTime && t.strategyRevision!==FLEX_REVISION){
+            if(warning.decision==="EXIT" && !t.exitTime && t.strategyRevision!==FLEX_REVISION && t.strategyRevision!==DIRECTION_REVISION){
               reversalDiagnostics.earlyExits++;
               closeFull(t,"ADAPTIVE Confirmed Institutional Reversal");
             }
@@ -853,6 +862,6 @@ export function startEngine(){
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
   persistEngineSnapshot();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; 15m two-hour breakout and three-hour trend correction; fixed SL/TP/time exits; OI/depth/fee gates; live Binance WebSocket "+
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; 15m two-hour breakout and three-hour trend correction; price direction confirmation + bounded retries; fixed SL/TP/time exits; OI/depth/fee gates; live Binance WebSocket "+
     (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
 }

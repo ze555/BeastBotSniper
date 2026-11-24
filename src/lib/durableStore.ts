@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import sqlite3 from "sqlite3";
 import {deflateRawSync,inflateRawSync} from "node:zlib";
+import {replayRecordedExits} from "./recordedExitReplay.js";
 
 type SqlDatabase=sqlite3.Database;
 let database:SqlDatabase|null=null,storagePath:string|null=null;
@@ -229,4 +230,22 @@ export async function getPaperRun(id:string){
   await writeQueue;
   const row=await sqlGet<{payload:string;archived_at:string}>("SELECT payload,archived_at FROM paper_runs WHERE id=?",[id]);
   return row?{...JSON.parse(row.payload),archivedAt:row.archived_at}:null;
+}
+
+/** Bounded read-only replay. No account state writes. All revisions included. */
+export async function replayRecordedTradeExits(afterId=0,limit=5){
+  if(!database)return {rows:[],nextCursor:null,hasMore:false};
+  const closed=await replayEvents({kind:"paper_trade_close",afterId,limit:Math.max(1,Math.min(8,Math.floor(limit)||5))});
+  const rows=[];
+  for(const close of closed.events){
+    const t=close.data?.trade,id=close.tradeId;
+    if(!t||!id){rows.push({id:close.id,tradeId:id,missing:"CLOSE_TRADE_ID_OR_DATA"});continue;}
+    const ticks=await sqlAll<{id:number;observed_ms:number;codec:string;payload:Buffer}>(
+      "SELECT id,observed_ms,codec,payload FROM replay_events WHERE trade_id=? AND kind='price_quote' ORDER BY id LIMIT 15001",[id]);
+    if(ticks.length>15000){rows.push({id:close.id,tradeId:id,missing:"PATH_TOO_LARGE"});continue;}
+    const quotes=ticks.map(x=>{const v=JSON.parse((x.codec==="deflate"?inflateRawSync(Buffer.from(x.payload)):Buffer.from(x.payload)).toString("utf8"));return {at:Number(v.receivedAt??x.observed_ms),price:Number(v.price)};});
+    const result=replayRecordedExits(t,quotes,Number(close.data.feeRate??.0004),Number(close.data.slippageRate??.0002));
+    rows.push({id:close.id,tradeId:id,revision:t.strategyRevision,side:t.direction,setup:t.setupType,drift:t.priceData?.entryEvidence?.driftAtr,entryTime:t.entryTime,exitTime:t.exitTime,actualPnl:t.finalPnl,result,missing:result?null:"NO_VALID_QUOTE_PATH"});
+  }
+  return {rows,nextCursor:closed.nextCursor,hasMore:closed.hasMore};
 }

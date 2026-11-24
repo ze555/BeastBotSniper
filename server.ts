@@ -4,7 +4,7 @@ import path from "path";
 import axios from "axios";
 import { startEngine, getCandidateAudit, getStats, getTrades, getLogs, setActive, isActive, getClosedTrades, updateConfig, resetAccountState,restoreEngineState,persistEngineSnapshot,initializePaperRun,requestNewPaperRun,paperRolloverBusy } from "./src/lib/apexPredator.js";
 import {initializePersistence,restoreSnapshot,flushPersistence,historicalEvents,persistenceStatus,
-  replayEvents,replayCoverage,listPaperRuns,getPaperRun,type ReplayKind} from "./src/lib/durableStore.js";
+  replayEvents,replayCoverage,listPaperRuns,getPaperRun,replayRecordedTradeExits,type ReplayKind} from "./src/lib/durableStore.js";
 import { isValidStrongFlowTradingSchedule } from "./src/lib/strongFlowStrategy.js";
 import { 
   getTradingDecisionsData, 
@@ -133,6 +133,11 @@ async function startServer() {
   }));
   // Replay archive is strictly read-only. Cursor order is DB ingestion order,
   // while sourceMs and observedMs remain distinct to prevent lookahead bias.
+  let exitReplayBusy=false;
+  app.get("/api/research/exit-replay",async(req,res)=>{
+    if(exitReplayBusy)return res.status(429).json({error:"Replay already running; retry"});
+    exitReplayBusy=true;try{res.json(await replayRecordedTradeExits(Number(req.query.afterId)||0,Number(req.query.limit)||5));}catch(e:any){res.status(500).json({error:String(e?.message||e)});}finally{exitReplayBusy=false;}
+  });
   app.get("/api/research/replay/coverage",async(_req,res)=>{
     try{res.json({...await replayCoverage(),
       description:"Observed live inputs only. No synthetic missing ticks, book history, or funding; historical exactness depends on recorded fields."});}

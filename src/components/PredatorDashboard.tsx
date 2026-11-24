@@ -216,7 +216,7 @@ export const PredatorDashboard: React.FC = () => {
                          </span>
                          <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded shadow-sm">{t.grade}</span>
                          {isClosed && <span className="bg-slate-800 text-blue-300 text-[10px] px-2 py-0.5 rounded">
-                           {t.strategyRevision === 'FLEX_INSTITUTIONAL_15M_RECONSTRUCTED_V1_PAPER' ? 'FLEX 15m' : 'محرك سابق'}
+                           {t.strategyRevision === 'FLEX_DIRECTION_CONFIRMATION_V2_PAPER' ? 'FLEX 15m' : 'محرك سابق'}
                          </span>}
                          {t.setupLabel && (
                             <span className="bg-blue-950/80 text-blue-300 border border-blue-500/40 text-[10px] px-2 py-0.5 rounded font-bold">
