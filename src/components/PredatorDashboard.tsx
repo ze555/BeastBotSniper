@@ -34,6 +34,10 @@ export const PredatorDashboard: React.FC = () => {
   const [tradingStart, setTradingStart] = useState('18:00');
   const [tradingEnd, setTradingEnd] = useState('02:00');
   const [configError, setConfigError] = useState('');
+  const [archiveOnUpdate,setArchiveOnUpdate]=useState(true);
+  const [archiveMessage,setArchiveMessage]=useState('');
+  const [archivedRuns,setArchivedRuns]=useState<any[]>([]);
+  const [resetBusy,setResetBusy]=useState(false);
   const tradingSettingsDirty = useRef(false);
 
   useEffect(() => {
@@ -72,6 +76,7 @@ export const PredatorDashboard: React.FC = () => {
             if (data.scanBatchSize !== undefined) setScanBatchSize(data.scanBatchSize.toString());
             if (data.feeRate !== undefined) setFeeRateInput(data.feeRate.toString());
             if (data.slippageRate !== undefined) setSlippageRateInput(data.slippageRate.toString());
+            if(typeof data.paperRun?.archiveOnUpdate==='boolean')setArchiveOnUpdate(data.paperRun.archiveOnUpdate);
             if (typeof data.liveWebsocketEnabled === 'boolean') setLiveWebsocketEnabled(data.liveWebsocketEnabled);
         }
       }
@@ -127,6 +132,7 @@ export const PredatorDashboard: React.FC = () => {
                   slippageRate: Number(slippageRateInput),
                   tradingSchedule: {mode: tradingMode, startLocal: tradingStart, endLocal: tradingEnd},
                   liveWebsocketEnabled,
+                  archiveOnUpdate,
               })
           });
           if (!result.ok) {
@@ -142,6 +148,13 @@ export const PredatorDashboard: React.FC = () => {
       setIsSavingConfig(false);
   };
 
+  const archiveAndReset=async()=>{
+    if(!window.confirm('أرشفة دورة PAPER الحالية وبدء دورة جديدة بنفس رأس المال؟ الصفقات المفتوحة ستغلق بشكل طبيعي أولاً.'))return;
+    setResetBusy(true);setArchiveMessage('');
+    try{const res=await fetch('/api/predator/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'ARCHIVE_AND_RESET',expectedRunId:stats?.paperRun?.id??null})});const data=await safeJson(res);if(!res.ok)throw Error(data.message||'تعذر الأرشفة');setArchiveMessage(data.pending?'تم طلب الأرشفة؛ سيتم التنفيذ بعد انتهاء الصفقات والمسح الجاري':'تمت الأرشفة وبدأت دورة جديدة');await fetchData();}
+    catch(e:any){setArchiveMessage(e.message||'تعذر الأرشفة');}finally{setResetBusy(false);}
+  };
+  const loadArchivedRuns=async()=>{try{const res=await fetch('/api/paper/runs');if(res.ok)setArchivedRuns((await safeJson(res)).runs||[]);}catch{}};
   const renderRuleStat = (name: string, stat: any) => {
     if (!stat) return null;
     const total = stat.passed + stat.failed;
@@ -484,6 +497,13 @@ export const PredatorDashboard: React.FC = () => {
                    <input type="number" min="1" value={haltLossTarget} onChange={e=>setHaltLossTarget(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
                 </div>
+                <div className="space-y-3 border-t border-slate-700 pt-4">
+                  <h3 className="text-white font-bold">دورات التداول التجريبي والأرشفة</h3>
+                  <label className="flex gap-2 items-center text-sm text-white"><input type="checkbox" checked={archiveOnUpdate} onChange={e=>{tradingSettingsDirty.current=true;setArchiveOnUpdate(e.target.checked);}}/>أرشفة الدورة وبدء دورة جديدة عند نشر تحديث جديد (وليس إعادة التشغيل)</label>
+                  <button disabled={resetBusy||stats?.paperRun?.rolloverPending} onClick={archiveAndReset} className="bg-amber-700 text-white rounded-lg px-4 py-2 disabled:opacity-50">أرشفة الصفقات وتصفير حساب PAPER</button>
+                  <p className="text-xs text-slate-300">رأس المال الجديد = رأس المال الابتدائي؛ الأرباح والرسوم والعدادات منفصلة. لا يتم حذف الأرشيف.</p>
+                  {(archiveMessage||stats?.paperRun?.rolloverPending||stats?.paperRun?.error)&&<p className="text-sm text-amber-300">{stats?.paperRun?.error||archiveMessage||'أرشفة معلقة حتى إغلاق الصفقات'}</p>}
+                </div>
                 {configError && <p role="alert" className="text-sm text-rose-400">{configError}</p>}
                 <button onClick={saveConfig} disabled={isSavingConfig}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
@@ -587,6 +607,12 @@ export const PredatorDashboard: React.FC = () => {
                 </div>
              </div>
 
+             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+                <h2 className="text-white font-bold">أرشيف دورات PAPER السابقة</h2>
+                <button onClick={loadArchivedRuns} className="bg-slate-700 rounded px-3 py-2 text-white">عرض الدورات المؤرشفة</button>
+                {archivedRuns.map(run=><div key={run.id} className="flex flex-wrap gap-3 items-center text-sm text-slate-300 border-t border-slate-700 pt-2"><span>{new Date(run.archivedAt).toLocaleString()}</span><span dir="ltr">PnL ${Number(run.netPnl).toFixed(2)}</span><span>{run.retainedTrades} صفقة محفوظة في لقطة الحساب</span><a className="text-blue-400" href={'/api/paper/runs/'+encodeURIComponent(run.id)} target="_blank" rel="noreferrer">فتح السجل</a></div>)}
+                <a className="block text-blue-400 text-sm" href="/api/research/archive?type=trading_decisions" target="_blank" rel="noreferrer">السجل التاريخي الكامل (صفحات)</a>
+             </div>
              {/* Closed Trades History */}
              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-[0_0_15px_rgba(59,130,246,0.05)]">
                 <h2 className="text-lg text-white font-bold mb-4 flex gap-2 items-center"><FileText className="w-4 h-4 text-emerald-400"/> سجل الصفقات المغلقة</h2>

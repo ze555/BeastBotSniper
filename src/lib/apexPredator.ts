@@ -5,6 +5,7 @@
  * No guarantee of profitable trades; all observations must be live/complete.
  */
 import axios from "axios";
+import crypto from "node:crypto";
 import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { WaveRadar, scheduleRadarBatch } from "./waveRadar.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
@@ -13,14 +14,14 @@ import { assessOrderBook, adaptiveStopCandidate } from "./adaptiveRegimeStrategy
 import {bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
 import { parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
 import { evaluateReversal } from "./institutionalReversal.js";
-import {persistSnapshot,persistenceStatus,persistReplayEvent,type ReplayKind} from "./durableStore.js";
+import {persistSnapshot,persistenceStatus,persistReplayEvent,rotatePaperRun,type ReplayKind} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 import { FLEX_REVISION, evaluateFlex15m, flexTiming } from "./flexInstitutional15m.js";
 const ADAPTIVE_STRATEGY_ID = FLEX_REVISION;
 // Passive, time-stamped evidence storage. Never feeds values back into decisions.
 function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
-  persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data});
+  persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data:{...(data as object),paperRunId:runId}});
 }
 function tradeArchiveId(t:{symbol:string;entryTime:string}){
   return t.symbol+"_"+new Date(t.entryTime).getTime();
@@ -35,7 +36,7 @@ import {
 import {
   extractEntryTiming, extractMarketRegimeContext, formatCandles,
   registerTradeForDirectionTracking, updateDirectionTracking,
-  logTradeJourneySnapshot, logTradeDecision, logInstitutionalEvidence
+  logTradeJourneySnapshot, logTradeDecision, logInstitutionalEvidence, setResearchRun
 } from "./researchLogger.js";
 
 const FAPI = "https://fapi.binance.com";
@@ -64,6 +65,11 @@ let scanTimer: ReturnType<typeof setInterval> | null = null;
 let protectTimer: ReturnType<typeof setInterval> | null = null;
 let virtualBalance = 1000;
 let initialVirtualBalance = 1000;
+let runId:string|null=null,runStartedAt:string|null=null,runRevision:string=ADAPTIVE_STRATEGY_ID;
+const buildId=process.env.RAILWAY_GIT_COMMIT_SHA||ADAPTIVE_STRATEGY_ID;
+let runBuildId=buildId,archiveOnUpdate=true,rolloverPending=false,rolling=false;
+let rolloverError:string|null=null;
+let runTotals={count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0};
 let maxOpenTrades = STRONG_FLOW_MAX_CONCURRENT;
 let scanBatchSize = 0; // AUTO: visit every available futures symbol per full round
 let feeRate = 0.0004;
@@ -155,6 +161,7 @@ function dailyRiskRemaining(){
 function entryReadiness(){
   const reasons:string[]=[];
   if(!active)reasons.push("BOT_PAUSED");
+  if(rolloverPending||rolling)reasons.push("PAPER_ARCHIVE_PENDING");
   if(!isStrongFlowTradingHour(new Date(),tradingSchedule))reasons.push("OUTSIDE_TRADING_HOURS");
   if(!Number.isFinite(virtualBalance)||virtualBalance<=0)reasons.push("INVALID_ACCOUNT_BALANCE");
   if(activeTrades.length>=Math.min(maxOpenTrades,STRONG_FLOW_MAX_CONCURRENT))reasons.push("MAX_CONCURRENT_TRADES");
@@ -177,6 +184,7 @@ function entryBlocked(){return !entryReadiness().canOpenTrade;}
 export function engineStateSnapshot(){
   return {schemaVersion:1,revision:ADAPTIVE_STRATEGY_ID,savedAt:new Date().toISOString(),
     active,virtualBalance,initialVirtualBalance,balance:virtualBalance,
+    runId,runStartedAt,runRevision,runBuildId,archiveOnUpdate,rolloverPending,runTotals:{...runTotals},
     maxOpenTrades,scanBatchSize,feeRate,slippageRate,liveWebsocketEnabled,
     tradingSchedule:{...tradingSchedule},haltProfitEnabled,haltProfitTarget,
     haltLossEnabled,haltLossTarget,dayKey,today:{...today},
@@ -186,7 +194,7 @@ export function engineStateSnapshot(){
     cooldownUntil:[...cooldownUntil],diagnostics:{...diagnostics},
     reversalDiagnostics:{...reversalDiagnostics}};
 }
-export function persistEngineSnapshot(){persistSnapshot(engineStateSnapshot());}
+export function persistEngineSnapshot(){if(!rolling)persistSnapshot(engineStateSnapshot());}
 export function restoreEngineState(s:any){
   if(!s || s.schemaVersion!==1)throw Error("Unsupported durable PAPER snapshot");
   if(!(Number.isFinite(s.virtualBalance)&&s.virtualBalance>=0&&
@@ -194,6 +202,11 @@ export function restoreEngineState(s:any){
      !Array.isArray(s.activeTrades)||!Array.isArray(s.closedTrades))
     throw Error("Invalid PAPER balance or trade collection in durable snapshot");
   virtualBalance=s.virtualBalance;initialVirtualBalance=s.initialVirtualBalance;
+  runId=typeof s.runId==="string"?s.runId:null;runStartedAt=s.runStartedAt||null;
+  runRevision=s.runRevision||s.revision||ADAPTIVE_STRATEGY_ID;runBuildId=s.runBuildId||runRevision;
+  archiveOnUpdate=s.archiveOnUpdate!==false;rolloverPending=s.rolloverPending===true;
+  runTotals=s.runTotals?{...s.runTotals}:{count:s.closedTrades.length,wins:s.closedTrades.filter((t:any)=>t.finalPnl>0).length,losses:s.closedTrades.filter((t:any)=>t.finalPnl<0).length,breakeven:s.closedTrades.filter((t:any)=>t.finalPnl===0).length,fees:s.closedTrades.reduce((n:number,t:any)=>n+(Number(t.totalFees)||0),0),pnl:s.virtualBalance-s.initialVirtualBalance};
+  setResearchRun(runId);
   active=typeof s.active==="boolean"?s.active:true;
   activeTrades.splice(0,activeTrades.length,...s.activeTrades);
   closedTrades.splice(0,closedTrades.length,...s.closedTrades.slice(0,MAX_DASHBOARD_TRADES));
@@ -228,6 +241,7 @@ export function restoreEngineState(s:any){
 }
 export function getStats(){
   return {persistence:persistenceStatus(),
+    paperRun:{id:runId,startedAt:runStartedAt,revision:runRevision,buildId:runBuildId,archiveOnUpdate,rolloverPending,rolling,error:rolloverError,totals:{...runTotals}},
     strategyRevision:ADAPTIVE_STRATEGY_ID,
     strategyMode:"FLEX_INSTITUTIONAL_15M",
     executionMode:"PAPER",
@@ -293,7 +307,9 @@ export function setConfig(config:any){
 export function updateConfig(balance:number,maxTrades:number,opts:any={}){
   const newBalance=Number(balance),newMax=Number(maxTrades);
   // A settings save must never silently reset the running account or rewrite its baseline.
-  if(activeTrades.length===0&&closedTrades.length===0&&Number.isFinite(newBalance)&&newBalance>0){
+  if(rolling)return;
+  if(typeof opts.archiveOnUpdate==="boolean")archiveOnUpdate=opts.archiveOnUpdate;
+  if(activeTrades.length===0&&closedTrades.length===0&&runTotals.count===0&&Number.isFinite(newBalance)&&newBalance>0){
     initialVirtualBalance=newBalance;virtualBalance=newBalance;
   }
   if(Number.isFinite(newMax)&&newMax>=1)maxOpenTrades=Math.max(1,Math.min(STRONG_FLOW_MAX_CONCURRENT,Math.floor(newMax)));
@@ -316,12 +332,49 @@ export function updateConfig(balance:number,maxTrades:number,opts:any={}){
   }
   persistEngineSnapshot();
 }
+/** Legacy reset entry point never discards a ledger. */
 export function resetAccountState(){
-  if(activeTrades.length){addLog("Reset rejected: open paper positions must be closed first.","warn");return false;}
-  virtualBalance=initialVirtualBalance=1000;
-  today={count:0,wins:0,losses:0,pnl:0,sumR:0};closedTrades.length=0;
-  cooldownUntil.clear();lastSignalTime.clear();pendingSignals.clear();evaluated15m.clear();
-  addLog("Paper account reset to $1000.","success");persistEngineSnapshot();return true;
+  if(activeTrades.length||!persistenceStatus().enabled)return false;
+  rolloverPending=true;persistEngineSnapshot();return true;
+}
+export function paperRolloverBusy(){return rolling;}
+export async function requestNewPaperRun(expectedRunId?:string|null){
+  if(expectedRunId!==undefined&&expectedRunId!==runId)throw Error("Paper run already changed; refresh before retry");
+  if(rolling)return {pending:true,runId};
+  if(!persistenceStatus().enabled)throw Error("Durable storage required for archive/reset");
+  rolloverPending=true;persistEngineSnapshot();
+  await completePaperRollover();
+  return {pending:rolloverPending,runId};
+}
+export async function initializePaperRun(saved:any){
+  if(!persistenceStatus().enabled)return;
+  if(!saved){
+    runId=crypto.randomUUID();runStartedAt=new Date().toISOString();runRevision=ADAPTIVE_STRATEGY_ID;runBuildId=buildId;
+    setResearchRun(runId);persistEngineSnapshot();return;
+  }
+  // Explicit one-time migration of the pre-run PAPER ledger; future builds
+  // rotate only when selected. Restarting the same build never rotates.
+  if(!runId||(archiveOnUpdate&&runBuildId!==buildId))rolloverPending=true;
+  if(!archiveOnUpdate&&!rolloverPending){runBuildId=buildId;persistEngineSnapshot();}
+  if(rolloverPending){persistEngineSnapshot();await completePaperRollover();}
+}
+async function completePaperRollover(){
+  if(!rolloverPending||rolling||scanning||protecting||activeTrades.length)return;
+  rolling=true;rolloverError=null;
+  try{
+    const old=structuredClone(engineStateSnapshot()),id=crypto.randomUUID(),at=new Date().toISOString();
+    const fresh={...old,runId:id,runStartedAt:at,runRevision:ADAPTIVE_STRATEGY_ID,runBuildId:buildId,rolloverPending:false,
+      active:true,virtualBalance:initialVirtualBalance,balance:initialVirtualBalance,activeTrades:[],closedTrades:[],logs:[],audits:[],
+      today:{count:0,wins:0,losses:0,pnl:0,sumR:0},runTotals:{count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0},
+      lastSignalTime:[],pendingSignals:[],cooldownUntil:[],
+      diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
+      reversalDiagnostics:{observations:0,warnings:0,earlyExits:0,incomplete:0}};
+    await rotatePaperRun(old,fresh);
+    restoreEngineState(fresh);evaluated15m.clear();
+    addLog("Archived previous PAPER run; started "+id+" at $"+initialVirtualBalance,"success");
+    if(institutionalMonitoringEnabled)syncMarketSubscriptions();
+  }catch(e:any){rolloverError=String(e?.message||e);addLog("Archive/reset failed; old account preserved: "+rolloverError,"error");}
+  finally{rolling=false;persistEngineSnapshot();}
 }
 async function updateUniverse(){
   if(lastUniverseUpdate && Date.now()-lastUniverseUpdate<300_000)return;
@@ -490,7 +543,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     audit(symbol,signal.side,"POSITION_TOO_SMALL",false);return;
   }
   const t:any={
-    symbol,direction:signal.side,entry,sl:stop,initialSlDist:dist,
+    symbol,paperRunId:runId,direction:signal.side,entry,sl:stop,initialSlDist:dist,
     tp1:target,tp2:target,tp3:target,pos,initialPos:pos,
     part_a:1,part_b:0,part_c:0,a_closed:false,b_closed:false,c_closed:false,
     be_done:false,micro_banked:false,peak_r:0,pnl:0,realizedPnl:0,totalFees:0,
@@ -534,7 +587,7 @@ export function mayStageFollowupSignal(previousCloseMs:number|null,nextCloseMs:n
     (previousCloseMs===null || nextCloseMs>previousCloseMs);
 }
 async function scanEntries(){
-  if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
+  if(!active || rolloverPending || rolling || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
   for(const [symbol,signal] of pendingSignals) {
     if(Date.now()-signal.signalCloseTime>300_000)pendingSignals.delete(symbol);
   }
@@ -644,6 +697,8 @@ function closeFull(t:any,reason:string){
   if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   closedTrades.unshift(t);if(closedTrades.length>MAX_DASHBOARD_TRADES)closedTrades.length=MAX_DASHBOARD_TRADES;
   today.count++;today.pnl+=t.finalPnl;
+  runTotals.count++;runTotals.pnl+=t.finalPnl;runTotals.fees+=Number(t.totalFees)||0;
+  if(t.finalPnl>0)runTotals.wins++;else if(t.finalPnl<0)runTotals.losses++;else runTotals.breakeven++;
   if(t.finalPnl>0.15)today.wins++;
   if(t.finalPnl< -0.15)today.losses++;
   today.sumR+=t.profitR||0;
@@ -702,7 +757,7 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   }
 }
 export async function runProtectionCycle(){
-  if(protecting||activeTrades.length===0)return;
+  if(rolling||protecting||activeTrades.length===0)return;
   protecting=true;
   try{
     await Promise.allSettled([...activeTrades].map(async t=>{
@@ -783,7 +838,7 @@ export async function runProtectionCycle(){
     persistEngineSnapshot();
   }finally{protecting=false;}
 }
-export async function runApexLoop(){await scanEntries();}
+export async function runApexLoop(){if(rolloverPending){await completePaperRollover();return;}if(!rolling)await scanEntries();}
 export function startEngine(){
   institutionalMonitoringEnabled=true;
   syncMarketSubscriptions();

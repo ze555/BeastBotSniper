@@ -53,6 +53,12 @@ const INSTITUTIONAL_EVIDENCE_FILE = path.join(RESEARCH_DIR, "institutional_evide
 const PERFORMANCE_SUMMARY_FILE = path.join(RESEARCH_DIR, "performance_summary.json");
 const DAILY_SUMMARY_FILE = path.join(RESEARCH_DIR, "daily_summary.jsonl");
 
+let researchRunId:string|null=null;
+export function setResearchRun(id:string|null){
+  researchRunId=id;
+  memoryDecisions.length=memoryRejected.length=memoryJourneys.length=memoryInstitutional.length=0;
+  pendingRejectedMap.clear();activeTradesDirectionMap.clear();cachedSummary=null;
+}
 const memoryDecisions: any[] = [];
 const memoryRejected: any[] = [];
 const memoryJourneys: any[] = [];
@@ -91,11 +97,12 @@ export function restoreResearchCaches(){
   ] as const;
   const counts:Record<string,number>={};
   for(const [file,array,limit] of fields){
-    const entries=readRecentJsonl(file,limit);
+    const entries=readRecentJsonl(file,limit).filter(e=>researchRunId===null||e.paperRunId===researchRunId);
     array.splice(0,array.length,...entries);
     counts[path.basename(file)]=entries.length;
   }
   cachedSummary=null;
+  if(researchRunId!==null)updateSummaries(null);
   return counts;
 }
 export function researchStorageInfo(){
@@ -124,6 +131,7 @@ let cachedSummary: any = null;
 
 function appendJsonlSafe(filePath: string, obj: any) {
    try {
+      if(researchRunId!==null)obj.paperRunId=researchRunId;
       const line = JSON.stringify(obj) + "\n";
       // Append-only SQLite history survives deployment and is queryable by version.
       persistEvent(path.basename(filePath,".jsonl"),obj,
@@ -773,7 +781,8 @@ export function updateRejectedSignalsOutcomes(symbol: string, currentPrice: numb
    }
 
    if (needsRewrite) {
-      rewriteJsonlSafe(REJECTED_SIGNALS_FILE, memoryRejected);
+      // Keep historic journal append-only. Outcome revisions are appended, never overwrite another run.
+      if(researchRunId===null)rewriteJsonlSafe(REJECTED_SIGNALS_FILE, memoryRejected);
       updateSummaries(null);
    }
 }
@@ -1226,8 +1235,9 @@ export function getTradeJourneysData(limit: number = 100) {
 
 export function getPerformanceSummaryData() {
    if (cachedSummary) return cachedSummary;
+   if(researchRunId!==null){updateSummaries(null);if(cachedSummary)return cachedSummary;}
    try {
-      if (fs.existsSync(PERFORMANCE_SUMMARY_FILE)) {
+      if (researchRunId===null && fs.existsSync(PERFORMANCE_SUMMARY_FILE)) {
          return JSON.parse(fs.readFileSync(PERFORMANCE_SUMMARY_FILE, "utf8"));
       }
    } catch (e) {}

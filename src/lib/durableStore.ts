@@ -57,6 +57,7 @@ export async function initializePersistence():Promise<boolean>{
     await new Promise<void>((resolve,reject)=>database!.exec(
       "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;"+
       "CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL);"+
+      "CREATE TABLE IF NOT EXISTS paper_runs(id TEXT PRIMARY KEY, archived_at TEXT NOT NULL, payload TEXT NOT NULL);"+
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, at TEXT NOT NULL, revision TEXT NOT NULL, payload TEXT NOT NULL);"+
       "CREATE INDEX IF NOT EXISTS idx_events_type_id ON events(type,id DESC);"+
       "CREATE TABLE IF NOT EXISTS replay_events ("+
@@ -192,4 +193,34 @@ export async function replayCoverage(){
     "SELECT COUNT(*) AS total,MIN(observed_ms) AS firstMs,MAX(observed_ms) AS lastMs FROM replay_events");
   return {enabled:true,total:stats?.total||0,firstMs:stats?.firstMs||null,
     lastMs:stats?.lastMs||null,counts};
+}
+
+/** Commit archive and fresh state in one SQLite transaction, serialized with
+ * existing writes. If this fails the old account stays intact. */
+export async function rotatePaperRun(oldState:any,newState:any){
+  if(!database)throw Error("Durable storage required for archive/reset");
+  const oldPayload=JSON.stringify(oldState),newPayload=JSON.stringify(newState);
+  const at=new Date().toISOString(),id=String(oldState.runId||"legacy-before-paper-runs");
+  const work=writeQueue.then(async()=>{
+    await sqlRun("BEGIN IMMEDIATE");
+    try{
+      await sqlRun("INSERT INTO paper_runs(id,archived_at,payload) VALUES(?,?,?)",[id,at,oldPayload]);
+      await sqlRun("INSERT INTO state(key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",[stateKey,newPayload,at]);
+      await sqlRun("COMMIT");lastSaveAt=at;
+    }catch(e){await sqlRun("ROLLBACK").catch(()=>{});throw e;}
+  });
+  writeQueue=work.catch(e=>{lastError=String(e?.message||e);});
+  await work;
+}
+export async function listPaperRuns(limit=50,offset=0){
+  if(!database)return [];
+  await writeQueue;
+  const rows=await sqlAll<{id:string;archived_at:string;payload:string}>("SELECT id,archived_at,payload FROM paper_runs ORDER BY archived_at DESC LIMIT ? OFFSET ?",[Math.max(1,Math.min(100,Math.floor(limit)||50)),Math.max(0,Math.floor(offset)||0)]);
+  return rows.map(x=>{const p=JSON.parse(x.payload);return {id:x.id,archivedAt:x.archived_at,startedAt:p.runStartedAt||null,revision:p.runRevision||p.revision,initialBalance:p.initialVirtualBalance,endingBalance:p.virtualBalance,netPnl:p.virtualBalance-p.initialVirtualBalance,retainedTrades:p.closedTrades.length,stats:p.runTotals||null};});
+}
+export async function getPaperRun(id:string){
+  if(!database)return null;
+  await writeQueue;
+  const row=await sqlGet<{payload:string;archived_at:string}>("SELECT payload,archived_at FROM paper_runs WHERE id=?",[id]);
+  return row?{...JSON.parse(row.payload),archivedAt:row.archived_at}:null;
 }

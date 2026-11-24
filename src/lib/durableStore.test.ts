@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {initializePersistence,restoreSnapshot,persistSnapshot,persistEvent,
   historicalEvents,flushPersistence,persistenceStatus,closePersistence,
-  persistReplayEvent,replayEvents,replayCoverage,REPLAY_SCHEMA_VERSION} from "./durableStore.js";
+  persistReplayEvent,replayEvents,replayCoverage,REPLAY_SCHEMA_VERSION,rotatePaperRun,listPaperRuns,getPaperRun} from "./durableStore.js";
 import {engineStateSnapshot,restoreEngineState,getStats,getTrades,getClosedTrades} from "./apexPredator.js";
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),"beast-persistence-test-"));
@@ -80,6 +80,19 @@ assert.equal(getTrades().length,1);
 assert.equal(getTrades()[0].sl,97);
 assert.equal(getClosedTrades()[0].finalPnl,3.25);
 restoreEngineState(original);
+const old={...payload,runId:"test-old",activeTrades:[]};
+const fresh={...original,runId:"test-new",runStartedAt:now,runRevision:"NEW",balance:1000,virtualBalance:1000,activeTrades:[],closedTrades:[],today:{count:0,wins:0,losses:0,pnl:0,sumR:0}};
+await rotatePaperRun(old,fresh);
+assert.equal((await listPaperRuns()).length,1);
+assert.equal((await getPaperRun("test-old"))?.closedTrades[0].finalPnl,3.25);
+assert.equal((await restoreSnapshot())?.runId,"test-new");
+assert.equal((await restoreSnapshot())?.closedTrades.length,0);
+await assert.rejects(()=>rotatePaperRun(old,{...fresh,balance:1}));
+assert.equal((await restoreSnapshot())?.balance,1000,"duplicate archive rolls back state");
+await closePersistence();
+await initializePersistence();
+assert.equal((await restoreSnapshot())?.runId,"test-new");
+assert.equal((await historicalEvents("trading_decisions")).total,1,"historical research remains intact");
 await closePersistence();
 fs.rmSync(root,{recursive:true,force:true});
 delete process.env.BEAST_PERSIST_DIR;
