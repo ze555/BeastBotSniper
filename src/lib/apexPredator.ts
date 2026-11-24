@@ -17,7 +17,8 @@ import {persistSnapshot,persistenceStatus,persistReplayEvent,type ReplayKind} fr
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { liveBreakoutEntryDecision } from "./websocketDecision.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
-const ADAPTIVE_STRATEGY_ID = BIDIRECTIONAL_REVISION;
+import { FLEX_REVISION, evaluateFlex15m, flexTiming } from "./flexInstitutional15m.js";
+const ADAPTIVE_STRATEGY_ID = FLEX_REVISION;
 // Passive, time-stamped evidence storage. Never feeds values back into decisions.
 function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
   persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data});
@@ -94,6 +95,7 @@ const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
 const pendingSignals = new Map<string,BidirectionalSignal>();
+const evaluated15m=new Map<string,number>();
 const cooldownUntil = new Map<string,number>();
 const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,
   rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",
@@ -201,7 +203,7 @@ export function restoreEngineState(s:any){
   lastSignalTime.clear();
   for(const pair of s.lastSignalTime||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))lastSignalTime.set(pair[0],pair[1]);}
   pendingSignals.clear();
-  for(const pair of s.pendingSignals||[]){if(Array.isArray(pair)&&pair.length===2&&pair[1]?.signalCloseTime>0)
+  for(const pair of (s.revision===FLEX_REVISION?s.pendingSignals:[])||[]){if(Array.isArray(pair)&&pair.length===2&&pair[1]?.signalCloseTime>0)
     pendingSignals.set(pair[0],pair[1]);}
   cooldownUntil.clear();
   for(const pair of s.cooldownUntil||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))cooldownUntil.set(pair[0],pair[1]);}
@@ -222,7 +224,7 @@ export function restoreEngineState(s:any){
   resetDailyStatsIfNeeded();
   // One-time migration, including V4 snapshots created before the marker existed.
   // Rebuild today's V4-only result from version-tagged closed trades, not old daily PnL.
-  if(s.todayRiskStrategyRevision!==ADAPTIVE_STRATEGY_ID){
+  if(s.todayRiskStrategyRevision!==ADAPTIVE_STRATEGY_ID && ADAPTIVE_STRATEGY_ID===BIDIRECTIONAL_REVISION as string){
     const formatter=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Tripoli"});
     const v4Today=closedTrades.filter(t=>t.strategyRevision===ADAPTIVE_STRATEGY_ID &&
       typeof t.exitTime==="string" && !Number.isNaN(Date.parse(t.exitTime)) &&
@@ -334,7 +336,7 @@ export function resetAccountState(){
   if(activeTrades.length){addLog("Reset rejected: open paper positions must be closed first.","warn");return false;}
   virtualBalance=initialVirtualBalance=1000;
   today={count:0,wins:0,losses:0,pnl:0,sumR:0};closedTrades.length=0;
-  cooldownUntil.clear();lastSignalTime.clear();pendingSignals.clear();
+  cooldownUntil.clear();lastSignalTime.clear();pendingSignals.clear();evaluated15m.clear();
   addLog("Paper account reset to $1000.","success");persistEngineSnapshot();return true;
 }
 async function updateUniverse(){
@@ -348,6 +350,7 @@ async function updateUniverse(){
     const universeChanged=watchlist.length!==eligible.length || watchlist.some((s,i)=>s!==eligible[i]);
     watchlist=eligible;
     if(universeChanged) {
+      const allowed=new Set(eligible);for(const s of evaluated15m.keys())if(!allowed.has(s))evaluated15m.delete(s);
       // A genuinely changed universe starts a new measurable full round.
       // Identical refreshes leave the cursor untouched (no repeated head scans).
       currentBatchIndex=0;
@@ -376,10 +379,10 @@ async function refreshWaveRadar(){
   }
   hotWatchlist=waveRadar.select(eligible,Date.now());
 }
-async function fetchClosedOneMinuteBars(symbol:string):Promise<StrongFlowBar[]>{
+async function fetchClosedOneMinuteBars(symbol:string,interval:"1m"|"15m"="1m"):Promise<StrongFlowBar[]>{
   let r;
   try {
-    r=await axios.get(FAPI+"/fapi/v1/klines",{params:{symbol,interval:"1m",limit:85},timeout:5000});
+    r=await axios.get(FAPI+"/fapi/v1/klines",{params:{symbol,interval,limit:interval==="15m"?25:85},timeout:5000});
   } catch (e:any) {
     const status=Number(e?.response?.status);
     if(status===429 || status===418) {
@@ -437,14 +440,12 @@ async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"):
 async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:StrongFlowBar[]){
   if(entryBlocked()||hasUnderlyingOpen(symbol)||isSymbolInCooldown(symbol)
     ||lastSignalTime.get(symbol)===signal.signalCloseTime)return;
-  if(Date.now()-signal.signalCloseTime>180_000)return;
-  const follow=confirmNextClosedMinute(signal,bars);
-  if(!follow.allowed){audit(symbol,signal.side,follow.reason,false);return;}
-  const mtf=confirmEntryContext(signal,bars);
+  if(Date.now()-signal.signalCloseTime>300_000)return;
+  const mtf=flexTiming(signal,bars);
   if(!mtf.allowed){audit(symbol,signal.side,mtf.reason,false);return;}
   const evidence=await confirmMarketEvidence(symbol,signal.side);
   if(!evidence||entryBlocked()||hasUnderlyingOpen(symbol)||
-     Date.now()-signal.signalCloseTime>180_000)return;
+     Date.now()-signal.signalCloseTime>300_000)return;
   // Fetch LAST so the executable quote is younger than the depth and OI reads.
   let quote;
   try{quote=await fetchExecutionQuote(symbol);}
@@ -454,7 +455,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     diagnostics.quoteErrorReasons[reason]=(diagnostics.quoteErrorReasons[reason]||0)+1;
     audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return;
   }
-  const gate=verifyExecutableEntry(signal,bars,quote,evidence.depth,evidence.oi,feeRate,slippageRate);
+  const gate=verifyExecutableEntry(signal,bars,quote,evidence.depth,evidence.oi,feeRate,slippageRate,Date.now(),"FLEX15");
   if(!gate.allowed){
     archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
       depth:evidence.depth,oi:evidence.oi,gate,liveWebsocketEnabled,
@@ -480,9 +481,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     notional:liveAgg?.notional??null,count:liveAgg?.count??null,
     wouldConfirm:alignedTape===null?null:alignedTape>=.10
   };
-  const liveEntry=liveBreakoutEntryDecision(
-    liveWebsocketEnabled,signal.setupType,signal.side,liveAgg
-  );
+  const liveEntry={allowed:alignedTape===null||alignedTape>=-.25,reason:alignedTape!==null&&alignedTape<-.25?"FLEX_LIVE_TAPE_STRONG_CONFLICT":"FLEX_LIVE_TAPE_NO_STRONG_CONFLICT",delta:alignedTape};
   archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
     depth:evidence.depth,oi:evidence.oi,gate,liveAgg,liveEntry,entryTapeShadow,liveWebsocketEnabled,
     feeRate,slippageRate,decision:liveEntry.allowed?"LIVE_GATE_PASS":"LIVE_GATE_REJECTED"});
@@ -491,7 +490,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
   const sign=signal.side==="LONG"?1:-1;
   const entry=(signal.side==="LONG"?quote.ask:quote.bid)*(1+sign*slippageRate);
   const dist=signal.atr14*signal.stopAtr;
-  if(!(entry>0&&dist>0&&dist/entry>=0.0048&&dist/entry<=0.04)){
+  if(!(entry>0&&dist>0&&dist/entry>0&&dist/entry<=0.04)){
     audit(symbol,signal.side,"STOP_DISTANCE_OUT_OF_RANGE",false);return;
   }
   const stop=entry-sign*dist,target=entry+sign*signal.targetR*dist;
@@ -512,7 +511,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     be_done:false,micro_banked:false,peak_r:0,pnl:0,realizedPnl:0,totalFees:0,
     entryTime:new Date().toISOString(),entrySignalTime:signal.signalCloseTime,
     entryTiming:extractEntryTiming(),marketRegimeContext:{...extractMarketRegimeContext({rvol:signal.rvol,atr14:signal.atr14,atr20:signal.atr14}),strategy_regime:signal.regime},
-    strategyRevision:ADAPTIVE_STRATEGY_ID,executionMode:"PAPER",timeframe:"1m",
+    strategyRevision:ADAPTIVE_STRATEGY_ID,executionMode:"PAPER",timeframe:"15m",
     phase:signal.phase||"LEGACY_SIGNAL",signalEvidence:signal.evidence||null,
     setupType:signal.setupType,setupLabel:signal.regime+" / "+signal.setupType,grade:"EVIDENCE_CHECKED",
     marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR:signal.targetR,
@@ -530,7 +529,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     whaleData:{scenario:"BINANCE_BIDIRECTIONAL_CLOSED_MTF_TAKER_FLOW_BOOK_REAL_OI"},
     reasoning:{flow:{state:entryTapeShadow.state==="OPPOSED"?"MIXED":"VERIFIED_1M_5M_15M_TAKER_FLOW",
        persistenceState:entryTapeShadow.state==="OPPOSED"?"CONFLICTED":entryTapeShadow.state==="CONFIRMED"?"STRONG":entryTapeShadow.state==="WEAK_OR_NEUTRAL"?"WEAK":"UNKNOWN"},
-       timingGate:{state:"FOLLOW_THROUGH_CONFIRMED"}}
+       timingGate:{state:"FLEX_5M_TIMING"}}
   };
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
   if(institutionalMonitoringEnabled)syncMarketSubscriptions();
@@ -552,7 +551,7 @@ export function mayStageFollowupSignal(previousCloseMs:number|null,nextCloseMs:n
 async function scanEntries(){
   if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
   for(const [symbol,signal] of pendingSignals) {
-    if(Date.now()-signal.signalCloseTime>180_000)pendingSignals.delete(symbol);
+    if(Date.now()-signal.signalCloseTime>300_000)pendingSignals.delete(symbol);
   }
   scanning=true;
   try{
@@ -576,7 +575,17 @@ async function scanEntries(){
       const group=symbols.slice(i,i+SCAN_CONCURRENCY);
       const rows=await Promise.allSettled(group.map(async symbol=>{
         const bars=await fetchClosedOneMinuteBars(symbol);
-        return {symbol,bars,signal:evaluateBidirectionalSignal(bars)};
+        const now=Date.now(),quarter=Math.floor(now/900000)*900000-1;
+        let signal:BidirectionalSignal|null=null;
+        if(now-quarter<=300000&&evaluated15m.get(symbol)!==quarter&&!hasUnderlyingOpen(symbol)&&!isSymbolInCooldown(symbol)){
+          const fifteen=await fetchClosedOneMinuteBars(symbol,"15m");
+          if(fifteen.at(-1)?.closeTime===quarter&&fifteen.length>=21){
+            evaluated15m.set(symbol,quarter);
+            signal=evaluateFlex15m(fifteen,Date.now());
+            if(signal)archive("signal_candidate",symbol,{signal,bars:fifteen,observedAt:Date.now(),stage:"FLEX_CLOSED_15M"},undefined,signal.signalCloseTime);
+          }
+        }
+        return {symbol,bars,signal};
       }));
       for(let j=0;j<rows.length;j++){
         const symbol=group[j],result=rows[j];
@@ -588,36 +597,24 @@ async function scanEntries(){
           const previous=pendingSignals.get(symbol),bars=result.value.bars;
           const last=bars.at(-1),now=Date.now();
           waveRadar.ingestBars(symbol,bars,now);
-          if(previous) {
-            if(now-previous.signalCloseTime>180_000 ||
-              (last && last.closeTime>previous.signalCloseTime+60000)){
-              pendingSignals.delete(symbol);
-              audit(symbol,previous.side,"FOLLOW_THROUGH_EXPIRED",false);
-            }else if(last && last.closeTime>previous.signalCloseTime){
-              pendingSignals.delete(symbol);
-              const follow=confirmNextClosedMinute(previous,bars,now);
-              archive("signal_followthrough",symbol,{signal:previous,bars,follow,
-                observedAt:now,liveWebsocketEnabled},undefined,last?.closeTime);
-              if(follow.allowed) {
-                diagnostics.candidatesConfirmed++;
-                await executeSignal(symbol,previous,bars);
-              } else audit(symbol,previous.side,follow.reason,false);
-            }
-          }
-          // After the previous hypothesis is rejected, expires, or was handled,
-          // do not discard a fresh signal from this newly closed candle.
-          // This NEVER turns a rejection into an automatic opposite trade:
-          // a newly staged signal must pass its own next-minute confirmation.
-          if(result.value.signal &&
-            mayStageFollowupSignal(previous?.signalCloseTime??null,
-              result.value.signal.signalCloseTime,pendingSignals.has(symbol)) &&
-            !hasUnderlyingOpen(symbol) && !isSymbolInCooldown(symbol)){
+          if(result.value.signal&&!hasUnderlyingOpen(symbol)&&!isSymbolInCooldown(symbol)){
             pendingSignals.set(symbol,result.value.signal);
-            archive("signal_candidate",symbol,{signal:result.value.signal,bars,
-              observedAt:now,stage:"WAIT_NEXT_CLOSED_MINUTE"},
-              undefined,result.value.signal.signalCloseTime);
             diagnostics.candidatesStaged++;
-            audit(symbol,result.value.signal.side,"WAIT_NEXT_CLOSED_MINUTE",false);
+            audit(symbol,result.value.signal.side,"FLEX_CLOSED_15M",false);
+          }
+          const candidate=pendingSignals.get(symbol);
+          if(candidate){
+            if(now-candidate.signalCloseTime>300000){pendingSignals.delete(symbol);audit(symbol,candidate.side,"FLEX_SIGNAL_EXPIRED",false);}
+            else if(!entryBlocked()){
+              const timing=flexTiming(candidate,bars,now);
+              if(timing.allowed){
+                pendingSignals.delete(symbol);
+                diagnostics.candidatesConfirmed++;
+                await executeSignal(symbol,candidate,bars);
+              }else if(timing.reason!=="FLEX_5M_MISSING"){
+                pendingSignals.delete(symbol);audit(symbol,candidate.side,timing.reason,false);
+              }
+            }
           }
         } else if(result.status==="rejected") diagnostics.scanErrors++;
       }
@@ -694,6 +691,7 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
     closeFull(t,isProtected?"ADAPTIVE Protected Stop":"ADAPTIVE Stop Loss");
     return;
   }
+  if(t.strategyRevision!==FLEX_REVISION){
   const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
   if(candidate!==null)tightenStop(t,candidate);
   // Apply new regime-specific trailing floors ONLY to V4 paper positions.
@@ -708,6 +706,7 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   const costStop=costAwareProfitLock(t.direction,t.entry,t.initialSlDist,
     t.peak_r||0,feeRate,slippageRate,t.setupType);
   if(costStop!==null)tightenStop(t,costStop);
+  }
   const sign=t.direction==="LONG"?1:-1;
   if(sign*(price-t.sl)<=0){closeFull(t,"ADAPTIVE Protected Stop");return;}
   if(sign*(price-t.entry)>=(t.targetR||3.5)*t.initialSlDist){
@@ -781,7 +780,7 @@ export async function runProtectionCycle(){
                 side:t.direction,price:t.currentPrice,profitR:t.profitR,peakR:t.peak_r,
                 market:t.institutionalContext,warning});
             }
-            if(warning.decision==="EXIT" && !t.exitTime){
+            if(warning.decision==="EXIT" && !t.exitTime && t.strategyRevision!==FLEX_REVISION){
               reversalDiagnostics.earlyExits++;
               closeFull(t,"ADAPTIVE Confirmed Institutional Reversal");
             }

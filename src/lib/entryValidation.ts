@@ -175,11 +175,11 @@ export function confirmBreakoutTakerFlow(
 /** The quote, depth, and historical open interest are independently observed. */
 export function verifyExecutableEntry(
   signal:AdaptiveSignal,rows:StrongFlowBar[],quote:Quote,depth:EntryDepth,oi:EntryOi|null,
-  feeRate:number,slippageRate:number,now=Date.now()
+  feeRate:number,slippageRate:number,now=Date.now(),mode:"LEGACY"|"FLEX15"="LEGACY"
 ):EntryDecision{
-  const follow=confirmNextClosedMinute(signal,rows,now);
+  const follow:EntryDecision=mode==="FLEX15"?{allowed:true,reason:"FLEX_CLOSED_SIGNAL"}:confirmNextClosedMinute(signal,rows,now);
   if(!follow.allowed)return follow;
-  const multi=confirmEntryContext(signal,rows,now);
+  const multi:EntryDecision=mode==="FLEX15"?{allowed:true,reason:"FLEX_TIMING_CHECKED"}:confirmEntryContext(signal,rows,now);
   if(!multi.allowed)return multi;
   if(!validQuote(quote,now)||now-quote.time>3000)return fail("EXECUTION_QUOTE_STALE");
   if(!depth.allowed)return fail(depth.reason);
@@ -196,7 +196,7 @@ export function verifyExecutableEntry(
   const imbalanceFloor=signal.setupType==="RANGE_REVERSION"?0.04:
     signal.setupType==="VOLATILITY_BREAKOUT"?-0.10:
     (signal.setupType==="FAILED_BREAKOUT_REVERSAL"||signal.setupType==="COUNTERTREND_CORRECTION")?-0.25:-0.20;
-  if(sign*depth.imbalance<imbalanceFloor)return fail("ENTRY_OPPOSING_LIQUIDITY");
+  if(sign*depth.imbalance<(mode==="FLEX15"?-.35:imbalanceFloor))return fail("ENTRY_OPPOSING_LIQUIDITY");
   if(!oi)return fail("OPEN_INTEREST_HISTORY_UNAVAILABLE");
   if(now-oi.timestamp>12*60000 || !Number.isFinite(oi.delta))return fail("OPEN_INTEREST_STALE");
   // OI has no LONG/SHORT direction; this vetoes unstable deleveraging, not 'predict' a direction.

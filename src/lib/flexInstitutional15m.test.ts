@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {evaluateFlex15m,flexTiming} from "./flexInstitutional15m.js";
+const Q=900000,M=60000,end=1800000000000;
+const base=Array.from({length:21},(_,i)=>({openTime:end-(21-i)*Q,closeTime:end-(20-i)*Q-1,open:100,close:100,high:100.3,low:99.7,quoteVolume:1000,takerBuyQuote:500}));
+const up=base.map(b=>({...b}));Object.assign(up[20],{close:101,high:101.2,quoteVolume:1300,takerBuyQuote:700});
+const u=evaluateFlex15m(up,end)!;assert(u);assert.equal(u.side,"LONG");assert.equal(u.stopAtr,1.7);assert.equal(u.targetR,3);assert.equal(u.maxHoldMs,180*M);
+const down=base.map(b=>({...b}));Object.assign(down[20],{close:99,low:98.8,quoteVolume:1300,takerBuyQuote:600});assert.equal(evaluateFlex15m(down,end)?.side,"SHORT");
+const weak=up.map(b=>({...b}));weak[20].takerBuyQuote=650;assert.equal(evaluateFlex15m(weak,end),null);
+assert.equal(evaluateFlex15m(up,end+5*M+1),null);assert.equal(evaluateFlex15m(up,end-1),null);
+const correction=base.map((b,i)=>{const px=i<8?96:i<17?104:103;return {...b,open:px,close:px,high:px+.3,low:px-.3};});
+Object.assign(correction[20],{open:103,close:102.5,high:103.1,low:102.4,quoteVolume:1300,takerBuyQuote:600});
+const cs=evaluateFlex15m(correction,end)!;assert(cs);assert.equal(cs.setupType,"COUNTERTREND_CORRECTION");assert.equal(cs.targetR,1.6);assert.equal(cs.stopAtr,1.35);
+const five=Array.from({length:5},(_,i)=>({openTime:end-(5-i)*M,closeTime:end-(4-i)*M-1,open:100,close:100,high:100.3,low:99.7,quoteVolume:100,takerBuyQuote:50}));
+assert(flexTiming(u,five,end).allowed);assert(!flexTiming(u,five.slice(1),end).allowed);
+console.log("15m breakout/collapse/correction, closed timing and risk parameters passed");
