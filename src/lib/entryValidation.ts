@@ -9,6 +9,7 @@ import type { StrongFlowBar } from "./strongFlowStrategy.js";
 import type { AdaptiveSignal, AdaptiveSetup } from "./adaptiveRegimeStrategy.js";
 import { validQuote, type Quote } from "./tradingIntegrity.js";
 import { followThroughExtension } from "./entryExitSafeguards.js";
+import { flexTiming } from "./flexInstitutional15m.js";
 
 type Direction = "LONG" | "SHORT";
 export type EntryDecision = {allowed:boolean;reason:string;details?:Record<string,number|string>};
@@ -179,7 +180,7 @@ export function verifyExecutableEntry(
 ):EntryDecision{
   const follow:EntryDecision=mode==="FLEX15"?{allowed:true,reason:"FLEX_CLOSED_SIGNAL"}:confirmNextClosedMinute(signal,rows,now);
   if(!follow.allowed)return follow;
-  const multi:EntryDecision=mode==="FLEX15"?{allowed:true,reason:"FLEX_TIMING_CHECKED"}:confirmEntryContext(signal,rows,now);
+  const multi:EntryDecision=mode==="FLEX15"?flexTiming(signal,rows,now):confirmEntryContext(signal,rows,now);
   if(!multi.allowed)return multi;
   if(!validQuote(quote,now)||now-quote.time>3000)return fail("EXECUTION_QUOTE_STALE");
   if(!depth.allowed)return fail(depth.reason);

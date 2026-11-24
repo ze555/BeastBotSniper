@@ -10,12 +10,11 @@ import { WaveRadar, scheduleRadarBatch } from "./waveRadar.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { assessOrderBook, adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
-import {evaluateBidirectionalSignal,bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
-import { confirmNextClosedMinute, confirmEntryContext, parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
+import {bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
+import { parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
 import { evaluateReversal } from "./institutionalReversal.js";
 import {persistSnapshot,persistenceStatus,persistReplayEvent,type ReplayKind} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
-import { liveBreakoutEntryDecision } from "./websocketDecision.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 import { FLEX_REVISION, evaluateFlex15m, flexTiming } from "./flexInstitutional15m.js";
 const ADAPTIVE_STRATEGY_ID = FLEX_REVISION;
@@ -222,20 +221,7 @@ export function restoreEngineState(s:any){
   if(typeof s.dayKey==="string")dayKey=s.dayKey;
   if(s.today&&typeof s.today==="object"&&Number.isFinite(s.today.pnl))today={...s.today};
   resetDailyStatsIfNeeded();
-  // One-time migration, including V4 snapshots created before the marker existed.
-  // Rebuild today's V4-only result from version-tagged closed trades, not old daily PnL.
-  if(s.todayRiskStrategyRevision!==ADAPTIVE_STRATEGY_ID && ADAPTIVE_STRATEGY_ID===BIDIRECTIONAL_REVISION as string){
-    const formatter=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Tripoli"});
-    const v4Today=closedTrades.filter(t=>t.strategyRevision===ADAPTIVE_STRATEGY_ID &&
-      typeof t.exitTime==="string" && !Number.isNaN(Date.parse(t.exitTime)) &&
-      formatter.format(new Date(t.exitTime))===dayKey);
-    today={count:v4Today.length,
-      wins:v4Today.filter(t=>Number(t.finalPnl)>0.15).length,
-      losses:v4Today.filter(t=>Number(t.finalPnl)<-0.15).length,
-      pnl:v4Today.reduce((a,t)=>a+(Number(t.finalPnl)||0),0),
-      sumR:v4Today.reduce((a,t)=>a+(Number(t.profitR)||0),0)};
-    addLog("V4 daily risk accounting migrated: legacy losses excluded from new daily risk; cash and ledger unchanged.","success");
-  }
+  // Keep the existing account daily loss ledger across strategy revisions.
   for(const t of activeTrades)registerTradeForDirectionTracking(t);
   addLog("Restored "+activeTrades.length+" open, "+closedTrades.length+
     " recent closed PAPER positions and balance $"+virtualBalance.toFixed(2)+" from durable volume","success");
@@ -442,7 +428,8 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     ||lastSignalTime.get(symbol)===signal.signalCloseTime)return;
   if(Date.now()-signal.signalCloseTime>300_000)return;
   const mtf=flexTiming(signal,bars);
-  if(!mtf.allowed){audit(symbol,signal.side,mtf.reason,false);return;}
+  if(!mtf.allowed||!mtf.details){audit(symbol,signal.side,mtf.reason,false);return;}
+  signal={...signal,flow5:mtf.details.flow5,evidence:{...signal.evidence,flow3:mtf.details.flow3,flow5:mtf.details.flow5}};
   const evidence=await confirmMarketEvidence(symbol,signal.side);
   if(!evidence||entryBlocked()||hasUnderlyingOpen(symbol)||
      Date.now()-signal.signalCloseTime>300_000)return;
@@ -526,8 +513,8 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
       liveWebsocketEntry:{
         enabled:liveWebsocketEnabled,reason:liveEntry.reason,delta:liveEntry.delta
       }},
-    whaleData:{scenario:"BINANCE_BIDIRECTIONAL_CLOSED_MTF_TAKER_FLOW_BOOK_REAL_OI"},
-    reasoning:{flow:{state:entryTapeShadow.state==="OPPOSED"?"MIXED":"VERIFIED_1M_5M_15M_TAKER_FLOW",
+    whaleData:{scenario:"BINANCE_FLEX_15M_5M_TAKER_FLOW_BOOK_REAL_OI"},
+    reasoning:{flow:{state:entryTapeShadow.state==="OPPOSED"?"MIXED":"VERIFIED_5M_15M_TAKER_FLOW",
        persistenceState:entryTapeShadow.state==="OPPOSED"?"CONFLICTED":entryTapeShadow.state==="CONFIRMED"?"STRONG":entryTapeShadow.state==="WEAK_OR_NEUTRAL"?"WEAK":"UNKNOWN"},
        timingGate:{state:"FLEX_5M_TIMING"}}
   };
@@ -566,7 +553,7 @@ async function scanEntries(){
     const regularSet=new Set(batch.symbols);
     // Hot symbols get extra attention, but never displace a symbol in the coverage round.
     const eligible=new Set(watchlist);
-    const symbols=scheduleRadarBatch(batch.symbols,hotWatchlist,[...pendingSignals].filter(([symbol])=>eligible.has(symbol)).map(([symbol,signal])=>({symbol,signalCloseTime:signal.signalCloseTime})),Date.now());
+    const symbols=scheduleRadarBatch(batch.symbols,[...new Set([...pendingSignals.keys(),...hotWatchlist])].filter(s=>eligible.has(s)),[...pendingSignals].filter(([symbol])=>eligible.has(symbol)).map(([symbol,signal])=>({symbol,signalCloseTime:signal.signalCloseTime})),Date.now());
     let attempted=0,succeeded=0,complete=true;
     for(let i=0;i<symbols.length;i+=SCAN_CONCURRENCY) {
       if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil) {
@@ -594,7 +581,7 @@ async function scanEntries(){
           if(result.status==="fulfilled"&&result.value.bars.length>=64){scanPassSucceeded.add(symbol);succeeded++;}
         }
         if(result.status==="fulfilled") {
-          const previous=pendingSignals.get(symbol),bars=result.value.bars;
+          const bars=result.value.bars;
           const last=bars.at(-1),now=Date.now();
           waveRadar.ingestBars(symbol,bars,now);
           if(result.value.signal&&!hasUnderlyingOpen(symbol)&&!isSymbolInCooldown(symbol)){
@@ -808,6 +795,6 @@ export function startEngine(){
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
   persistEngineSnapshot();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; explosion/collapse, countertrend corrections and failed-breakout reversals; conservative OI/depth/fee gates; live Binance WebSocket "+
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; 15m two-hour breakout and three-hour trend correction; fixed SL/TP/time exits; OI/depth/fee gates; live Binance WebSocket "+
     (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
 }

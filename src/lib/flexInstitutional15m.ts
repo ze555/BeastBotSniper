@@ -38,21 +38,21 @@ export function evaluateFlex15m(rows:StrongFlowBar[],now=Date.now()):Bidirection
   // A reversal through the entire two-hour range is treated as a breakout.
   const trend15=b.close/prev.close-1,trend60=b.close/r[r.length-5].close-1;
   return {side,signalOpenTime:b.openTime,signalCloseTime:b.closeTime,signalClose:b.close,
-    atr14,rvol,delta,flow5:delta,flow15:delta,trend15,trend60,
+    atr14,rvol,delta,flow5:NaN,flow15:delta,trend15,trend60,
     setupType:breakout?"VOLATILITY_BREAKOUT":"COUNTERTREND_CORRECTION",
     regime:breakout?"EXPANSION":sg>0?"TREND_DOWN":"TREND_UP",
     phase:breakout?(sg>0?"EXPLOSION_UP":"COLLAPSE_DOWN"):(sg>0?"DOWNTREND_CORRECTION_LONG":"UPTREND_CORRECTION_SHORT"),
     stopAtr:breakout?1.7:1.35,targetR:breakout?3:1.6,maxHoldMs:(breakout?180:90)*M,
-    evidence:{closeQuality:sg>0?(b.close-b.low)/width:(b.high-b.close)/width,flow3:delta,flow5:delta,flow15:delta,trend15,trend60,rvol,priorImpulsePct:oldTrend,
+    evidence:{closeQuality:sg>0?(b.close-b.low)/width:(b.high-b.close)/width,flow3:NaN,flow5:NaN,flow15:delta,trend15,trend60,rvol,priorImpulsePct:oldTrend,
       reason:breakout?"CLOSED_15M_TWO_HOUR_BREAK":"CLOSED_15M_THREE_HOUR_CORRECTION"}};
 }
 /** Most recent fully closed, aligned five-minute block. Only strong simultaneous
  * adverse price and flow is a veto; a small pullback does not block entry. */
-export function flexTiming(signal:BidirectionalSignal,rows:StrongFlowBar[],now=Date.now()){
+export function flexTiming(signal:Pick<BidirectionalSignal,"side"|"signalCloseTime">,rows:StrongFlowBar[],now=Date.now()){
   const end=Math.floor(now/(5*M))*5*M;
   const five=rows.filter(b=>b.openTime>=end-5*M&&b.openTime<end);
   if(five.length!==5||!valid(five,M,now)||five[0].openTime!==end-5*M||five[4].closeTime!==end-1||five[4].closeTime<signal.signalCloseTime)return {allowed:false,reason:"FLEX_5M_MISSING"};
   const sg=signal.side==="LONG"?1:-1,d=flow(five),ret=five[4].close/five[0].open-1;
   if(sg*d<-.15&&sg*ret<-.002)return {allowed:false,reason:"FLEX_5M_STRONG_CONFLICT"};
-  return {allowed:true,reason:"FLEX_5M_TIMING"};
+  return {allowed:true,reason:"FLEX_5M_TIMING",details:{flow5:d,flow3:flow(five.slice(-3)),return5m:ret}};
 }
