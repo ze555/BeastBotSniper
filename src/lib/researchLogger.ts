@@ -444,6 +444,16 @@ export function classifyEntryQuality(trade: any): EntryQualityType {
    if (trade.score < 7.0 || timingGate?.state === "WAITING_FOR_CONFIRMATION") {
       return "WEAK_CONFIRMATION";
    }
+   // V4 has no legacy numeric score. Classify the recorded entry evidence,
+   // not the later outcome, and never call missing live tape GOOD_ENTRY.
+   const tape = trade.priceData?.entryTapeShadow;
+   if (tape?.revision === "TAPE_SHADOW_V1") {
+      if (tape.state === "OPPOSED") return "CONFLICTED_FLOW";
+      if (tape.state === "WEAK_OR_NEUTRAL") return "WEAK_CONFIRMATION";
+      if (tape.state === "CONFIRMED") return "GOOD_ENTRY";
+      return "UNKNOWN";
+   }
+   if (trade.strategyRevision === "BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER" && !Number.isFinite(trade.score)) return "UNKNOWN";
    return "GOOD_ENTRY";
 }
 
