@@ -88,6 +88,11 @@ async function startServer() {
   app.get("/api/paper/runs",async(req,res)=>{
     try{res.json({runs:await listPaperRuns(Number(req.query.limit)||50,Number(req.query.offset)||0)});}catch(e:any){res.status(500).json({error:String(e?.message||e)});}
   });
+  app.get("/api/paper/runs/:id/trades",async(req,res)=>{
+    try{const run=await getPaperRun(req.params.id);if(!run)return res.status(404).json({error:"Run not found"});
+      res.json(await replayEvents({kind:"paper_trade_close",afterId:Math.max(Number(run.replayStartId)||0,Number(req.query.afterId)||0),throughId:Number(run.replayEndId)||0,limit:Number(req.query.limit)||100}));
+    }catch(e:any){res.status(500).json({error:String(e?.message||e)});}
+  });
   app.get("/api/paper/runs/:id",async(req,res)=>{
     try{const run=await getPaperRun(req.params.id);if(!run)return res.status(404).json({error:"Run not found"});res.json(run);}catch(e:any){res.status(500).json({error:String(e?.message||e)});}
   });

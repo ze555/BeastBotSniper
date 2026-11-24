@@ -157,13 +157,14 @@ export function persistReplayEvent(kind:ReplayKind,input:ReplayEventInput):void{
   });
 }
 export interface ReplayQuery{
- kind?:ReplayKind;symbol?:string;tradeId?:string;afterId?:number;
+ kind?:ReplayKind;symbol?:string;tradeId?:string;afterId?:number;throughId?:number;
  limit?:number;beforeMs?:number;afterMs?:number;
 }
 export async function replayEvents(query:ReplayQuery={}){
   if(!database)return {events:[],nextCursor:null,hasMore:false};
   if(query.kind&&!supportedReplayKinds.has(query.kind))throw Error("Unknown replay kind");
   const where=["id>?"],parameters:unknown[]=[Math.max(0,Math.floor(query.afterId||0))];
+  if(Number.isFinite(query.throughId)){where.push("id<=?");parameters.push(query.throughId!);}
   if(query.kind){where.push("kind=?");parameters.push(query.kind);}
   if(query.symbol){where.push("symbol=?");parameters.push(query.symbol);}
   if(query.tradeId){where.push("trade_id=?");parameters.push(query.tradeId);}
@@ -199,18 +200,23 @@ export async function replayCoverage(){
  * existing writes. If this fails the old account stays intact. */
 export async function rotatePaperRun(oldState:any,newState:any){
   if(!database)throw Error("Durable storage required for archive/reset");
-  const oldPayload=JSON.stringify(oldState),newPayload=JSON.stringify(newState);
+  const newCopy=structuredClone(newState),oldCopy=structuredClone(oldState);
   const at=new Date().toISOString(),id=String(oldState.runId||"legacy-before-paper-runs");
   const work=writeQueue.then(async()=>{
     await sqlRun("BEGIN IMMEDIATE");
     try{
-      await sqlRun("INSERT INTO paper_runs(id,archived_at,payload) VALUES(?,?,?)",[id,at,oldPayload]);
-      await sqlRun("INSERT INTO state(key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",[stateKey,newPayload,at]);
+      const replay=await sqlGet<{n:number}>("SELECT COALESCE(MAX(id),0) AS n FROM replay_events");
+      const events=await sqlGet<{n:number}>("SELECT COALESCE(MAX(id),0) AS n FROM events");
+      oldCopy.replayEndId=replay?.n||0;oldCopy.eventEndId=events?.n||0;
+      newCopy.replayStartId=oldCopy.replayEndId;newCopy.eventStartId=oldCopy.eventEndId;
+      await sqlRun("INSERT INTO paper_runs(id,archived_at,payload) VALUES(?,?,?)",[id,at,JSON.stringify(oldCopy)]);
+      await sqlRun("INSERT INTO state(key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",[stateKey,JSON.stringify(newCopy),at]);
       await sqlRun("COMMIT");lastSaveAt=at;
     }catch(e){await sqlRun("ROLLBACK").catch(()=>{});throw e;}
   });
   writeQueue=work.catch(e=>{lastError=String(e?.message||e);});
   await work;
+  return {replayStartId:newCopy.replayStartId,eventStartId:newCopy.eventStartId};
 }
 export async function listPaperRuns(limit=50,offset=0){
   if(!database)return [];

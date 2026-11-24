@@ -3,7 +3,7 @@ import { RefreshCw, Activity, Target, TrendingUp, Swords, Play, Square, Terminal
 
 const entryBlockDescriptions: Record<string,string> = {
   BOT_PAUSED:'المحرك متوقف',OUTSIDE_TRADING_HOURS:'خارج وقت التداول',
-  INVALID_ACCOUNT_BALANCE:'رصيد الحساب غير صالح',MAX_CONCURRENT_TRADES:'بلوغ الحد الأقصى للصفقات',
+  PAPER_ARCHIVE_PENDING:'انتظار أرشفة دورة PAPER',INVALID_ACCOUNT_BALANCE:'رصيد الحساب غير صالح',MAX_CONCURRENT_TRADES:'بلوغ الحد الأقصى للصفقات',
   DAILY_LOSS_LIMIT:'بلوغ حد خسارة الحساب اليومي',ACCOUNT_PROFIT_HALT:'إيقاف الربح التراكمي مفعل',
   ACCOUNT_LOSS_HALT:'إيقاف الخسارة التراكمية مفعل',
   INSUFFICIENT_RISK_BUDGET:'ميزانية المخاطرة المتاحة أقل من الحد المطلوب للدخول'
@@ -610,7 +610,7 @@ export const PredatorDashboard: React.FC = () => {
              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
                 <h2 className="text-white font-bold">أرشيف دورات PAPER السابقة</h2>
                 <button onClick={loadArchivedRuns} className="bg-slate-700 rounded px-3 py-2 text-white">عرض الدورات المؤرشفة</button>
-                {archivedRuns.map(run=><div key={run.id} className="flex flex-wrap gap-3 items-center text-sm text-slate-300 border-t border-slate-700 pt-2"><span>{new Date(run.archivedAt).toLocaleString()}</span><span dir="ltr">PnL ${Number(run.netPnl).toFixed(2)}</span><span>{run.retainedTrades} صفقة محفوظة في لقطة الحساب</span><a className="text-blue-400" href={'/api/paper/runs/'+encodeURIComponent(run.id)} target="_blank" rel="noreferrer">فتح السجل</a></div>)}
+                {archivedRuns.map(run=><div key={run.id} className="flex flex-wrap gap-3 items-center text-sm text-slate-300 border-t border-slate-700 pt-2"><span>{new Date(run.archivedAt).toLocaleString()}</span><span dir="ltr">PnL ${Number(run.netPnl).toFixed(2)}</span><span>{run.retainedTrades} صفقة محفوظة في لقطة الحساب</span><a className="text-blue-400" href={'/api/paper/runs/'+encodeURIComponent(run.id)} target="_blank" rel="noreferrer">فتح السجل</a><a className="text-blue-400" href={'/api/paper/runs/'+encodeURIComponent(run.id)+'/trades'} target="_blank" rel="noreferrer">جميع الصفقات المسجلة (صفحات)</a></div>)}
                 <a className="block text-blue-400 text-sm" href="/api/research/archive?type=trading_decisions" target="_blank" rel="noreferrer">السجل التاريخي الكامل (صفحات)</a>
              </div>
              {/* Closed Trades History */}

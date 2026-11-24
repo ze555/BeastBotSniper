@@ -87,6 +87,8 @@ assert.equal((await listPaperRuns()).length,1);
 assert.equal((await getPaperRun("test-old"))?.closedTrades[0].finalPnl,3.25);
 assert.equal((await restoreSnapshot())?.runId,"test-new");
 assert.equal((await restoreSnapshot())?.closedTrades.length,0);
+assert.equal((await restoreSnapshot())?.replayStartId,6);
+assert.equal((await replayEvents({kind:"paper_trade_close",throughId:(await getPaperRun("test-old"))?.replayEndId})).events.length,1);
 await assert.rejects(()=>rotatePaperRun(old,{...fresh,balance:1}));
 assert.equal((await restoreSnapshot())?.balance,1000,"duplicate archive rolls back state");
 await closePersistence();

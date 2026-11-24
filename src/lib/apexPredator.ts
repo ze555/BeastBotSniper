@@ -68,6 +68,7 @@ let initialVirtualBalance = 1000;
 let runId:string|null=null,runStartedAt:string|null=null,runRevision:string=ADAPTIVE_STRATEGY_ID;
 const buildId=process.env.RAILWAY_GIT_COMMIT_SHA||ADAPTIVE_STRATEGY_ID;
 let runBuildId=buildId,archiveOnUpdate=true,rolloverPending=false,rolling=false;
+let replayStartId=0,eventStartId=0;
 let rolloverError:string|null=null;
 let runTotals={count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0};
 let maxOpenTrades = STRONG_FLOW_MAX_CONCURRENT;
@@ -184,7 +185,7 @@ function entryBlocked(){return !entryReadiness().canOpenTrade;}
 export function engineStateSnapshot(){
   return {schemaVersion:1,revision:ADAPTIVE_STRATEGY_ID,savedAt:new Date().toISOString(),
     active,virtualBalance,initialVirtualBalance,balance:virtualBalance,
-    runId,runStartedAt,runRevision,runBuildId,archiveOnUpdate,rolloverPending,runTotals:{...runTotals},
+    runId,runStartedAt,runRevision,runBuildId,archiveOnUpdate,rolloverPending,replayStartId,eventStartId,runTotals:{...runTotals},
     maxOpenTrades,scanBatchSize,feeRate,slippageRate,liveWebsocketEnabled,
     tradingSchedule:{...tradingSchedule},haltProfitEnabled,haltProfitTarget,
     haltLossEnabled,haltLossTarget,dayKey,today:{...today},
@@ -205,6 +206,7 @@ export function restoreEngineState(s:any){
   runId=typeof s.runId==="string"?s.runId:null;runStartedAt=s.runStartedAt||null;
   runRevision=s.runRevision||s.revision||ADAPTIVE_STRATEGY_ID;runBuildId=s.runBuildId||runRevision;
   archiveOnUpdate=s.archiveOnUpdate!==false;rolloverPending=s.rolloverPending===true;
+  replayStartId=Number(s.replayStartId)||0;eventStartId=Number(s.eventStartId)||0;
   runTotals=s.runTotals?{...s.runTotals}:{count:s.closedTrades.length,wins:s.closedTrades.filter((t:any)=>t.finalPnl>0).length,losses:s.closedTrades.filter((t:any)=>t.finalPnl<0).length,breakeven:s.closedTrades.filter((t:any)=>t.finalPnl===0).length,fees:s.closedTrades.reduce((n:number,t:any)=>n+(Number(t.totalFees)||0),0),pnl:s.virtualBalance-s.initialVirtualBalance};
   setResearchRun(runId);
   active=typeof s.active==="boolean"?s.active:true;
@@ -255,9 +257,9 @@ export function getStats(){
     strategyPerformance:(()=>{
       const v4=closedTrades.filter(t=>t.strategyRevision===ADAPTIVE_STRATEGY_ID);
       const legacy=closedTrades.filter(t=>t.strategyRevision!==ADAPTIVE_STRATEGY_ID);
-      return {v4ClosedCount:v4.length,v4ClosedPnl:v4.reduce((s,t)=>s+(Number(t.finalPnl)||0),0),
+      return {v4ClosedCount:runId?runTotals.count:v4.length,v4ClosedPnl:runId?runTotals.pnl:v4.reduce((s,t)=>s+(Number(t.finalPnl)||0),0),
         legacyClosedCount:legacy.length,legacyClosedPnl:legacy.reduce((s,t)=>s+(Number(t.finalPnl)||0),0),
-        note:"Retained trade ledger only; cash balance includes all trade history."};
+        note:"Current PAPER run only; previous runs are excluded from balance and counters."};
     })(),
     rules:{signalFamilies:["EXPLOSION_UP","COLLAPSE_DOWN","UPTREND_CORRECTION_SHORT","DOWNTREND_CORRECTION_LONG"],
       uniqueUnderlyingExposure:true,existingRiskLimitUnchanged:true},
@@ -369,8 +371,8 @@ async function completePaperRollover(){
       lastSignalTime:[],pendingSignals:[],cooldownUntil:[],
       diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
       reversalDiagnostics:{observations:0,warnings:0,earlyExits:0,incomplete:0}};
-    await rotatePaperRun(old,fresh);
-    restoreEngineState(fresh);evaluated15m.clear();
+    const boundaries=await rotatePaperRun(old,fresh);
+    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();
     addLog("Archived previous PAPER run; started "+id+" at $"+initialVirtualBalance,"success");
     if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   }catch(e:any){rolloverError=String(e?.message||e);addLog("Archive/reset failed; old account preserved: "+rolloverError,"error");}
