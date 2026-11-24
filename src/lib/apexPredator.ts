@@ -8,7 +8,7 @@ import axios from "axios";
 import crypto from "node:crypto";
 import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { WaveRadar, scheduleRadarBatch } from "./waveRadar.js";
-import { fetchExecutionQuote } from "./executionQuotes.js";
+import { fetchExecutionQuote, syncExecutionQuoteSymbols, executionQuoteHealth } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { assessOrderBook, adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
 import {bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
@@ -55,7 +55,9 @@ function desiredMarketSymbols(){
   return [...new Set([...activeSymbols,...candidates])].slice(0,40);
 }
 function syncMarketSubscriptions(){
-  syncInstitutionalSymbols(desiredMarketSymbols(),liveWebsocketEnabled);
+  const symbols=desiredMarketSymbols();
+  syncInstitutionalSymbols(symbols,liveWebsocketEnabled);
+  syncExecutionQuoteSymbols([...new Set([...activeTrades.map(t=>String(t.symbol)),...symbols,...hotWatchlist])].slice(0,40));
 }
 const reversalDiagnostics={observations:0,warnings:0,earlyExits:0,incomplete:0};
 let active = true; // PAPER-only auto-start after deployment
@@ -264,6 +266,7 @@ export function getStats(){
     rules:{signalFamilies:["EXPLOSION_UP","COLLAPSE_DOWN","UPTREND_CORRECTION_SHORT","DOWNTREND_CORRECTION_LONG"],
       uniqueUnderlyingExposure:true,existingRiskLimitUnchanged:true},
     diagnostics,pendingCandidates:pendingSignals.size,
+    executionQuotes:executionQuoteHealth(),
     institutionalMonitor:{...institutionalHealth(),...reversalDiagnostics,enabled:liveWebsocketEnabled},
     balance:virtualBalance,initialBalance:initialVirtualBalance,
     maxOpenTrades,feeRate,slippageRate,scanBatchSize,liveWebsocketEnabled,
@@ -488,7 +491,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
      Date.now()-signal.signalCloseTime>300_000)return;
   // Fetch LAST so the executable quote is younger than the depth and OI reads.
   let quote;
-  try{quote=await fetchExecutionQuote(symbol);}
+  try{quote=await fetchExecutionQuote(symbol,3000);}
   catch(e:any){
     diagnostics.quoteErrors++;
     const reason=String(e?.message||"QUOTE_UNAVAILABLE").slice(0,160);
