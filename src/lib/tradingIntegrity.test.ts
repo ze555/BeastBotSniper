@@ -5,10 +5,11 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {closedCandles,validQuote,waveEvidence} from "./tradingIntegrity.js";
 import {ADAPTIVE_STRATEGY_ID} from "./adaptiveRegimeStrategy.js";
+import {FLEX_REVISION} from "./flexInstitutional15m.js";
 process.env.BEAST_RESEARCH_DIR=mkdtempSync(join(tmpdir(),"beast-fixed2-test-"));
 const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState,restoreEngineState,engineStateSnapshot,mayStageFollowupSignal}=await import("./apexPredator.js");
-assert.equal(getStats().strategyMode,"BIDIRECTIONAL_REGIME_REVERSAL_V4");
-assert.equal(getStats().strategyRevision,"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER");
+assert.equal(getStats().strategyMode,"FLEX_INSTITUTIONAL_15M");
+assert.equal(getStats().strategyRevision,FLEX_REVISION);
 assert.equal(getStats().legacyEnginesEnabled,false);
 assert.equal(getStats().executionMode,"PAPER");
 // Signal replacement never flips directly: it stages ONLY a later independent signal.
@@ -18,7 +19,7 @@ assert.equal(mayStageFollowupSignal(1000,1000,false),false,"same candle must not
 assert.equal(mayStageFollowupSignal(1000,900,false),false,"stale signal must not replay");
 assert.equal(mayStageFollowupSignal(1000,1060,true),false,"pending signal must keep its slot");
 assert.equal(mayStageFollowupSignal(null,null,false),false,"no candidate means no entry");
-// V4 deployment must never reinterpret historical V3 losses as new V4 daily risk.
+// New strategy revision must not erase account daily losses or historical ledger.
 const originalState=structuredClone(engineStateSnapshot());
 const oldTrade={symbol:"OLDUSDT",strategyRevision:"ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK",
   finalPnl:-38.17589132191527,profitR:-10,exitTime:new Date().toISOString()};
@@ -28,18 +29,18 @@ const priorState={...originalState,virtualBalance:961.3241086780848,
   closedTrades:[oldTrade,v4Trade],today:{count:2,wins:0,losses:2,pnl:-38.67589132191527,sumR:-10.2}} as any;
 delete priorState.todayRiskStrategyRevision; // simulated pre-fix Railway snapshot.
 restoreEngineState(priorState);
-assert.equal(getStats().today.count,1,"migrate current-revision daily trade count only");
-assert.equal(getStats().today.pnl,-0.5,"legacy PnL excluded from new daily risk");
+assert.equal(getStats().today.count,2,"preserve account daily count");
+assert.equal(getStats().today.pnl,priorState.today.pnl,"preserve existing daily loss cap");
 assert.equal(getStats().balance,priorState.virtualBalance,"account cash must not reset");
 assert.equal(getClosedTrades().length,2,"legacy ledger preserved");
-assert.equal(getStats().strategyPerformance.legacyClosedCount,1);
-assert.equal(getStats().strategyPerformance.v4ClosedCount,1);
-assert.equal(getStats().entryReadiness.dailyRiskBudget,39.5,"daily risk budget reflects V4 only");
-assert.equal(getStats().entryReadiness.canOpenTrade,true,"valid V4 signal no longer blocked by old V3 loss");
+assert.equal(getStats().strategyPerformance.legacyClosedCount,2);
+assert.equal(getStats().strategyPerformance.v4ClosedCount,0);
+assert(Math.abs(getStats().entryReadiness.dailyRiskBudget-(40+priorState.today.pnl))<1e-8,"daily risk budget reflects all account losses");
+assert.equal(getStats().entryReadiness.canOpenTrade,false,"strategy change must not bypass account loss cap");
 const restored=engineStateSnapshot();
-assert.equal(restored.todayRiskStrategyRevision,"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER");
+assert.equal(restored.todayRiskStrategyRevision,FLEX_REVISION);
 restoreEngineState(restored);
-assert.equal(getStats().today.pnl,-0.5,"migration idempotent after restart");
+assert.equal(getStats().today.pnl,priorState.today.pnl,"daily accounting idempotent after restart");
 const riskLocked={...restored,today:{...restored.today,pnl:-39}} as any;
 restoreEngineState(riskLocked);
 assert.equal(getStats().entryReadiness.canOpenTrade,false);
@@ -121,6 +122,17 @@ for(const side of ["LONG","SHORT"] as const){
   assert(!getTrades().includes(t),"protective stop closes instead of giving back to loss");
   assert(t.finalPnl>0,"profit lock pays net fees on a timely observed quote");
   assert.equal(t.exitReason,"ADAPTIVE Protected Stop");
+}
+// New FLEX positions use the research fixed exits, while legacy positions retain trailing.
+for(const side of ["LONG","SHORT"] as const){
+  const sign=side==="LONG"?1:-1,t:any=mk("FLEX"+side+"USDT",side);
+  t.strategyRevision=FLEX_REVISION;t.targetR=3;t.setupType="VOLATILITY_BREAKOUT";
+  getTrades().push(t);
+  protectTradeAtPrice(t,100+sign*20,Date.now());
+  assert.equal(t.sl,100-sign*10,"FLEX 2R does not change original stop");
+  assert(getTrades().includes(t));
+  protectTradeAtPrice(t,100+sign*30,Date.now());
+  assert(!getTrades().includes(t));assert.equal(t.exitReason,"ADAPTIVE Regime Target");
 }
 const loss:any=mk("NEWLOSSUSDT","LONG");
 getTrades().push(loss);

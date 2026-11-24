@@ -229,7 +229,7 @@ export function restoreEngineState(s:any){
 export function getStats(){
   return {persistence:persistenceStatus(),
     strategyRevision:ADAPTIVE_STRATEGY_ID,
-    strategyMode:"BIDIRECTIONAL_REGIME_REVERSAL_V4",
+    strategyMode:"FLEX_INSTITUTIONAL_15M",
     executionMode:"PAPER",
     legacyEnginesEnabled:false,
     totalEvaluations:audits.length,
@@ -245,9 +245,7 @@ export function getStats(){
         legacyClosedCount:legacy.length,legacyClosedPnl:legacy.reduce((s,t)=>s+(Number(t.finalPnl)||0),0),
         note:"Retained trade ledger only; cash balance includes all trade history."};
     })(),
-    rules:{signalFamilies:["EXPLOSION_UP","COLLAPSE_DOWN","TREND_UP_CONTINUATION",
-      "TREND_DOWN_CONTINUATION","UPTREND_CORRECTION_SHORT","DOWNTREND_CORRECTION_LONG",
-      "FAILED_UP_BREAKOUT_SHORT","FAILED_DOWN_BREAKOUT_LONG","RANGE_LONG","RANGE_SHORT"],
+    rules:{signalFamilies:["EXPLOSION_UP","COLLAPSE_DOWN","UPTREND_CORRECTION_SHORT","DOWNTREND_CORRECTION_LONG"],
       uniqueUnderlyingExposure:true,existingRiskLimitUnchanged:true},
     diagnostics,pendingCandidates:pendingSignals.size,
     institutionalMonitor:{...institutionalHealth(),...reversalDiagnostics,enabled:liveWebsocketEnabled},
@@ -276,8 +274,8 @@ export function getStats(){
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
     strategySettings:{tradingSchedule:{...tradingSchedule},liveWebsocketEnabled,
-      timeframe:"1m closed + confirmed 5m/15m with bidirectional regime classification",
-      stopAtr:"setup-dependent",targetR:"setup-dependent",
+      timeframe:"15m closed + 5m execution timing",
+      stopAtr:"breakout 1.7 / correction 1.35",targetR:"breakout 3 / correction 1.6",
       riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
