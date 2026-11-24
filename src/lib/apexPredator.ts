@@ -452,11 +452,29 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     audit(symbol,signal.side,gate.reason,false);return;
   }
   const liveAgg=liveWebsocketEnabled?institutionalSnapshot(symbol).agg:null;
+  // Non-blocking prospective comparison: record the actual executed tape for
+  // EVERY setup. Missing or stale evidence is not interpreted as neutral.
+  const tapeNow=Date.now();
+  const tapeValid=liveWebsocketEnabled&&!!liveAgg&&liveAgg.complete&&
+    Number.isFinite(liveAgg.delta)&&Math.abs(liveAgg.delta)<=1&&
+    Number.isFinite(liveAgg.asOf)&&liveAgg.asOf<=tapeNow+1000&&
+    tapeNow-liveAgg.asOf<=12000&&Number.isFinite(liveAgg.notional)&&
+    liveAgg.notional>=350&&Number.isFinite(liveAgg.count)&&liveAgg.count>=5;
+  const alignedTape=tapeValid&&liveAgg?(signal.side==="LONG"?1:-1)*liveAgg.delta:null;
+  const entryTapeShadow={
+    revision:"TAPE_SHADOW_V1",state:!liveWebsocketEnabled?"DISABLED":
+      alignedTape===null?"UNAVAILABLE":alignedTape<-.12?"OPPOSED":
+      alignedTape>=.10?"CONFIRMED":"WEAK_OR_NEUTRAL",
+    alignedDelta:alignedTape,observedDelta:tapeValid&&liveAgg?liveAgg.delta:null,
+    observedAt:tapeNow,sourceAt:liveAgg?.asOf??null,
+    notional:liveAgg?.notional??null,count:liveAgg?.count??null,
+    wouldConfirm:alignedTape===null?null:alignedTape>=.10
+  };
   const liveEntry=liveBreakoutEntryDecision(
     liveWebsocketEnabled,signal.setupType,signal.side,liveAgg
   );
   archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
-    depth:evidence.depth,oi:evidence.oi,gate,liveAgg,liveEntry,liveWebsocketEnabled,
+    depth:evidence.depth,oi:evidence.oi,gate,liveAgg,liveEntry,entryTapeShadow,liveWebsocketEnabled,
     feeRate,slippageRate,decision:liveEntry.allowed?"LIVE_GATE_PASS":"LIVE_GATE_REJECTED"});
   if(!liveEntry.allowed){audit(symbol,signal.side,liveEntry.reason,false);return;}
   if(entryBlocked() || hasUnderlyingOpen(symbol) || isSymbolInCooldown(symbol))return;
@@ -495,11 +513,14 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
       bookImbalance:evidence.depth.imbalance,bookSpread:evidence.depth.spread,
       depthNotional:evidence.depth.depthNotional,openInterestDelta:evidence.oi.delta,
       entryEvidence:gate.details,followThroughExtensionAtr:gate.details?.followThroughExtensionAtr,
+       entryTapeShadow,
       liveWebsocketEntry:{
         enabled:liveWebsocketEnabled,reason:liveEntry.reason,delta:liveEntry.delta
       }},
     whaleData:{scenario:"BINANCE_BIDIRECTIONAL_CLOSED_MTF_TAKER_FLOW_BOOK_REAL_OI"},
-    reasoning:{flow:{state:"VERIFIED_1M_5M_15M_TAKER_FLOW"},timingGate:{state:"FOLLOW_THROUGH_CONFIRMED"}}
+    reasoning:{flow:{state:entryTapeShadow.state==="OPPOSED"?"MIXED":"VERIFIED_1M_5M_15M_TAKER_FLOW",
+       persistenceState:entryTapeShadow.state==="OPPOSED"?"CONFLICTED":entryTapeShadow.state==="CONFIRMED"?"STRONG":entryTapeShadow.state==="WEAK_OR_NEUTRAL"?"WEAK":"UNKNOWN"},
+       timingGate:{state:"FOLLOW_THROUGH_CONFIRMED"}}
   };
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
   if(institutionalMonitoringEnabled)syncMarketSubscriptions();
