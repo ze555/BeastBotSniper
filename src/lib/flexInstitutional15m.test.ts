@@ -7,7 +7,7 @@ const u=evaluateFlex15m(up,end)!;assert(u);assert.equal(u.side,"LONG");assert.eq
 const down=base.map(b=>({...b}));Object.assign(down[20],{close:99,low:98.8,quoteVolume:1300,takerBuyQuote:600});assert.equal(evaluateFlex15m(down,end)?.side,"SHORT");
 const weak=up.map(b=>({...b}));weak[20].takerBuyQuote=650;assert.equal(evaluateFlex15m(weak,end),null);
 assert.equal(evaluateFlex15m(up,end+5*M+1),null);assert.equal(evaluateFlex15m(up,end-1),null);
-const correction=base.map((b,i)=>{const px=i<8?96:i<17?104:103;return {...b,open:px,close:px,high:px+.3,low:px-.3};});
+const correction=base.map((b,i)=>{const px=i<8?96:i===13?101:i<17?104:103;return {...b,open:px,close:px,high:px+.3,low:px-.3};});
 Object.assign(correction[20],{open:103,close:102.5,high:103.1,low:102.4,quoteVolume:1300,takerBuyQuote:600});
 const cs=evaluateFlex15m(correction,end)!;assert(cs);assert.equal(cs.setupType,"COUNTERTREND_CORRECTION");assert.equal(cs.targetR,1.6);assert.equal(cs.stopAtr,1.35);
 const five=Array.from({length:5},(_,i)=>({openTime:end-(5-i)*M,closeTime:end-(4-i)*M-1,open:100,close:100,high:100.3,low:99.7,quoteVolume:100,takerBuyQuote:50}));
