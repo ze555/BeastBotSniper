@@ -359,7 +359,7 @@ export const PredatorDashboard: React.FC = () => {
              <strong className={stats.entryReadiness.canOpenTrade ? 'text-emerald-400 text-sm' : 'text-amber-400 text-sm'}>
                {stats.entryReadiness.canOpenTrade ? 'بوابة الدخول متاحة — بعد استيفاء شروط السوق' : 'بوابة الدخول محظورة'}
              </strong>
-             <span className="text-xs text-slate-400 font-mono" dir="ltr">FLEX 15m PAPER · 4% daily limit</span>
+             <span className="text-xs text-slate-400 font-mono" dir="ltr">FLEX Direction V2 PAPER · 1.2R TP · 4% daily limit</span>
            </div>
            {!stats.entryReadiness.canOpenTrade && (
              <p className="text-sm text-amber-200">
@@ -412,7 +412,7 @@ export const PredatorDashboard: React.FC = () => {
                    <SettingsIcon className="w-5 h-5 text-blue-400"/> إعدادات المحرك الجديد فقط
                 </h2>
                 <p className="text-sm text-slate-300 leading-relaxed">
-                   محرك FLEX 15m: اختراق نطاق ساعتين أو تصحيح اتجاه ثلاث ساعات، وتوقيت 5m، مع التحقق من دفتر الأوامر وOI وتكاليف التنفيذ.
+                   محرك FLEX Direction V2: اختراق أو تصحيح مؤكد بسعر التنفيذ، هدف 1.2R، مع التحقق من دفتر الأوامر وOI وتكاليف التنفيذ.
                    يتم رفض الدخول في حال ضعف السيولة أو ارتفاع التكلفة أو تغير الاتجاه. المخاطرة المستهدفة 0.35% لكل صفقة PAPER.
                    التداول الافتراضي طوال اليوم، ولا توجد ضمانة للربحية قبل اختبارات مستقلة.
                 </p>

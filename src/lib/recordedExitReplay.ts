@@ -42,5 +42,5 @@ export function replayRecordedExits(t:any,quotes:RecordedQuote[],fee:number,slip
    peak=Math.max(peak,r);
  }
  maxGap=Math.max(maxGap,end-last);
- return {baseline,peak,samples:valid.length,maxGapMs:maxGap,policies:Object.fromEntries(states.map(st=>[st.policy.id,st.result||{pnl:baseline,at:end,reason:"ORIGINAL_CLOSE"}]))};
+ return {baseline,peak,samples:valid.length,maxGapMs:maxGap,firstGapMs:valid[0].at-start,lastGapMs:end-last,policies:Object.fromEntries(states.map(st=>[st.policy.id,st.result||{pnl:baseline,at:end,reason:"ORIGINAL_CLOSE"}]))};
 }

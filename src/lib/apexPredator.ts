@@ -18,7 +18,7 @@ import {persistSnapshot,persistenceStatus,persistReplayEvent,rotatePaperRun,type
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 import { FLEX_REVISION, evaluateFlex15m, flexTiming } from "./flexInstitutional15m.js";
-import {DIRECTION_REVISION,directionConfirmation,retryDirection} from "./directionConfirmation.js";
+import {DIRECTION_REVISION,DIRECTION_TARGET_R,directionExitPlan,directionConfirmation,retryDirection} from "./directionConfirmation.js";
 const ADAPTIVE_STRATEGY_ID = DIRECTION_REVISION;
 // Passive, time-stamped evidence storage. Never feeds values back into decisions.
 function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
@@ -296,7 +296,7 @@ export function getStats(){
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
     strategySettings:{tradingSchedule:{...tradingSchedule},liveWebsocketEnabled,
       timeframe:"15m closed + 5m timing + executable price direction confirmation",
-      stopAtr:"breakout 1.7 / correction 1.35",targetR:"breakout 3 / correction 1.6",
+      stopAtr:"breakout 1.7 / correction 1.35",targetR:DIRECTION_TARGET_R,
       riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
@@ -541,7 +541,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
   if(!(entry>0&&dist>0&&dist/entry>0&&dist/entry<=0.04)){
     audit(symbol,signal.side,"STOP_DISTANCE_OUT_OF_RANGE",false);return;
   }
-  const stop=entry-sign*dist,target=entry+sign*signal.targetR*dist;
+  const {stop,target,targetR}=directionExitPlan(entry,dist,signal.side);
   if(!(stop>0&&target>0))return;
   const riskBudget=dailyRiskRemaining();
   const dollars=Math.min(virtualBalance*ADAPTIVE_RISK_FRACTION,riskBudget);
@@ -562,7 +562,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     strategyRevision:ADAPTIVE_STRATEGY_ID,executionMode:"PAPER",timeframe:"15m",
     phase:signal.phase||"LEGACY_SIGNAL",signalEvidence:signal.evidence||null,
     setupType:signal.setupType,setupLabel:signal.regime+" / "+signal.setupType,grade:"EVIDENCE_CHECKED",
-    marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR:signal.targetR,
+    marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR,
     atr:signal.atr14,highestPrice:entry,lowestPrice:entry,currentPrice:entry,
     candlesBeforeEntry:formatCandles(bars,40),
     priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow5:signal.flow5,flow15:signal.flow15,
@@ -583,7 +583,7 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
   if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   diagnostics.opened++;registerTradeForDirectionTracking(t);
   audit(symbol,signal.side,signal.setupType,true);
-  addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+signal.targetR+"R","success");
+  addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+targetR+"R","success");
   archive("paper_trade_open",symbol,{trade:{...t},feeRate,slippageRate,
     accountBalance:virtualBalance,initialAccountBalance:initialVirtualBalance,
     sourceSignalTime:signal.signalCloseTime},tradeArchiveId(t),Date.parse(t.entryTime));
@@ -630,6 +630,7 @@ async function scanEntries(){
           if(fifteen.at(-1)?.closeTime===quarter&&fifteen.length>=21){
             evaluated15m.set(symbol,quarter);
             signal=evaluateFlex15m(fifteen,Date.now());
+            if(signal)signal={...signal,targetR:DIRECTION_TARGET_R};
             if(signal)archive("signal_candidate",symbol,{signal,bars:fifteen,observedAt:Date.now(),stage:"FLEX_CLOSED_15M"},undefined,signal.signalCloseTime);
           }
         }
@@ -862,6 +863,6 @@ export function startEngine(){
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
   persistEngineSnapshot();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; 15m two-hour breakout and three-hour trend correction; price direction confirmation + bounded retries; fixed SL/TP/time exits; OI/depth/fee gates; live Binance WebSocket "+
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; 15m two-hour breakout and three-hour trend correction; price direction confirmation + bounded retries; fixed 1.2R target / SL / time exits; OI/depth/fee gates; live Binance WebSocket "+
     (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
 }

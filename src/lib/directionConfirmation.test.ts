@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import {directionConfirmation,retryDirection} from "./directionConfirmation.js";
+import {directionConfirmation,retryDirection,directionExitPlan} from "./directionConfirmation.js";
 import {replayRecordedExits} from "./recordedExitReplay.js";
 const now=Date.now();
 for(const side of ["LONG","SHORT"] as const){
  const sign=side==="LONG"?1:-1;
+ const plan=directionExitPlan(100,10,side);
+ assert.equal(plan.targetR,1.2);assert.equal(plan.target,100+sign*12);assert.equal(plan.stop,100-sign*10);
  const q=(price:number)=>({bid:price-.01,ask:price+.01,time:now});
  assert(directionConfirmation(side,100,10,q(100+sign)).allowed);
  assert.equal(directionConfirmation(side,100,10,q(100-sign)).reason,"DIRECTION_WAIT_PRICE_CONFIRMATION");

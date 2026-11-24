@@ -124,7 +124,16 @@ for(const side of ["LONG","SHORT"] as const){
   assert(t.finalPnl>0,"profit lock pays net fees on a timely observed quote");
   assert.equal(t.exitReason,"ADAPTIVE Protected Stop");
 }
-// New FLEX positions use the research fixed exits, while legacy positions retain trailing.
+// New direction-confirmed positions use a single 1.2R exit; legacy positions retain their original behavior.
+for(const side of ["LONG","SHORT"] as const){
+  const sign=side==="LONG"?1:-1,t:any=mk("DIRECTION"+side+"USDT",side);
+  t.strategyRevision=DIRECTION_REVISION;t.targetR=1.2;t.setupType="VOLATILITY_BREAKOUT";
+  getTrades().push(t);protectTradeAtPrice(t,100+sign*11,Date.now());
+  assert(getTrades().includes(t));assert.equal(t.sl,100-sign*10);
+  protectTradeAtPrice(t,100+sign*12,Date.now());
+  assert(!getTrades().includes(t));assert.equal(t.exitReason,"ADAPTIVE Regime Target");assert(t.finalPnl>0);
+}
+// Legacy FLEX positions keep their original fixed exits.
 for(const side of ["LONG","SHORT"] as const){
   const sign=side==="LONG"?1:-1,t:any=mk("FLEX"+side+"USDT",side);
   t.strategyRevision=FLEX_REVISION;t.targetR=3;t.setupType="VOLATILITY_BREAKOUT";
