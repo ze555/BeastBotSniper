@@ -6,11 +6,18 @@ import {join} from "node:path";
 import {closedCandles,validQuote,waveEvidence} from "./tradingIntegrity.js";
 import {ADAPTIVE_STRATEGY_ID} from "./adaptiveRegimeStrategy.js";
 process.env.BEAST_RESEARCH_DIR=mkdtempSync(join(tmpdir(),"beast-fixed2-test-"));
-const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState,restoreEngineState,engineStateSnapshot}=await import("./apexPredator.js");
+const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState,restoreEngineState,engineStateSnapshot,mayStageFollowupSignal}=await import("./apexPredator.js");
 assert.equal(getStats().strategyMode,"BIDIRECTIONAL_REGIME_REVERSAL_V4");
 assert.equal(getStats().strategyRevision,"BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER");
 assert.equal(getStats().legacyEnginesEnabled,false);
 assert.equal(getStats().executionMode,"PAPER");
+// Signal replacement never flips directly: it stages ONLY a later independent signal.
+assert.equal(mayStageFollowupSignal(null,1000,false),true,"initial candidate staged");
+assert.equal(mayStageFollowupSignal(1000,1060,false),true,"fresh resolved candidate not lost");
+assert.equal(mayStageFollowupSignal(1000,1000,false),false,"same candle must not replay");
+assert.equal(mayStageFollowupSignal(1000,900,false),false,"stale signal must not replay");
+assert.equal(mayStageFollowupSignal(1000,1060,true),false,"pending signal must keep its slot");
+assert.equal(mayStageFollowupSignal(null,null,false),false,"no candidate means no entry");
 // V4 deployment must never reinterpret historical V3 losses as new V4 daily risk.
 const originalState=structuredClone(engineStateSnapshot());
 const oldTrade={symbol:"OLDUSDT",strategyRevision:"ADAPTIVE_REGIME_ORDERFLOW_V3_ANTI_EXHAUSTION_R1_LOCK",
