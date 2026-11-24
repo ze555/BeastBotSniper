@@ -4,7 +4,7 @@ import { RefreshCw, Activity, Target, TrendingUp, Swords, Play, Square, Terminal
 const entryBlockDescriptions: Record<string,string> = {
   BOT_PAUSED:'المحرك متوقف',OUTSIDE_TRADING_HOURS:'خارج وقت التداول',
   INVALID_ACCOUNT_BALANCE:'رصيد الحساب غير صالح',MAX_CONCURRENT_TRADES:'بلوغ الحد الأقصى للصفقات',
-  DAILY_LOSS_LIMIT:'بلوغ حد خسارة V4 اليومي',ACCOUNT_PROFIT_HALT:'إيقاف الربح التراكمي مفعل',
+  DAILY_LOSS_LIMIT:'بلوغ حد خسارة الحساب اليومي',ACCOUNT_PROFIT_HALT:'إيقاف الربح التراكمي مفعل',
   ACCOUNT_LOSS_HALT:'إيقاف الخسارة التراكمية مفعل',
   INSUFFICIENT_RISK_BUDGET:'ميزانية المخاطرة المتاحة أقل من الحد المطلوب للدخول'
 };
@@ -203,7 +203,7 @@ export const PredatorDashboard: React.FC = () => {
                          </span>
                          <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded shadow-sm">{t.grade}</span>
                          {isClosed && <span className="bg-slate-800 text-blue-300 text-[10px] px-2 py-0.5 rounded">
-                           {t.strategyRevision === 'BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER' ? 'محرك V4' : 'محرك سابق'}
+                           {t.strategyRevision === 'FLEX_INSTITUTIONAL_15M_RECONSTRUCTED_V1_PAPER' ? 'FLEX 15m' : 'محرك سابق'}
                          </span>}
                          {t.setupLabel && (
                             <span className="bg-blue-950/80 text-blue-300 border border-blue-500/40 text-[10px] px-2 py-0.5 rounded font-bold">
@@ -346,7 +346,7 @@ export const PredatorDashboard: React.FC = () => {
              <strong className={stats.entryReadiness.canOpenTrade ? 'text-emerald-400 text-sm' : 'text-amber-400 text-sm'}>
                {stats.entryReadiness.canOpenTrade ? 'بوابة الدخول متاحة — بعد استيفاء شروط السوق' : 'بوابة الدخول محظورة'}
              </strong>
-             <span className="text-xs text-slate-400 font-mono" dir="ltr">V4 PAPER · 4% daily limit</span>
+             <span className="text-xs text-slate-400 font-mono" dir="ltr">FLEX 15m PAPER · 4% daily limit</span>
            </div>
            {!stats.entryReadiness.canOpenTrade && (
              <p className="text-sm text-amber-200">
@@ -357,11 +357,11 @@ export const PredatorDashboard: React.FC = () => {
              <span>ميزانية المخاطرة المتبقية: <strong dir="ltr">${Number(stats.entryReadiness.dailyRiskBudget).toFixed(2)}</strong></span>
              <span>المتاح للصفقة: <strong dir="ltr">${Number(stats.entryReadiness.maxNewRiskDollars).toFixed(2)}</strong></span>
              <span>الحد الأدنى للدخول: <strong dir="ltr">${Number(stats.entryReadiness.minNewRiskDollars).toFixed(2)}</strong></span>
-             <span>نتيجة V4 اليوم: <strong dir="ltr">${Number(stats.entryReadiness.dailyPnl).toFixed(2)}</strong></span>
+             <span>نتيجة الحساب اليوم: <strong dir="ltr">${Number(stats.entryReadiness.dailyPnl).toFixed(2)}</strong></span>
            </div>
            {stats.strategyPerformance && (
              <p className="text-xs text-slate-400">
-               صفقات V4 المغلقة: {stats.strategyPerformance.v4ClosedCount} (صافي ${Number(stats.strategyPerformance.v4ClosedPnl).toFixed(2)})؛
+               صفقات FLEX المغلقة: {stats.strategyPerformance.v4ClosedCount} (صافي ${Number(stats.strategyPerformance.v4ClosedPnl).toFixed(2)})؛
                الصفقات السابقة: {stats.strategyPerformance.legacyClosedCount} (صافي ${Number(stats.strategyPerformance.legacyClosedPnl).toFixed(2)}).
                الرصيد الكلي يشمل نتائج المحركين، دون حذف أي صفقة.
              </p>
@@ -399,7 +399,7 @@ export const PredatorDashboard: React.FC = () => {
                    <SettingsIcon className="w-5 h-5 text-blue-400"/> إعدادات المحرك الجديد فقط
                 </h2>
                 <p className="text-sm text-slate-300 leading-relaxed">
-                   محرك V4 ثنائي الاتجاه: إشارة الدقيقة تمر بانتظار شمعة مغلقة إضافية، ثم تأكيد اتجاه 5m/15m وتدفق تنفيذ حي ودفتر أوامر حقيقي وبيانات OI تاريخية موثقة.
+                   محرك FLEX 15m: اختراق نطاق ساعتين أو تصحيح اتجاه ثلاث ساعات، وتوقيت 5m، مع التحقق من دفتر الأوامر وOI وتكاليف التنفيذ.
                    يتم رفض الدخول في حال ضعف السيولة أو ارتفاع التكلفة أو تغير الاتجاه. المخاطرة المستهدفة 0.35% لكل صفقة PAPER.
                    التداول الافتراضي طوال اليوم، ولا توجد ضمانة للربحية قبل اختبارات مستقلة.
                 </p>
