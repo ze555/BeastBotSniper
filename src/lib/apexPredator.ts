@@ -6,6 +6,7 @@
  */
 import axios from "axios";
 import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
+import { WaveRadar, scheduleRadarBatch } from "./waveRadar.js";
 import { fetchExecutionQuote } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
 import { assessOrderBook, adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
@@ -85,7 +86,8 @@ let lastBatchSucceeded = 0;
 let dayKey = new Intl.DateTimeFormat("en-CA", {timeZone:"Africa/Tripoli"}).format(new Date());
 let today = {count:0,wins:0,losses:0,pnl:0,sumR:0};
 let watchlist: string[] = ["BTCUSDT","ETHUSDT","SOLUSDT","AVAXUSDT","LINKUSDT","SUIUSDT"];
-let hotWatchlist: string[] = ["BTCUSDT","ETHUSDT","SOLUSDT"];
+let hotWatchlist: string[] = [];
+const waveRadar=new WaveRadar();
 const activeTrades: any[] = [];
 const closedTrades: any[] = [];
 const logs: any[] = [];
@@ -353,18 +355,26 @@ async function updateUniverse(){
       addLog("All Binance USD-M USDT/USDC perpetual contracts eligible: "+watchlist.length,"success");
     }
     lastUniverseUpdate=Date.now();
-    try {
-      const ticker=await axios.get(FAPI+"/fapi/v1/ticker/24hr",{timeout:8000});
-      const eligibleSet=new Set(watchlist);
-      hotWatchlist=Array.isArray(ticker.data)?ticker.data
-        .filter((x:any)=>eligibleSet.has(x.symbol)&&Math.abs(Number(x.priceChangePercent))>=1)
-        .sort((a:any,b:any)=>Math.abs(Number(b.priceChangePercent))-Math.abs(Number(a.priceChangePercent)))
-        .slice(0,20).map((x:any)=>x.symbol):[];
-    } catch { hotWatchlist=[]; /* Ticker is optional; main coverage still runs. */ }
+
   }catch(e:any) {
     diagnostics.scanErrors++;
     addLog("Universe refresh unavailable; retaining previous symbols: "+(e?.message||e),"warn");
   }
+}
+async function refreshWaveRadar(){
+  const eligible=new Set(watchlist);
+  try {
+    const ticker=await axios.get(FAPI+"/fapi/v2/ticker/price",{timeout:3500});
+    waveRadar.ingestPrices(ticker.data,eligible,Date.now());
+  }catch(e:any){
+    const status=Number(e?.response?.status);
+    if(status===429||status===418){
+      const retry=Number(e?.response?.headers?.["retry-after"]);
+      scanBackoffUntil=Math.max(scanBackoffUntil,Date.now()+(Number.isFinite(retry)&&retry>0?Math.min(300,retry):60)*1000);
+      diagnostics.rateLimitEvents++;
+    }
+  }
+  hotWatchlist=waveRadar.select(eligible,Date.now());
 }
 async function fetchClosedOneMinuteBars(symbol:string):Promise<StrongFlowBar[]>{
   let r;
@@ -549,12 +559,15 @@ async function scanEntries(){
     resetDailyStatsIfNeeded();
     await updateUniverse();
     if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil)return;
+    await refreshWaveRadar();
+    if(!active||!isStrongFlowTradingHour(new Date(),tradingSchedule)||Date.now()<scanBackoffUntil)return;
     const batch=nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize);
     if(batch.symbols.length===0)return;
     if(!scanPassStartedAt)scanPassStartedAt=Date.now();
     const regularSet=new Set(batch.symbols);
     // Hot symbols get extra attention, but never displace a symbol in the coverage round.
-    const symbols=[...new Set([...hotWatchlist,...batch.symbols])];
+    const eligible=new Set(watchlist);
+    const symbols=scheduleRadarBatch(batch.symbols,hotWatchlist,[...pendingSignals].filter(([symbol])=>eligible.has(symbol)).map(([symbol,signal])=>({symbol,signalCloseTime:signal.signalCloseTime})),Date.now());
     let attempted=0,succeeded=0,complete=true;
     for(let i=0;i<symbols.length;i+=SCAN_CONCURRENCY) {
       if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil) {
@@ -574,6 +587,7 @@ async function scanEntries(){
         if(result.status==="fulfilled") {
           const previous=pendingSignals.get(symbol),bars=result.value.bars;
           const last=bars.at(-1),now=Date.now();
+          waveRadar.ingestBars(symbol,bars,now);
           if(previous) {
             if(now-previous.signalCloseTime>180_000 ||
               (last && last.closeTime>previous.signalCloseTime+60000)){
