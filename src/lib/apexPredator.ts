@@ -767,7 +767,7 @@ export async function runProtectionCycle(){
   try{
     await Promise.allSettled([...activeTrades].map(async t=>{
       try{
-        const q=await fetchExecutionQuote(t.symbol);
+        const q=await fetchExecutionQuote(t.symbol,5000);
         protectTradeAtPrice(t,t.direction==="LONG"?q.bid:q.ask,q.time);
         if(!t.exitTime && institutionalMonitoringEnabled){
           // REST context remains available when user turns WS OFF.
