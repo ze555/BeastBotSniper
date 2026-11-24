@@ -129,5 +129,7 @@ for mode,tp,gate in scenarios:
         if result:rows.append(result)
     report.append(dict(mode=mode,tp=tp,costGate=gate,status=dict(counts_result),all=stats(rows),calibration=stats([r for r in rows if r[6]<split]),heldOut=stats([r for r in rows if r[6]>=split]),nonOverlap=stats(nonoverlap(rows)),heldOutNonOverlap=stats(nonoverlap([r for r in rows if r[6]>=split])),byRevision={rev:stats([r for r in rows if r[7]==rev]) for rev in sorted(set(r[7] for r in rows))}))
 out=dict(cutoff=CUTOFF,downloaded=counts,uniqueSignals=len(ordered),symbols=len(set(x[2] for x in ordered)),minuteCandles=sum(len(x) for x in candles.values()),conflictingCandles=len(conflicts),split=split,first=ordered[0][0],last=ordered[-1][0],scenarios=report)
+from exit_path_replay import run_paired
+out["pairedExitStudy"]=run_paired(ordered,bar,split,FEE,SLIP)
 print("FINAL_ARCHIVE_REPLAY "+json.dumps(out,separators=(",",":")),flush=True)
 with open("archive-replay-report.json","w") as f:json.dump(out,f,indent=2)
