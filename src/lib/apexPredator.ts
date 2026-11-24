@@ -511,6 +511,13 @@ async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:Stron
     sourceSignalTime:signal.signalCloseTime},tradeArchiveId(t),Date.parse(t.entryTime));
   persistEngineSnapshot();
 }
+/** A resolved candidate must not swallow a DIFFERENT fresh closed-minute
+ * signal. Every new candidate still waits for independent next-minute evidence.
+ */
+export function mayStageFollowupSignal(previousCloseMs:number|null,nextCloseMs:number|null,stillPending:boolean){
+  return nextCloseMs!==null && Number.isFinite(nextCloseMs) && !stillPending &&
+    (previousCloseMs===null || nextCloseMs>previousCloseMs);
+}
 async function scanEntries(){
   if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
   for(const [symbol,signal] of pendingSignals) {
@@ -561,7 +568,14 @@ async function scanEntries(){
                 await executeSignal(symbol,previous,bars);
               } else audit(symbol,previous.side,follow.reason,false);
             }
-          }else if(result.value.signal &&
+          }
+          // After the previous hypothesis is rejected, expires, or was handled,
+          // do not discard a fresh signal from this newly closed candle.
+          // This NEVER turns a rejection into an automatic opposite trade:
+          // a newly staged signal must pass its own next-minute confirmation.
+          if(result.value.signal &&
+            mayStageFollowupSignal(previous?.signalCloseTime??null,
+              result.value.signal.signalCloseTime,pendingSignals.has(symbol)) &&
             !hasUnderlyingOpen(symbol) && !isSymbolInCooldown(symbol)){
             pendingSignals.set(symbol,result.value.signal);
             archive("signal_candidate",symbol,{signal:result.value.signal,bars,
