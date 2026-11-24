@@ -155,9 +155,16 @@ export function bidirectionalProfitStop(side:"LONG"|"SHORT",setup:AdaptiveSetup,
     if(peakR>=1.1)lock=.34;
     if(peakR>=1.45)lock=.75;
   }else if(setup==="FAILED_BREAKOUT_REVERSAL"){
+    // Replay on 20 real V4 PAPER trades (10,266 time-ordered executable quotes)
+    // found +0.6R -> +0.1R reduces observed giveback without suppressing entries.
+    // This early tier applies to failed-breakout and trend setups only;
+    // genuine volatility breakouts keep their existing long-runner protection.
+    if(peakR>=.6)lock=.1;
     if(peakR>=1.1)lock=.2;
     if(peakR>=1.7)lock=.7;
     if(peakR>=2.35)lock=Math.max(1.15,peakR-.85);
+  }else if(setup==="TREND_CONTINUATION" || setup==="TREND_PULLBACK"){
+    if(peakR>=.6)lock=.1;
   }else if(setup==="VOLATILITY_BREAKOUT"){
     if(peakR>=2.7)lock=Math.max(1.2,peakR-1.15);
   }
