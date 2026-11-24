@@ -62,6 +62,20 @@ for(const side of ["LONG","SHORT"] as const){
   const c=bidirectionalProfitStop(side,"VOLATILITY_BREAKOUT",entry,dist,3.1);
   assert.equal(c,entry+sg*1.95*dist);
   assert.equal(bidirectionalProfitStop(side,"VOLATILITY_BREAKOUT",entry,dist,.4),null);
+  for(const setup of ["TREND_CONTINUATION","TREND_PULLBACK","FAILED_BREAKOUT_REVERSAL"] as const){
+    assert.equal(bidirectionalProfitStop(side,setup,entry,dist,.599),null,
+      "early stop must not engage before +0.60R");
+    assert.equal(bidirectionalProfitStop(side,setup,entry,dist,.60),entry+sg*.10*dist,
+      "V4 should protect partial progress without dropping the entry");
+  }
+  assert.equal(bidirectionalProfitStop(side,"FAILED_BREAKOUT_REVERSAL",entry,dist,1.1),
+    entry+sg*.2*dist,"later confirmed-reversal tier stays stronger");
+  assert.equal(bidirectionalProfitStop(side,"VOLATILITY_BREAKOUT",entry,dist,.9),null,
+    "do not prematurely close the genuine breakout runners");
+  assert.equal(bidirectionalProfitStop(side,"RANGE_REVERSION",entry,dist,.9),null,
+    "range strategy remains unchanged");
+  assert.equal(bidirectionalProfitStop(side,"COUNTERTREND_CORRECTION",entry,dist,.60),null,
+    "unvalidated correction strategy remains unchanged");
 }
 // No future knowledge; the same historical bars + clock must return the same candidate.
 const fixture=history("UP","FAILED");
