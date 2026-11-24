@@ -61,6 +61,31 @@ const mk=(symbol:string,direction:"LONG"|"SHORT")=>{
     part_a:1,part_b:0,part_c:0,a_closed:false,b_closed:false,
     entryTime:new Date(now).toISOString(),highestPrice:100,lowestPrice:100};
 };
+// V4-only early giveback protection: real trade lifecycle, both directions.
+for(const side of ["LONG","SHORT"] as const){
+  const sign=side==="LONG"?1:-1;
+  const t:any=mk("EARLYGUARD"+side+"USDT",side);
+  t.strategyRevision="BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER";
+  getTrades().push(t);
+  protectTradeAtPrice(t,100+sign*5,Date.now());
+  assert.equal(t.sl,100-sign*10,"no early lock before +0.60R");
+  protectTradeAtPrice(t,100+sign*6,Date.now());
+  assert(Math.abs(t.sl-(100+sign*1))<1e-8,"V4 +0.6R arms +0.1R floor");
+  protectTradeAtPrice(t,100+sign*.5,Date.now());
+  assert(!getTrades().includes(t),"V4 early guard must close a genuine giveback");
+  assert(t.finalPnl>0,"modest net profit remains after estimated fees for timely observed quote");
+  assert.equal(t.exitReason,"ADAPTIVE Protected Stop");
+}
+// Breakout winners retain their original wide trailing to avoid premature exits.
+{
+  const t:any=mk("BREAKOUTRUNNERUSDT","LONG");
+  t.strategyRevision="BIDIRECTIONAL_REGIME_REVERSAL_V4_PAPER";
+  t.setupType="VOLATILITY_BREAKOUT";
+  getTrades().push(t);
+  protectTradeAtPrice(t,106,Date.now());
+  assert.equal(t.sl,90,"do not add early stop to genuine breakout");
+  getTrades().splice(getTrades().indexOf(t),1);
+}
 for(const side of ["LONG","SHORT"] as const){
   const sign=side==="LONG"?1:-1;
   const t:any=mk("NEW"+side+"USDT",side);
