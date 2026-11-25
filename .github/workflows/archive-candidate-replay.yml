@@ -1,33 +1,24 @@
-name: Full archive candidate replay (read-only)
+name: New entry research (read-only)
 on:
   push:
     branches:
       - research/full-candidate-replay-20261125
 permissions:
   contents: read
-  actions: read
 jobs:
   archive-replay:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Avoid concurrent archive extraction
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Validate Python research code
         run: |
-          for i in $(seq 1 120); do
-            state=$(gh api repos/${{ github.repository }}/actions/runs/45503319593 --jq .status)
-            if [ "$state" = completed ]; then exit 0; fi
-            sleep 10
-          done
-          exit 1
-      - name: Test paired exit rules
-        run: python3 scripts/exit_path_replay.py
+          python3 -m py_compile scripts/archive_candidate_replay.py scripts/new_entry_replay.py scripts/exit_path_replay.py
+          python3 scripts/exit_path_replay.py
       - name: Replay archived candidate evidence
         run: python3 scripts/archive_candidate_replay.py
       - uses: actions/upload-artifact@v4
         with:
-          name: archive-candidate-replay-report
+          name: archive-new-entry-research
           path: archive-replay-report.json
           retention-days: 14

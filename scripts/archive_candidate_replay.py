@@ -4,12 +4,14 @@ Results are OHLC simulations, NOT historical bid/ask execution or account return
 """
 import json, urllib.request, urllib.parse, gzip, time, math, collections, sys
 BASE="https://beastbotsniper-production-0fa1ec8b.up.railway.app/api/research/replay"
-CUTOFF=1795559981028
+CUTOFF=1795588607270
 M=60000
 FEE=.0004
 SLIP=.0007 # .0002 model slippage + assumed .0005 half spread per side
 candles=collections.defaultdict(dict)
 conflicts=set()
+availability=collections.defaultdict(dict)
+entry_evidence=collections.defaultdict(list)
 signals={}
 counts={}
 def get(params):
@@ -37,8 +39,13 @@ def ingest(kind):
                     value=(op,hi,lo,cl,q,tb)
                     old=candles[sym].get(o)
                     if old is not None and old!=value:conflicts.add((sym,o))
-                    else:candles[sym][o]=value
+                    else:
+                        candles[sym][o]=value
+                        availability[sym][o]=min(observed,availability[sym].get(o,observed))
                 except (KeyError,ValueError,TypeError):continue
+            if kind=="entry_decision_inputs":
+                gate=(d.get("gate") or {}).get("details") or {}
+                entry_evidence[sym].append((observed,gate,d.get("quote") or {}))
             s=d.get("signal")
             if kind=="signal_candidate" and s and s.get("side") in ("LONG","SHORT"):
                 key=(sym,s["signalCloseTime"],s["side"])
@@ -130,6 +137,8 @@ for mode,tp,gate in scenarios:
     report.append(dict(mode=mode,tp=tp,costGate=gate,status=dict(counts_result),all=stats(rows),calibration=stats([r for r in rows if r[6]<split]),heldOut=stats([r for r in rows if r[6]>=split]),nonOverlap=stats(nonoverlap(rows)),heldOutNonOverlap=stats(nonoverlap([r for r in rows if r[6]>=split])),byRevision={rev:stats([r for r in rows if r[7]==rev]) for rev in sorted(set(r[7] for r in rows))}))
 out=dict(cutoff=CUTOFF,downloaded=counts,uniqueSignals=len(ordered),symbols=len(set(x[2] for x in ordered)),minuteCandles=sum(len(x) for x in candles.values()),conflictingCandles=len(conflicts),split=split,first=ordered[0][0],last=ordered[-1][0],scenarios=report)
 from exit_path_replay import run_paired
-out["pairedExitStudy"]=run_paired(ordered,bar,split,FEE,SLIP)
+from new_entry_replay import study
+out["newEntryStudy"]=study(candles,availability,conflicts,entry_evidence,FEE,SLIP)
+# Keep original report for baseline, but do not refit the former paired study on new holdout.
 print("FINAL_ARCHIVE_REPLAY "+json.dumps(out,separators=(",",":")),flush=True)
 with open("archive-replay-report.json","w") as f:json.dump(out,f,indent=2)
