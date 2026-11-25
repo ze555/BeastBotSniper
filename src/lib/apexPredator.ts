@@ -389,7 +389,7 @@ async function completePaperRollover(){
     if(persistenceStatus().lastError)throw Error("Archive blocked by unresolved persistence write error; current ledger retained");
     const old=structuredClone(engineStateSnapshot()),id=crypto.randomUUID(),at=new Date().toISOString();
     const fresh={...old,runId:id,runStartedAt:at,runRevision:ADAPTIVE_STRATEGY_ID,runBuildId:buildId,rolloverPending:false,manualCloseReset:false,
-      active:!manualCloseReset,virtualBalance:initialVirtualBalance,balance:initialVirtualBalance,activeTrades:[],closedTrades:[],logs:[],audits:[],
+      active:manualCloseReset?false:active,virtualBalance:initialVirtualBalance,balance:initialVirtualBalance,activeTrades:[],closedTrades:[],logs:[],audits:[],
       today:{count:0,wins:0,losses:0,pnl:0,sumR:0},runTotals:{count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0},
       lastSignalTime:[],pendingSignals:[],cooldownUntil:[],
       diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
@@ -732,6 +732,5 @@ export function startEngine(){
   scanTimer=setInterval(()=>{void runApexLoop();},SCAN_INTERVAL_MS);
   void runApexLoop();
   persistEngineSnapshot();
-  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; 15m two-hour breakout and three-hour trend correction; price direction confirmation + bounded retries; fixed 1.2R target / SL / time exits; OI/depth/fee gates; live Binance WebSocket "+
-    (liveWebsocketEnabled?"ON":"OFF")+" by default, route /market/stream; decision gate and reversal engine enabled.","success");
+  addLog(ADAPTIVE_STRATEGY_ID+" initialized PAPER; closed 1h flow divergence; fixed 2.5 ATR stop / 1.2R target / 4h exit; OI/depth shadow monitoring; manual close/archive/reset available; WebSocket "+(liveWebsocketEnabled?"ON":"OFF"),"success");
 }
