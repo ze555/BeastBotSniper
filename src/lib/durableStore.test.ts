@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import axios from "axios";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {initializePersistence,restoreSnapshot,persistSnapshot,persistEvent,
   historicalEvents,flushPersistence,persistenceStatus,closePersistence,
   persistReplayEvent,replayEvents,replayCoverage,REPLAY_SCHEMA_VERSION,rotatePaperRun,listPaperRuns,getPaperRun} from "./durableStore.js";
-import {engineStateSnapshot,restoreEngineState,getStats,getTrades,getClosedTrades} from "./apexPredator.js";
+import {engineStateSnapshot,restoreEngineState,getStats,getTrades,getClosedTrades,requestNewPaperRun,runApexLoop,protectTradeAtPrice,isActive,setActive} from "./apexPredator.js";
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),"beast-persistence-test-"));
 process.env.BEAST_PERSIST_DIR=root;
@@ -95,6 +96,26 @@ await closePersistence();
 await initializePersistence();
 assert.equal((await restoreSnapshot())?.runId,"test-new");
 assert.equal((await historicalEvents("trading_decisions")).total,1,"historical research remains intact");
+// Real manual close/reset lifecycle against a temporary SQLite database.
+const manual={...fresh,runId:"manual-old",runTotals:{count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0},active:true,activeTrades:[{...active,symbol:"MANUALUSDT"}],closedTrades:[]};
+restoreEngineState(manual);
+const originalGet=axios.get;
+axios.get=(async()=>{throw Error("quote unavailable")}) as any;
+try{
+  const result=await requestNewPaperRun("manual-old",true);
+  assert.equal(result.pending,true);assert.equal(isActive(),false);assert.equal(getTrades().length,1);
+  setActive(true);assert.equal(isActive(),false,"manual reset cannot be resumed early");
+  protectTradeAtPrice(getTrades()[0],104,Date.now()-10000);assert.equal(getTrades().length,1,"never close at stale quote");
+  await assert.rejects(()=>requestNewPaperRun("wrong-id",true));
+  protectTradeAtPrice(getTrades()[0],104,Date.now());assert.equal(getTrades().length,0);
+  await runApexLoop();
+  const archived=await getPaperRun("manual-old");
+  assert.equal(archived.closedTrades.length,1);assert.equal(archived.closedTrades[0].exitReason,"PAPER Manual Archive Reset");
+  assert(archived.closedTrades[0].finalPnl>0);assert.equal(archived.activeTrades.length,0);
+  assert.equal(getStats().balance,1000);assert.equal(getClosedTrades().length,0);assert.equal(getStats().today.count,0);assert.equal(isActive(),false);
+  assert.equal((await restoreSnapshot()).manualCloseReset,false);assert.equal((await restoreSnapshot()).active,false);
+  setActive(true);assert.equal(isActive(),true);
+}finally{axios.get=originalGet;}
 await closePersistence();
 fs.rmSync(root,{recursive:true,force:true});
 delete process.env.BEAST_PERSIST_DIR;

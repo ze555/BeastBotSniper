@@ -148,10 +148,10 @@ export const PredatorDashboard: React.FC = () => {
       setIsSavingConfig(false);
   };
 
-  const archiveAndReset=async()=>{
-    if(!window.confirm('أرشفة دورة PAPER الحالية وبدء دورة جديدة بنفس رأس المال؟ الصفقات المفتوحة ستغلق بشكل طبيعي أولاً.'))return;
+  const archiveAndReset=async(closeImmediately=false)=>{
+    if(!window.confirm(closeImmediately?'إيقاف الدخول وإغلاق جميع صفقات PAPER بسعر السوق الحديث ثم أرشفة الدورة وتصفير الحساب؟ سيبقى الروبوت متوقفاً حتى تشغيله يدوياً.':'أرشفة دورة PAPER الحالية وبدء دورة جديدة بنفس رأس المال؟ الصفقات المفتوحة ستغلق بشكل طبيعي أولاً.'))return;
     setResetBusy(true);setArchiveMessage('');
-    try{const res=await fetch('/api/predator/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'ARCHIVE_AND_RESET',expectedRunId:stats?.paperRun?.id??null})});const data=await safeJson(res);if(!res.ok)throw Error(data.message||'تعذر الأرشفة');setArchiveMessage(data.pending?'تم طلب الأرشفة؛ سيتم التنفيذ بعد انتهاء الصفقات والمسح الجاري':'تمت الأرشفة وبدأت دورة جديدة');await fetchData();}
+    try{const res=await fetch('/api/predator/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:closeImmediately?'CLOSE_ARCHIVE_AND_RESET':'ARCHIVE_AND_RESET',expectedRunId:stats?.paperRun?.id??null})});const data=await safeJson(res);if(!res.ok)throw Error(data.message||'تعذر الأرشفة');setArchiveMessage(data.pending?'تم طلب الأرشفة؛ بانتظار أسعار تنفيذ حديثة وإغلاق الصفقات':closeImmediately?'تم الإغلاق والأرشفة والتصفير؛ الروبوت متوقف':'تمت الأرشفة وبدأت دورة جديدة');await fetchData();}
     catch(e:any){setArchiveMessage(e.message||'تعذر الأرشفة');}finally{setResetBusy(false);}
   };
   const loadArchivedRuns=async()=>{try{const res=await fetch('/api/paper/runs');if(res.ok)setArchivedRuns((await safeJson(res)).runs||[]);}catch{}};
@@ -500,9 +500,10 @@ export const PredatorDashboard: React.FC = () => {
                 <div className="space-y-3 border-t border-slate-700 pt-4">
                   <h3 className="text-white font-bold">دورات التداول التجريبي والأرشفة</h3>
                   <label className="flex gap-2 items-center text-sm text-white"><input type="checkbox" checked={archiveOnUpdate} onChange={e=>{tradingSettingsDirty.current=true;setArchiveOnUpdate(e.target.checked);}}/>أرشفة الدورة وبدء دورة جديدة عند نشر تحديث جديد (وليس إعادة التشغيل)</label>
-                  <button disabled={resetBusy||stats?.paperRun?.rolloverPending} onClick={archiveAndReset} className="bg-amber-700 text-white rounded-lg px-4 py-2 disabled:opacity-50">أرشفة الصفقات وتصفير حساب PAPER</button>
+                  <button disabled={resetBusy||stats?.paperRun?.rolloverPending} onClick={()=>archiveAndReset(false)} className="bg-amber-700 text-white rounded-lg px-4 py-2 disabled:opacity-50">أرشفة بعد الإغلاق الطبيعي</button>
+                  <button disabled={resetBusy||stats?.paperRun?.rolling||stats?.paperRun?.manualCloseReset} onClick={()=>archiveAndReset(true)} className="bg-rose-700 text-white rounded-lg px-4 py-2 disabled:opacity-50">إغلاق كل الصفقات + أرشفة + تصفير</button>
                   <p className="text-xs text-slate-300">رأس المال الجديد = رأس المال الابتدائي؛ الأرباح والرسوم والعدادات منفصلة. لا يتم حذف الأرشيف.</p>
-                  {(archiveMessage||stats?.paperRun?.rolloverPending||stats?.paperRun?.error)&&<p className="text-sm text-amber-300">{stats?.paperRun?.error||archiveMessage||'أرشفة معلقة حتى إغلاق الصفقات'}</p>}
+                  {(archiveMessage||stats?.paperRun?.rolloverPending||stats?.paperRun?.error)&&<p className="text-sm text-amber-300">{stats?.paperRun?.error||(stats?.paperRun?.manualCloseReset?`إغلاق وأرشفة جارية — المتبقي: ${stats.paperRun.remainingOpenTrades} صفقة`:archiveMessage||'أرشفة معلقة حتى إغلاق الصفقات')}</p>}
                 </div>
                 {configError && <p role="alert" className="text-sm text-rose-400">{configError}</p>}
                 <button onClick={saveConfig} disabled={isSavingConfig}

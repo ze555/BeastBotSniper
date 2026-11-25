@@ -14,7 +14,7 @@ import { adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
 import {bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
 import {validQuote} from "./tradingIntegrity.js";
 import { evaluateReversal } from "./institutionalReversal.js";
-import {persistSnapshot,persistenceStatus,persistReplayEvent,rotatePaperRun,type ReplayKind} from "./durableStore.js";
+import {persistSnapshot,persistenceStatus,persistReplayEvent,rotatePaperRun,flushPersistence,type ReplayKind} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
 import { FLEX_REVISION } from "./flexInstitutional15m.js";
@@ -73,6 +73,7 @@ let runId:string|null=null,runStartedAt:string|null=null,runRevision:string=ADAP
 const buildId=process.env.RAILWAY_GIT_COMMIT_SHA||ADAPTIVE_STRATEGY_ID;
 let runBuildId=buildId,archiveOnUpdate=true,rolloverPending=false,rolling=false;
 let replayStartId=0,eventStartId=0;
+let manualCloseReset=false,manualResetArming=false;
 let rolloverError:string|null=null;
 let runTotals={count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0};
 let maxOpenTrades = STRONG_FLOW_MAX_CONCURRENT;
@@ -131,7 +132,7 @@ export function getLogs(){return logs;}
 export function getTrades(){return activeTrades;}
 export function getClosedTrades(){return closedTrades;}
 export function isActive(){return active;}
-export function setActive(value:boolean){active=Boolean(value);addLog("BOT ACTIVE: "+active);persistEngineSnapshot();}
+export function setActive(value:boolean){if(manualCloseReset||manualResetArming)return;active=Boolean(value);addLog("BOT ACTIVE: "+active);persistEngineSnapshot();}
 /** Prevent correlated exposure through the same asset's USDT/USDC contracts. */
 function underlying(symbol:string){return symbol.replace(/(?:USDT|USDC)$/,"");}
 function hasUnderlyingOpen(symbol:string){
@@ -192,7 +193,7 @@ function entryBlocked(){return !entryReadiness().canOpenTrade;}
 export function engineStateSnapshot(){
   return {schemaVersion:1,revision:ADAPTIVE_STRATEGY_ID,savedAt:new Date().toISOString(),
     active,virtualBalance,initialVirtualBalance,balance:virtualBalance,
-    runId,runStartedAt,runRevision,runBuildId,archiveOnUpdate,rolloverPending,replayStartId,eventStartId,runTotals:{...runTotals},
+    runId,runStartedAt,runRevision,runBuildId,archiveOnUpdate,rolloverPending,manualCloseReset,replayStartId,eventStartId,runTotals:{...runTotals},
     maxOpenTrades,scanBatchSize,feeRate,slippageRate,liveWebsocketEnabled,
     tradingSchedule:{...tradingSchedule},haltProfitEnabled,haltProfitTarget,
     haltLossEnabled,haltLossTarget,dayKey,today:{...today},
@@ -213,10 +214,11 @@ export function restoreEngineState(s:any){
   runId=typeof s.runId==="string"?s.runId:null;runStartedAt=s.runStartedAt||null;
   runRevision=s.runRevision||s.revision||ADAPTIVE_STRATEGY_ID;runBuildId=s.runBuildId||runRevision;
   archiveOnUpdate=s.archiveOnUpdate!==false;rolloverPending=s.rolloverPending===true;
+  manualCloseReset=s.manualCloseReset===true&&rolloverPending;
   replayStartId=Number(s.replayStartId)||0;eventStartId=Number(s.eventStartId)||0;
   runTotals=s.runTotals?{...s.runTotals}:{count:s.closedTrades.length,wins:s.closedTrades.filter((t:any)=>t.finalPnl>0).length,losses:s.closedTrades.filter((t:any)=>t.finalPnl<0).length,breakeven:s.closedTrades.filter((t:any)=>t.finalPnl===0).length,fees:s.closedTrades.reduce((n:number,t:any)=>n+(Number(t.totalFees)||0),0),pnl:s.virtualBalance-s.initialVirtualBalance};
   setResearchRun(runId);
-  active=typeof s.active==="boolean"?s.active:true;
+  active=manualCloseReset?false:typeof s.active==="boolean"?s.active:true;
   activeTrades.splice(0,activeTrades.length,...s.activeTrades);
   closedTrades.splice(0,closedTrades.length,...s.closedTrades.slice(0,MAX_DASHBOARD_TRADES));
   if(Array.isArray(s.logs))logs.splice(0,logs.length,...s.logs.slice(0,200));
@@ -249,7 +251,7 @@ export function restoreEngineState(s:any){
 }
 export function getStats(){
   return {persistence:persistenceStatus(),
-    paperRun:{id:runId,startedAt:runStartedAt,revision:runRevision,buildId:runBuildId,archiveOnUpdate,rolloverPending,rolling,error:rolloverError,totals:{...runTotals}},
+    paperRun:{id:runId,startedAt:runStartedAt,revision:runRevision,buildId:runBuildId,archiveOnUpdate,rolloverPending,manualCloseReset,remainingOpenTrades:activeTrades.length,rolling,error:rolloverError,totals:{...runTotals}},
     strategyRevision:ADAPTIVE_STRATEGY_ID,
     strategyMode:"FLOW_PRICE_DIVERGENCE_1H",
     executionMode:"PAPER",
@@ -347,14 +349,25 @@ export function resetAccountState(){
   if(activeTrades.length||!persistenceStatus().enabled)return false;
   rolloverPending=true;persistEngineSnapshot();return true;
 }
-export function paperRolloverBusy(){return rolling;}
-export async function requestNewPaperRun(expectedRunId?:string|null){
+export function paperRolloverBusy(){return rolling||manualCloseReset||manualResetArming;}
+export async function requestNewPaperRun(expectedRunId?:string|null,closeImmediately=false){
   if(expectedRunId!==undefined&&expectedRunId!==runId)throw Error("Paper run already changed; refresh before retry");
-  if(rolling)return {pending:true,runId};
+  if(rolling||manualResetArming)return {pending:true,runId,remainingOpenTrades:activeTrades.length};
   if(!persistenceStatus().enabled)throw Error("Durable storage required for archive/reset");
-  rolloverPending=true;persistEngineSnapshot();
+  if(closeImmediately&&!manualCloseReset){
+    // Disable entry first, persist operator intent before any forced closure.
+    if(persistenceStatus().lastError)throw Error("Archive storage has an unresolved write error");
+    manualResetArming=true;active=false;rolloverPending=true;manualCloseReset=true;
+    pendingSignals.clear();
+    try{
+      persistEngineSnapshot();await flushPersistence();
+      if(persistenceStatus().lastError)throw Error("Could not persist manual reset request");
+    }catch(e){rolloverError=String(e);throw e;}
+    finally{manualResetArming=false;}
+  }else{rolloverPending=true;persistEngineSnapshot();}
+  if(manualCloseReset&&!scanning&&!protecting)await runProtectionCycle();
   await completePaperRollover();
-  return {pending:rolloverPending,runId};
+  return {pending:rolloverPending,runId,remainingOpenTrades:activeTrades.length,active};
 }
 export async function initializePaperRun(saved:any){
   if(!persistenceStatus().enabled)return;
@@ -369,18 +382,21 @@ export async function initializePaperRun(saved:any){
   if(rolloverPending){persistEngineSnapshot();await completePaperRollover();}
 }
 async function completePaperRollover(){
-  if(!rolloverPending||rolling||scanning||protecting||activeTrades.length)return;
+  if(!rolloverPending||rolling||manualResetArming||scanning||protecting||activeTrades.length)return;
   rolling=true;rolloverError=null;
   try{
+    await flushPersistence();
+    if(persistenceStatus().lastError)throw Error("Archive blocked by unresolved persistence write error; current ledger retained");
     const old=structuredClone(engineStateSnapshot()),id=crypto.randomUUID(),at=new Date().toISOString();
-    const fresh={...old,runId:id,runStartedAt:at,runRevision:ADAPTIVE_STRATEGY_ID,runBuildId:buildId,rolloverPending:false,
-      active:true,virtualBalance:initialVirtualBalance,balance:initialVirtualBalance,activeTrades:[],closedTrades:[],logs:[],audits:[],
+    const fresh={...old,runId:id,runStartedAt:at,runRevision:ADAPTIVE_STRATEGY_ID,runBuildId:buildId,rolloverPending:false,manualCloseReset:false,
+      active:!manualCloseReset,virtualBalance:initialVirtualBalance,balance:initialVirtualBalance,activeTrades:[],closedTrades:[],logs:[],audits:[],
       today:{count:0,wins:0,losses:0,pnl:0,sumR:0},runTotals:{count:0,wins:0,losses:0,breakeven:0,fees:0,pnl:0},
       lastSignalTime:[],pendingSignals:[],cooldownUntil:[],
       diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
       reversalDiagnostics:{observations:0,warnings:0,earlyExits:0,incomplete:0}};
     const boundaries=await rotatePaperRun(old,fresh);
     restoreEngineState({...fresh,...boundaries});evaluated15m.clear();rankReference.clear();rankBars.clear();rankHour=0;completedHour=0;rankFrozen=false;
+    currentBatchIndex=0;completedScanPasses=0;scanPassStartedAt=0;scanPassAttempted.clear();scanPassSucceeded.clear();lastCompletedScanPass=null;lastBatchAttempted=0;lastBatchSucceeded=0;
     addLog("Archived previous PAPER run; started "+id+" at $"+initialVirtualBalance,"success");
     if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   }catch(e:any){rolloverError=String(e?.message||e);addLog("Archive/reset failed; old account preserved: "+rolloverError,"error");}
@@ -591,6 +607,9 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
     feeRate,slippageRate},tradeArchiveId(t),quoteTime);
   updateDirectionTracking(t.symbol,price);
   logTradeJourneySnapshot(t,price,t.pnl);
+  if(manualCloseReset&&!manualResetArming&&!persistenceStatus().lastError){
+    closeFull(t,"PAPER Manual Archive Reset");return;
+  }
   if(stopped){
     const isProtected=t.direction==="LONG"?t.sl>t.entry:t.sl<t.entry;
     closeFull(t,isProtected?"ADAPTIVE Protected Stop":"ADAPTIVE Stop Loss");
@@ -622,14 +641,14 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   }
 }
 export async function runProtectionCycle(){
-  if(rolling||protecting||activeTrades.length===0)return;
+  if(rolling||manualResetArming||protecting||activeTrades.length===0)return;
   protecting=true;
   try{
     await Promise.allSettled([...activeTrades].map(async t=>{
       try{
         const q=await fetchExecutionQuote(t.symbol,5000);
         protectTradeAtPrice(t,t.direction==="LONG"?q.bid:q.ask,q.time);
-        if(!t.exitTime && institutionalMonitoringEnabled){
+        if(!t.exitTime && institutionalMonitoringEnabled&&!manualCloseReset){
           // REST context remains available when user turns WS OFF.
           await refreshInstitutionalEvidence(t.symbol,Date.now(),liveWebsocketEnabled);
           const now=Date.now();

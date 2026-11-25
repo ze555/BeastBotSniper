@@ -2,7 +2,7 @@ name: Validate BeastBotSniper
 
 on:
   push:
-    branches: [main, research/flow-divergence-b-integration]
+    branches: [main, research/flow-divergence-b-integration, research/paper-close-archive-reset]
   pull_request:
     branches: [main]
 

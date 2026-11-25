@@ -78,11 +78,11 @@ async function startServer() {
       liveWebsocketEnabled: req.body.liveWebsocketEnabled,
       archiveOnUpdate:req.body.archiveOnUpdate,
     });
-    res.json({success:true,strategy:"ADAPTIVE_REGIME_ORDERFLOW_V2_ENTRY_VERIFIED",liveWebsocketEnabled:getStats().liveWebsocketEnabled});
+    res.json({success:true,strategy:getStats().strategyRevision,liveWebsocketEnabled:getStats().liveWebsocketEnabled});
   });
   app.post("/api/predator/reset",async(req,res)=>{
-    if(req.body?.confirm!=="ARCHIVE_AND_RESET"||!("expectedRunId" in (req.body||{})))return res.status(400).json({message:"Explicit archive confirmation and current run ID required"});
-    try{const result=await requestNewPaperRun(req.body.expectedRunId);res.status(result.pending?202:200).json({success:true,...result});}
+    if(!["ARCHIVE_AND_RESET","CLOSE_ARCHIVE_AND_RESET"].includes(req.body?.confirm)||!("expectedRunId" in (req.body||{})))return res.status(400).json({message:"Explicit archive confirmation and current run ID required"});
+    try{const result=await requestNewPaperRun(req.body.expectedRunId,req.body.confirm==="CLOSE_ARCHIVE_AND_RESET");res.status(result.pending?202:200).json({success:true,...result});}
     catch(e:any){res.status(409).json({success:false,message:String(e?.message||e)});}
   });
   app.get("/api/paper/runs",async(req,res)=>{
