@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {FLOW_TARGET_R,FLOW_STOP_ATR,FLOW_MAX_HOLD_MS,HOUR,closedHour,validHourRows,relativeRank,flowCostGate,flowExitPlan,evaluateFlowDivergence} from "./flowDivergence.js";
+const end=1800000000000/HOUR;const now=Math.floor(end)*HOUR;
+const rows=Array.from({length:200},(_,i)=>{const openTime=now-(200-i)*HOUR;return {openTime,closeTime:openTime+HOUR-1,open:100,high:101,low:99,close:100,quoteVolume:1000,takerBuyQuote:600};});
+Object.assign(rows[199],{open:100,close:100.3,high:100.4,low:99.8,quoteVolume:1500,takerBuyQuote:900});
+assert(validHourRows(rows,closedHour(now)));
+const signal=evaluateFlowDivergence(rows,.6,now)!;assert(signal);assert.equal(signal.side,"LONG");assert.equal(signal.stopAtr,FLOW_STOP_ATR);assert.equal(signal.targetR,FLOW_TARGET_R);assert.equal(signal.maxHoldMs,FLOW_MAX_HOLD_MS);
+const short=rows.map(b=>({...b,open:200-b.open,close:200-b.close,high:200-b.low,low:200-b.high,takerBuyQuote:b.quoteVolume-b.takerBuyQuote}));assert.equal(evaluateFlowDivergence(short,.4,now)?.side,"SHORT");
+assert.equal(evaluateFlowDivergence(rows,.2,now),null);assert.equal(evaluateFlowDivergence(rows,.6,now+300001),null);
+const broken=rows.slice();broken.splice(190,1);assert.equal(evaluateFlowDivergence(broken,.6,now),null);
+assert.equal(relativeRank("A",1,new Map([["A",1]])),null);
+const reference=new Map(Array.from({length:42},(_,i)=>["S"+i,i] as [string,number]));assert.equal(relativeRank("S20",20,reference),21/42);
+assert(flowCostGate(100,5,.001,.0004,.0002));assert(!flowCostGate(100,.1,.001,.0004,.0002));
+assert.deepEqual(flowExitPlan(100,5,"LONG"),{stop:95,target:106,targetR:1.2});assert.deepEqual(flowExitPlan(100,5,"SHORT"),{stop:105,target:94,targetR:1.2});
+console.log("FLOW DIVERGENCE TEST PASSED");

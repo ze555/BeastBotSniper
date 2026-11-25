@@ -10,16 +10,17 @@ import { listAllUsdmPerpetuals, nextCoverageBatch } from "./futuresUniverse.js";
 import { WaveRadar, scheduleRadarBatch } from "./waveRadar.js";
 import { fetchExecutionQuote, syncExecutionQuoteSymbols, executionQuoteHealth } from "./executionQuotes.js";
 import { markTrade, closedCandles, tightenStop } from "./tradingIntegrity.js";
-import { assessOrderBook, adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
+import { adaptiveStopCandidate } from "./adaptiveRegimeStrategy.js";
 import {bidirectionalProfitStop,BIDIRECTIONAL_REVISION,type BidirectionalSignal} from "./bidirectionalRegimeEngine.js";
-import { parseOpenInterestHistory, verifyExecutableEntry, type EntryDepth, type EntryOi } from "./entryValidation.js";
+import {validQuote} from "./tradingIntegrity.js";
 import { evaluateReversal } from "./institutionalReversal.js";
 import {persistSnapshot,persistenceStatus,persistReplayEvent,rotatePaperRun,type ReplayKind} from "./durableStore.js";
 import { costAwareProfitLock } from "./entryExitSafeguards.js";
 import { syncInstitutionalSymbols, refreshInstitutionalEvidence, institutionalSnapshot, institutionalHealth } from "./institutionalMarketFeed.js";
-import { FLEX_REVISION, evaluateFlex15m, flexTiming } from "./flexInstitutional15m.js";
-import {DIRECTION_REVISION,DIRECTION_TARGET_R,directionExitPlan,directionConfirmation,retryDirection} from "./directionConfirmation.js";
-const ADAPTIVE_STRATEGY_ID = DIRECTION_REVISION;
+import { FLEX_REVISION } from "./flexInstitutional15m.js";
+import {DIRECTION_REVISION} from "./directionConfirmation.js";
+import {FLOW_REVISION,FLOW_TARGET_R,FLOW_MAX_HOLD_MS,FLOW_VALID_MS,FLOW_REFERENCE_SYMBOLS,flowEligible,closedHour,return3h,relativeRank,evaluateFlowDivergence,flowCostGate,flowExitPlan,type FlowSignal} from "./flowDivergence.js";
+const ADAPTIVE_STRATEGY_ID = FLOW_REVISION;
 // Passive, time-stamped evidence storage. Never feeds values back into decisions.
 function archive(kind:ReplayKind,symbol:string,data:unknown,tradeId?:string,sourceMs?:number){
   persistReplayEvent(kind,{symbol,tradeId,sourceMs,revision:ADAPTIVE_STRATEGY_ID,data:{...(data as object),paperRunId:runId}});
@@ -104,7 +105,9 @@ const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
 const pendingSignals = new Map<string,BidirectionalSignal>();
-const directionRetries=new Map<string,{signalTime:number;attempts:number;nextAt:number}>();
+let rankHour=0, completedHour=0;
+const rankReference=new Map<string,number>();
+const rankBars=new Map<string,StrongFlowBar[]>();
 const evaluated15m=new Map<string,number>();
 const cooldownUntil = new Map<string,number>();
 const diagnostics = {opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,
@@ -221,8 +224,7 @@ export function restoreEngineState(s:any){
   lastSignalTime.clear();
   for(const pair of s.lastSignalTime||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))lastSignalTime.set(pair[0],pair[1]);}
   pendingSignals.clear();
-  for(const pair of (s.revision===ADAPTIVE_STRATEGY_ID?s.pendingSignals:[])||[]){if(Array.isArray(pair)&&pair.length===2&&pair[1]?.signalCloseTime>0)
-    pendingSignals.set(pair[0],pair[1]);}
+  // Old pending signals must never be restored into this engine.
   cooldownUntil.clear();
   for(const pair of s.cooldownUntil||[]){if(Array.isArray(pair)&&pair.length===2&&Number.isFinite(pair[1]))cooldownUntil.set(pair[0],pair[1]);}
   if(s.diagnostics&&typeof s.diagnostics==="object")Object.assign(diagnostics,s.diagnostics);
@@ -249,7 +251,7 @@ export function getStats(){
   return {persistence:persistenceStatus(),
     paperRun:{id:runId,startedAt:runStartedAt,revision:runRevision,buildId:runBuildId,archiveOnUpdate,rolloverPending,rolling,error:rolloverError,totals:{...runTotals}},
     strategyRevision:ADAPTIVE_STRATEGY_ID,
-    strategyMode:"FLEX_INSTITUTIONAL_15M",
+    strategyMode:"FLOW_PRICE_DIVERGENCE_1H",
     executionMode:"PAPER",
     legacyEnginesEnabled:false,
     totalEvaluations:audits.length,
@@ -295,9 +297,9 @@ export function getStats(){
     executionRiskLocked:entryBlocked(),
     today:{...today,floatingPnl:floatingPnl(),netPnl:today.pnl+floatingPnl()},
     strategySettings:{tradingSchedule:{...tradingSchedule},liveWebsocketEnabled,
-      timeframe:"15m closed + 5m timing + executable price direction confirmation",
-      stopAtr:"breakout 1.7 / correction 1.35",targetR:DIRECTION_TARGET_R,
-      riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:180,
+      timeframe:"1h closed + 3h executed taker flow + relative rank",
+      stopAtr:2.5,targetR:FLOW_TARGET_R,
+      riskFraction:ADAPTIVE_RISK_FRACTION,maxHoldMinutes:FLOW_MAX_HOLD_MS/60000,
       maxConcurrent:STRONG_FLOW_MAX_CONCURRENT,dailyLossLimit:MAX_DAILY_LOSS}
   };
 }
@@ -377,7 +379,7 @@ async function completePaperRollover(){
       diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
       reversalDiagnostics:{observations:0,warnings:0,earlyExits:0,incomplete:0}};
     const boundaries=await rotatePaperRun(old,fresh);
-    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();directionRetries.clear();
+    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();rankReference.clear();rankBars.clear();rankHour=0;completedHour=0;
     addLog("Archived previous PAPER run; started "+id+" at $"+initialVirtualBalance,"success");
     if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   }catch(e:any){rolloverError=String(e?.message||e);addLog("Archive/reset failed; old account preserved: "+rolloverError,"error");}
@@ -423,10 +425,10 @@ async function refreshWaveRadar(){
   }
   hotWatchlist=waveRadar.select(eligible,Date.now());
 }
-async function fetchClosedOneMinuteBars(symbol:string,interval:"1m"|"15m"="1m"):Promise<StrongFlowBar[]>{
+async function fetchClosedOneMinuteBars(symbol:string,interval:"1m"|"15m"|"1h"="1m"):Promise<StrongFlowBar[]>{
   let r;
   try {
-    r=await axios.get(FAPI+"/fapi/v1/klines",{params:{symbol,interval,limit:interval==="15m"?25:85},timeout:5000});
+    r=await axios.get(FAPI+"/fapi/v1/klines",{params:{symbol,interval,limit:interval==="1h"?200:interval==="15m"?25:85},timeout:5000});
   } catch (e:any) {
     const status=Number(e?.response?.status);
     if(status===429 || status===418) {
@@ -449,144 +451,41 @@ async function fetchClosedOneMinuteBars(symbol:string,interval:"1m"|"15m"="1m"):
   // Binance includes a still-forming final candle: using it suppresses valid closed-bar signals.
   return closedCandles(bars);
 }
-/** Two independent real Binance observations; absence of OI/history rejects new entries. */
-async function confirmMarketEvidence(symbol:string,side:"LONG"|"SHORT"):
-  Promise<{depth:EntryDepth;oi:EntryOi}|null>{
-  const [depthResult,oiResult]=await Promise.allSettled([
-    axios.get(FAPI+"/fapi/v1/depth",{params:{symbol,limit:20},timeout:3500}),
-    axios.get(FAPI+"/futures/data/openInterestHist",{params:{symbol,period:"5m",limit:4},timeout:3500})
-  ]);
-  // Preserve the exact raw REST payloads (or explicit failure) before evaluating
-  // the existing gates. This archive cannot change either gate's result.
-  archive("entry_book_oi",symbol,{side,observedAt:Date.now(),
-    rawDepth:depthResult.status==="fulfilled"?depthResult.value.data:null,
-    rawOiHistory:oiResult.status==="fulfilled"?oiResult.value.data:null,
-    errors:{
-      depth:depthResult.status==="rejected"?String(depthResult.reason):null,
-      oi:oiResult.status==="rejected"?String(oiResult.reason):null
-    }});
-  if(depthResult.status!=="fulfilled"){
-    diagnostics.depthErrors++;audit(symbol,side,"DEPTH_UNAVAILABLE",false);return null;
-  }
-  const d=depthResult.value.data;
-  const book=assessOrderBook(side,d?.bids,d?.asks);
-  const depth:EntryDepth={...book,bestBid:Number(d?.bids?.[0]?.[0]),bestAsk:Number(d?.asks?.[0]?.[0]),
-    time:Number(d?.T||d?.E)};
-  if(!depth.allowed){audit(symbol,side,depth.reason,false);return null;}
-  if(oiResult.status!=="fulfilled"){
-    diagnostics.openInterestErrors++;audit(symbol,side,"OI_HISTORY_FETCH_FAILED",false);return null;
-  }
-  const oi=parseOpenInterestHistory(oiResult.value.data);
-  if(!oi){diagnostics.openInterestErrors++;audit(symbol,side,"OI_HISTORY_INCOMPLETE",false);return null;}
-  return {depth,oi};
-}
-
-async function executeSignal(symbol:string,signal:BidirectionalSignal,bars:StrongFlowBar[]){
-  if(entryBlocked()||hasUnderlyingOpen(symbol)||isSymbolInCooldown(symbol)
-    ||lastSignalTime.get(symbol)===signal.signalCloseTime)return;
-  if(Date.now()-signal.signalCloseTime>300_000)return;
-  const mtf=flexTiming(signal,bars);
-  if(!mtf.allowed||!mtf.details){audit(symbol,signal.side,mtf.reason,false);return;}
-  signal={...signal,flow5:mtf.details.flow5,evidence:{...signal.evidence,flow3:mtf.details.flow3,flow5:mtf.details.flow5}};
-  const evidence=await confirmMarketEvidence(symbol,signal.side);
-  if(!evidence||entryBlocked()||hasUnderlyingOpen(symbol)||
-     Date.now()-signal.signalCloseTime>300_000)return;
-  // Fetch LAST so the executable quote is younger than the depth and OI reads.
+/** Single active entry engine. Live book/OI are monitored independently, not used as untested vetoes. */
+async function executeFlowSignal(symbol:string,signal:FlowSignal,bars:StrongFlowBar[]){
+  if(entryBlocked()||hasUnderlyingOpen(symbol)||lastSignalTime.get(symbol)===signal.signalCloseTime||Date.now()-signal.signalCloseTime>FLOW_VALID_MS)return;
   let quote;
   try{quote=await fetchExecutionQuote(symbol,3000);}
-  catch(e:any){
-    diagnostics.quoteErrors++;
-    const reason=String(e?.message||"QUOTE_UNAVAILABLE").slice(0,160);
-    diagnostics.quoteErrorReasons[reason]=(diagnostics.quoteErrorReasons[reason]||0)+1;
-    audit(symbol,signal.side,"QUOTE_UNAVAILABLE",false);return "RETRY" as const;
-  }
-  const gate=verifyExecutableEntry(signal,bars,quote,evidence.depth,evidence.oi,feeRate,slippageRate,Date.now(),"FLEX15");
-  if(!gate.allowed){
-    archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
-      depth:evidence.depth,oi:evidence.oi,gate,liveWebsocketEnabled,
-      feeRate,slippageRate,decision:"REJECTED"});
-    audit(symbol,signal.side,gate.reason,false);return;
-  }
-  const directionGate=directionConfirmation(signal.side,signal.signalClose,signal.atr14,quote);
-  archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,quote,directionGate,gate,decision:directionGate.allowed?"DIRECTION_CONFIRMED":"DIRECTION_WAIT"});
-  if(!directionGate.allowed){audit(symbol,signal.side,directionGate.reason,false);return directionGate.reason==="DIRECTION_WAIT_PRICE_CONFIRMATION"?"RETRY" as const:undefined;}
-  const liveAgg=liveWebsocketEnabled?institutionalSnapshot(symbol).agg:null;
-  // Non-blocking prospective comparison: record the actual executed tape for
-  // EVERY setup. Missing or stale evidence is not interpreted as neutral.
-  const tapeNow=Date.now();
-  const tapeValid=liveWebsocketEnabled&&!!liveAgg&&liveAgg.complete&&
-    Number.isFinite(liveAgg.delta)&&Math.abs(liveAgg.delta)<=1&&
-    Number.isFinite(liveAgg.asOf)&&liveAgg.asOf<=tapeNow+1000&&
-    tapeNow-liveAgg.asOf<=12000&&Number.isFinite(liveAgg.notional)&&
-    liveAgg.notional>=350&&Number.isFinite(liveAgg.count)&&liveAgg.count>=5;
-  const alignedTape=tapeValid&&liveAgg?(signal.side==="LONG"?1:-1)*liveAgg.delta:null;
-  const entryTapeShadow={
-    revision:"TAPE_SHADOW_V1",state:!liveWebsocketEnabled?"DISABLED":
-      alignedTape===null?"UNAVAILABLE":alignedTape<-.12?"OPPOSED":
-      alignedTape>=.10?"CONFIRMED":"WEAK_OR_NEUTRAL",
-    alignedDelta:alignedTape,observedDelta:tapeValid&&liveAgg?liveAgg.delta:null,
-    observedAt:tapeNow,sourceAt:liveAgg?.asOf??null,
-    notional:liveAgg?.notional??null,count:liveAgg?.count??null,
-    wouldConfirm:alignedTape===null?null:alignedTape>=.10
-  };
-  const liveEntry={allowed:alignedTape===null||alignedTape>=-.25,reason:alignedTape!==null&&alignedTape<-.25?"FLEX_LIVE_TAPE_STRONG_CONFLICT":"FLEX_LIVE_TAPE_NO_STRONG_CONFLICT",delta:alignedTape};
-  archive("entry_decision_inputs",symbol,{asOf:Date.now(),signal,bars,quote,
-    depth:evidence.depth,oi:evidence.oi,gate,liveAgg,liveEntry,entryTapeShadow,liveWebsocketEnabled,
-    feeRate,slippageRate,decision:liveEntry.allowed?"LIVE_GATE_PASS":"LIVE_GATE_REJECTED"});
-  if(!liveEntry.allowed){audit(symbol,signal.side,liveEntry.reason,false);return;}
-  if(entryBlocked() || hasUnderlyingOpen(symbol) || isSymbolInCooldown(symbol))return;
-  const sign=signal.side==="LONG"?1:-1;
-  const entry=(signal.side==="LONG"?quote.ask:quote.bid)*(1+sign*slippageRate);
-  const dist=signal.atr14*signal.stopAtr;
-  if(!(entry>0&&dist>0&&dist/entry>0&&dist/entry<=0.04)){
-    audit(symbol,signal.side,"STOP_DISTANCE_OUT_OF_RANGE",false);return;
-  }
-  const {stop,target,targetR}=directionExitPlan(entry,dist,signal.side);
+  catch(e:any){diagnostics.quoteErrors++;audit(symbol,signal.side,"FLOW_QUOTE_UNAVAILABLE",false);return;}
+  if(!validQuote(quote)||Date.now()-quote.time>3000||Date.now()-signal.signalCloseTime>FLOW_VALID_MS){audit(symbol,signal.side,"FLOW_QUOTE_STALE",false);return;}
+  const sign=signal.side==="LONG"?1:-1,raw=sign===1?quote.ask:quote.bid;
+  const entry=raw*(1+sign*slippageRate),dist=signal.atr14*signal.stopAtr,spread=(quote.ask-quote.bid)/((quote.ask+quote.bid)/2);
+  const gate=flowCostGate(raw,dist,spread,feeRate,slippageRate);
+  archive("entry_decision_inputs",symbol,{signal,quote,feeRate,slippageRate,spread,decision:gate?"FLOW_COST_PASS":"FLOW_COST_REJECTED",institutionalShadow:institutionalSnapshot(symbol)});
+  if(!gate){audit(symbol,signal.side,"FLOW_COST_OR_RISK",false);return;}
+  if(entryBlocked()||hasUnderlyingOpen(symbol))return;
+  const {stop,target,targetR}=flowExitPlan(entry,dist,signal.side);
   if(!(stop>0&&target>0))return;
-  const riskBudget=dailyRiskRemaining();
-  const dollars=Math.min(virtualBalance*ADAPTIVE_RISK_FRACTION,riskBudget);
-  if(dollars<initialVirtualBalance*0.003){audit(symbol,signal.side,"INSUFFICIENT_RISK_BUDGET",false);return;}
-  const notionalCap=Math.min(virtualBalance*10,virtualBalance*0.15*10);
-  const pos=Math.min(dollars/(dist+entry*2*(feeRate+slippageRate)),notionalCap/entry);
+  const dollars=Math.min(virtualBalance*ADAPTIVE_RISK_FRACTION,dailyRiskRemaining());
+  if(dollars<initialVirtualBalance*.003){audit(symbol,signal.side,"INSUFFICIENT_RISK_BUDGET",false);return;}
+  const pos=Math.min(dollars/(dist+entry*2*(feeRate+slippageRate)),virtualBalance*1.5/entry);
   if(!(pos>0&&Number.isFinite(pos))){audit(symbol,signal.side,"RISK_BUDGET",false);return;}
-  if(pos*(dist+entry*2*(feeRate+slippageRate))<initialVirtualBalance*0.003){
-    audit(symbol,signal.side,"POSITION_TOO_SMALL",false);return;
-  }
-  const t:any={
-    symbol,paperRunId:runId,direction:signal.side,entry,sl:stop,initialSlDist:dist,
-    tp1:target,tp2:target,tp3:target,pos,initialPos:pos,
-    part_a:1,part_b:0,part_c:0,a_closed:false,b_closed:false,c_closed:false,
+  const t:any={symbol,paperRunId:runId,direction:signal.side,entry,sl:stop,initialSlDist:dist,
+    tp1:target,tp2:target,tp3:target,pos,initialPos:pos,part_a:1,part_b:0,part_c:0,a_closed:false,b_closed:false,c_closed:false,
     be_done:false,micro_banked:false,peak_r:0,pnl:0,realizedPnl:0,totalFees:0,
-    entryTime:new Date().toISOString(),entrySignalTime:signal.signalCloseTime,
-    entryTiming:extractEntryTiming(),marketRegimeContext:{...extractMarketRegimeContext({rvol:signal.rvol,atr14:signal.atr14,atr20:signal.atr14}),strategy_regime:signal.regime},
-    strategyRevision:ADAPTIVE_STRATEGY_ID,executionMode:"PAPER",timeframe:"15m",
-    phase:signal.phase||"LEGACY_SIGNAL",signalEvidence:signal.evidence||null,
-    setupType:signal.setupType,setupLabel:signal.regime+" / "+signal.setupType,grade:"EVIDENCE_CHECKED",
-    marketRegime:signal.regime,maxHoldMs:signal.maxHoldMs,targetR,
-    atr:signal.atr14,highestPrice:entry,lowestPrice:entry,currentPrice:entry,
-    candlesBeforeEntry:formatCandles(bars,40),
-    priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow5:signal.flow5,flow15:signal.flow15,
-      trend15:signal.trend15,trend60:signal.trend60,
-      bookImbalance:evidence.depth.imbalance,bookSpread:evidence.depth.spread,
-      depthNotional:evidence.depth.depthNotional,openInterestDelta:evidence.oi.delta,
-      entryEvidence:{...gate.details,directionConfirmation:directionGate.reason},followThroughExtensionAtr:gate.details?.followThroughExtensionAtr,
-       entryTapeShadow,
-      liveWebsocketEntry:{
-        enabled:liveWebsocketEnabled,reason:liveEntry.reason,delta:liveEntry.delta
-      }},
-    whaleData:{scenario:"BINANCE_FLEX_15M_5M_TAKER_FLOW_BOOK_REAL_OI"},
-    reasoning:{flow:{state:entryTapeShadow.state==="OPPOSED"?"MIXED":"VERIFIED_5M_15M_TAKER_FLOW",
-       persistenceState:entryTapeShadow.state==="OPPOSED"?"CONFLICTED":entryTapeShadow.state==="CONFIRMED"?"STRONG":entryTapeShadow.state==="WEAK_OR_NEUTRAL"?"WEAK":"UNKNOWN"},
-       timingGate:{state:"FLEX_5M_TIMING"}}
-  };
+    entryTime:new Date().toISOString(),entrySignalTime:signal.signalCloseTime,entryTiming:extractEntryTiming(),
+    marketRegimeContext:{...extractMarketRegimeContext({rvol:signal.rvol,atr14:signal.atr14,atr20:signal.atr14}),strategy_regime:signal.regime},
+    strategyRevision:FLOW_REVISION,executionMode:"PAPER",timeframe:"1h",phase:signal.phase,signalEvidence:{...signal.evidence,flow3h:signal.flow3h,flowRank:signal.flowRank,ema12:signal.ema12},
+    setupType:signal.setupType,setupLabel:"FLOW_PRICE_DIVERGENCE_B",grade:"FLOW_PRICE_DIVERGENCE",marketRegime:signal.regime,maxHoldMs:FLOW_MAX_HOLD_MS,targetR,
+    atr:signal.atr14,highestPrice:entry,lowestPrice:entry,currentPrice:entry,candlesBeforeEntry:formatCandles(bars,40),
+    priceData:{rvol:signal.rvol,atr14:signal.atr14,delta:signal.delta,flow3h:signal.flow3h,flowRank:signal.flowRank,bookSpread:spread},
+    whaleData:{scenario:"FLOW_PRICE_DIVERGENCE_B"},reasoning:{flow:{state:"CLOSED_1H_TAKER_FLOW"},timingGate:{state:"FLOW_DIRECT_ENTRY"}},
+    entryFeeRate:feeRate,entrySlippageRate:slippageRate};
   activeTrades.push(t);lastSignalTime.set(symbol,signal.signalCloseTime);
   if(institutionalMonitoringEnabled)syncMarketSubscriptions();
-  diagnostics.opened++;registerTradeForDirectionTracking(t);
-  audit(symbol,signal.side,signal.setupType,true);
-  addLog("PAPER "+signal.side+" "+symbol+" "+signal.setupType+" opened at "+entry+"; target "+targetR+"R","success");
-  archive("paper_trade_open",symbol,{trade:{...t},feeRate,slippageRate,
-    accountBalance:virtualBalance,initialAccountBalance:initialVirtualBalance,
-    sourceSignalTime:signal.signalCloseTime},tradeArchiveId(t),Date.parse(t.entryTime));
+  diagnostics.opened++;registerTradeForDirectionTracking(t);audit(symbol,signal.side,"FLOW_DIVERGENCE_OPEN",true);
+  addLog("PAPER FLOW "+signal.side+" "+symbol+" opened at "+entry+"; target 1.2R","success");
+  archive("paper_trade_open",symbol,{trade:{...t},feeRate,slippageRate,accountBalance:virtualBalance,sourceSignalTime:signal.signalCloseTime},tradeArchiveId(t),Date.parse(t.entryTime));
   persistEngineSnapshot();
 }
 /** A resolved candidate must not swallow a DIFFERENT fresh closed-minute
@@ -597,112 +496,61 @@ export function mayStageFollowupSignal(previousCloseMs:number|null,nextCloseMs:n
     (previousCloseMs===null || nextCloseMs>previousCloseMs);
 }
 async function scanEntries(){
-  if(!active || rolloverPending || rolling || !isStrongFlowTradingHour(new Date(),tradingSchedule) || scanning || Date.now()<scanBackoffUntil)return;
-  for(const [symbol,signal] of pendingSignals) {
-    if(Date.now()-signal.signalCloseTime>300_000){pendingSignals.delete(symbol);directionRetries.delete(symbol);}
-  }
+  if(!active||rolloverPending||rolling||scanning||Date.now()<scanBackoffUntil||!isStrongFlowTradingHour(new Date(),tradingSchedule))return;
+  const hour=closedHour(Date.now());
+  if(Date.now()-hour>FLOW_VALID_MS||completedHour===hour)return;
   scanning=true;
   try{
-    resetDailyStatsIfNeeded();
-    await updateUniverse();
-    if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil)return;
-    await refreshWaveRadar();
-    if(!active||!isStrongFlowTradingHour(new Date(),tradingSchedule)||Date.now()<scanBackoffUntil)return;
-    const batch=nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize);
-    if(batch.symbols.length===0)return;
-    if(!scanPassStartedAt)scanPassStartedAt=Date.now();
-    const regularSet=new Set(batch.symbols);
-    // Hot symbols get extra attention, but never displace a symbol in the coverage round.
-    const eligible=new Set(watchlist);
-    const symbols=scheduleRadarBatch(batch.symbols,[...new Set([...pendingSignals.keys(),...hotWatchlist])].filter(s=>eligible.has(s)),[...pendingSignals].filter(([symbol])=>eligible.has(symbol)).map(([symbol,signal])=>({symbol,signalCloseTime:signal.signalCloseTime})),Date.now());
-    let attempted=0,succeeded=0,complete=true;
-    for(let i=0;i<symbols.length;i+=SCAN_CONCURRENCY) {
-      if(!active || !isStrongFlowTradingHour(new Date(),tradingSchedule) || Date.now()<scanBackoffUntil) {
-        complete=false;break;
-      }
-      const group=symbols.slice(i,i+SCAN_CONCURRENCY);
-      const rows=await Promise.allSettled(group.map(async symbol=>{
-        const bars=await fetchClosedOneMinuteBars(symbol);
-        const now=Date.now(),quarter=Math.floor(now/900000)*900000-1;
-        let signal:BidirectionalSignal|null=null;
-        if(now-quarter<=300000&&evaluated15m.get(symbol)!==quarter&&!hasUnderlyingOpen(symbol)&&!isSymbolInCooldown(symbol)){
-          const fifteen=await fetchClosedOneMinuteBars(symbol,"15m");
-          if(fifteen.at(-1)?.closeTime===quarter&&fifteen.length>=21){
-            evaluated15m.set(symbol,quarter);
-            signal=evaluateFlex15m(fifteen,Date.now());
-            if(signal)signal={...signal,targetR:DIRECTION_TARGET_R};
-            if(signal)archive("signal_candidate",symbol,{signal,bars:fifteen,observedAt:Date.now(),stage:"FLEX_CLOSED_15M"},undefined,signal.signalCloseTime);
-          }
-        }
-        return {symbol,bars,signal};
+    resetDailyStatsIfNeeded();await updateUniverse();
+    if(rankHour!==hour){rankHour=hour;rankReference.clear();rankBars.clear();currentBatchIndex=0;scanPassStartedAt=Date.now();scanPassAttempted.clear();scanPassSucceeded.clear();}
+    // Reference cohort is the actual research universe. Missing symbols are not imputed.
+    const refs=FLOW_REFERENCE_SYMBOLS.filter(x=>watchlist.includes(x)&&!rankReference.has(x));
+    for(let i=0;i<refs.length;i+=SCAN_CONCURRENCY){
+      if(Date.now()-hour>FLOW_VALID_MS||Date.now()<scanBackoffUntil)return;
+      await Promise.allSettled(refs.slice(i,i+SCAN_CONCURRENCY).map(async symbol=>{
+        const bars=await fetchClosedOneMinuteBars(symbol,"1h"),ret=return3h(bars,hour);
+        if(ret!==null){rankReference.set(symbol,ret);rankBars.set(symbol,bars);}
       }));
-      for(let j=0;j<rows.length;j++){
-        const symbol=group[j],result=rows[j];
-        if(regularSet.has(symbol)) {
-          scanPassAttempted.add(symbol);attempted++;
-          if(result.status==="fulfilled"&&result.value.bars.length>=64){scanPassSucceeded.add(symbol);succeeded++;}
-        }
-        if(result.status==="fulfilled") {
-          const bars=result.value.bars;
-          const last=bars.at(-1),now=Date.now();
-          waveRadar.ingestBars(symbol,bars,now);
-          if(result.value.signal&&!hasUnderlyingOpen(symbol)&&!isSymbolInCooldown(symbol)){
-            pendingSignals.set(symbol,result.value.signal);
-            diagnostics.candidatesStaged++;
-            audit(symbol,result.value.signal.side,"FLEX_CLOSED_15M",false);
-          }
-          const candidate=pendingSignals.get(symbol);
-          if(candidate){
-            if(now-candidate.signalCloseTime>300000){pendingSignals.delete(symbol);audit(symbol,candidate.side,"FLEX_SIGNAL_EXPIRED",false);}
-            else if(!entryBlocked()&&(!directionRetries.has(symbol)||now>=directionRetries.get(symbol)!.nextAt)){
-              const timing=flexTiming(candidate,bars,now);
-              if(timing.allowed){
-                pendingSignals.delete(symbol);
-                diagnostics.candidatesConfirmed++;
-                const result=await executeSignal(symbol,candidate,bars);
-                const previous=directionRetries.get(symbol),attempts=(previous?.signalTime===candidate.signalCloseTime?previous.attempts:0)+1;
-                if(result==="RETRY"&&retryDirection(attempts,Date.now(),candidate.signalCloseTime)&&!hasUnderlyingOpen(symbol)){
-                  directionRetries.set(symbol,{signalTime:candidate.signalCloseTime,attempts,nextAt:Date.now()+20000});pendingSignals.set(symbol,candidate);
-                }else directionRetries.delete(symbol);
-              }else if(timing.reason!=="FLEX_5M_MISSING"){
-                pendingSignals.delete(symbol);audit(symbol,candidate.side,timing.reason,false);
-              }
-            }
-          }
-        } else if(result.status==="rejected") diagnostics.scanErrors++;
+    }
+    if(rankReference.size<30){audit("MARKET","NONE","FLOW_REFERENCE_INCOMPLETE",false);return;}
+    const batch=nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize);
+    if(!batch.symbols.length)return;
+    let attempted=0,succeeded=0,complete=true;
+    for(let i=0;i<batch.symbols.length;i+=SCAN_CONCURRENCY){
+      if(!active||Date.now()-hour>FLOW_VALID_MS||Date.now()<scanBackoffUntil||!isStrongFlowTradingHour(new Date(),tradingSchedule)){complete=false;break;}
+      const group=batch.symbols.slice(i,i+SCAN_CONCURRENCY);
+      const results=await Promise.allSettled(group.map(async symbol=>{
+        if(!flowEligible(symbol))return {symbol,bars:[] as StrongFlowBar[],excluded:true};
+        return {symbol,bars:rankBars.get(symbol)||await fetchClosedOneMinuteBars(symbol,"1h"),excluded:false};
+      }));
+      for(let j=0;j<results.length;j++){
+        const symbol=group[j],result=results[j];attempted++;scanPassAttempted.add(symbol);
+        if(result.status==="rejected"){diagnostics.scanErrors++;continue;}
+        const {bars,excluded}=result.value;
+        if(excluded){audit(symbol,"NONE","FLOW_NON_CRYPTO_EXCLUDED",false);continue;}
+        const ret=return3h(bars,hour);if(ret===null)continue;
+        succeeded++;scanPassSucceeded.add(symbol);
+        if(evaluated15m.get(symbol)===hour)continue;
+        evaluated15m.set(symbol,hour);
+        const rank=relativeRank(symbol,ret,rankReference);if(rank===null)continue;
+        const signal=evaluateFlowDivergence(bars,rank);
+        if(signal){diagnostics.candidatesStaged++;archive("signal_candidate",symbol,{signal,bars:bars.slice(-26),referenceCoverage:rankReference.size,stage:"FLOW_CLOSED_1H",outOfResearchUniverse:!FLOW_REFERENCE_SYMBOLS.includes(symbol)},undefined,signal.signalCloseTime);
+          diagnostics.candidatesConfirmed++;await executeFlowSignal(symbol,signal,bars);}
       }
     }
     lastBatchAttempted=attempted;lastBatchSucceeded=succeeded;
-    if(complete){
-      currentBatchIndex=batch.nextIndex;
-      if(batch.completedPass){
-        lastCompletedScanPass={
-          time:new Date().toISOString(),
-          durationMs:Date.now()-scanPassStartedAt,
-          attempted:scanPassAttempted.size,
-          succeeded:scanPassSucceeded.size,
-          failed:scanPassAttempted.size-scanPassSucceeded.size,
-          universeSize:watchlist.length
-        };
-        completedScanPasses++;
-        scanPassStartedAt=0;scanPassAttempted.clear();scanPassSucceeded.clear();
-      }
-    }
-  }catch(e:any){diagnostics.scanErrors++;addLog("Strong-flow scan error: "+(e?.message||e),"warn");}
-  finally{
-    // Newly staged symbols get a fresh trade stream before next-minute confirmation.
-    if(institutionalMonitoringEnabled)syncMarketSubscriptions();
-    scanning=false;
-    persistEngineSnapshot();
-  }
+    if(complete){currentBatchIndex=batch.nextIndex;if(batch.completedPass){completedHour=hour;completedScanPasses++;lastCompletedScanPass={time:new Date().toISOString(),durationMs:Date.now()-scanPassStartedAt,attempted:scanPassAttempted.size,succeeded:scanPassSucceeded.size,failed:scanPassAttempted.size-scanPassSucceeded.size,universeSize:watchlist.length};}}
+  }catch(e:any){diagnostics.scanErrors++;addLog("Flow scan error: "+String(e?.message||e),"warn");}
+  finally{scanning=false;persistEngineSnapshot();}
 }
+
 function closeFull(t:any,reason:string){
   if(!activeTrades.includes(t)||t.exitTime)return;
   const sign=t.direction==="LONG"?1:-1,price=t.currentPrice;
   if(!(Number.isFinite(price)&&price>0))return;
-  const executionPrice=price*(1-sign*slippageRate);
+  const executionPrice=price*(1-sign*(t.entrySlippageRate??slippageRate));
   const gross=sign*(executionPrice-t.entry)*t.pos;
-  const fees=(t.entry+executionPrice)*t.pos*feeRate;
+  const fees=(t.entry+executionPrice)*t.pos*(t.entryFeeRate??feeRate);
   const pnl=gross-fees;
   t.realizedPnl=(t.realizedPnl||0)+pnl;
   t.totalFees=(t.totalFees||0)+fees;
@@ -733,7 +581,7 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
   if(!(Number.isFinite(price)&&price>0))return;
   t.lastQuoteTime=quoteTime;
   const stopBefore=t.sl,peakBefore=t.peak_r;
-  const stopped=markTrade(t,price,feeRate,slippageRate);
+  const stopped=markTrade(t,price,t.entryFeeRate??feeRate,t.entrySlippageRate??slippageRate);
   archive("price_quote",t.symbol,{receivedAt:now,quoteTime,price,
     quoteSide:t.direction==="LONG"?"BID":"ASK",
     stopBefore,peakBefore,markStopped:stopped,
@@ -746,7 +594,7 @@ export function protectTradeAtPrice(t:any,price:number,quoteTime=Date.now()){
     closeFull(t,isProtected?"ADAPTIVE Protected Stop":"ADAPTIVE Stop Loss");
     return;
   }
-  if(t.strategyRevision!==FLEX_REVISION&&t.strategyRevision!==DIRECTION_REVISION){
+  if(t.strategyRevision!==FLOW_REVISION&&t.strategyRevision!==FLEX_REVISION&&t.strategyRevision!==DIRECTION_REVISION){
   const candidate=adaptiveStopCandidate(t.direction,t.entry,t.initialSlDist,t.peak_r||0,t.setupType);
   if(candidate!==null)tightenStop(t,candidate);
   // Apply new regime-specific trailing floors ONLY to V4 paper positions.
@@ -835,7 +683,7 @@ export async function runProtectionCycle(){
                 side:t.direction,price:t.currentPrice,profitR:t.profitR,peakR:t.peak_r,
                 market:t.institutionalContext,warning});
             }
-            if(warning.decision==="EXIT" && !t.exitTime && t.strategyRevision!==FLEX_REVISION && t.strategyRevision!==DIRECTION_REVISION){
+            if(warning.decision==="EXIT" && !t.exitTime && t.strategyRevision!==FLOW_REVISION && t.strategyRevision!==FLEX_REVISION && t.strategyRevision!==DIRECTION_REVISION){
               reversalDiagnostics.earlyExits++;
               closeFull(t,"ADAPTIVE Confirmed Institutional Reversal");
             }
