@@ -105,7 +105,7 @@ const logs: any[] = [];
 const audits: any[] = [];
 const lastSignalTime = new Map<string,number>();
 const pendingSignals = new Map<string,BidirectionalSignal>();
-let rankHour=0, completedHour=0;
+let rankHour=0, completedHour=0, rankFrozen=false;
 const rankReference=new Map<string,number>();
 const rankBars=new Map<string,StrongFlowBar[]>();
 const evaluated15m=new Map<string,number>();
@@ -283,8 +283,9 @@ export function getStats(){
       enabled:active&&isStrongFlowTradingHour(new Date(),tradingSchedule),
       eligibleSymbols:watchlist.length,
       universeLastUpdatedAt:lastUniverseUpdate?new Date(lastUniverseUpdate).toISOString():null,
-      mode:scanBatchSize===0?"AUTO_ALL":"MANUAL_ALL",
-      effectiveBatchSize:nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize).effectiveBatchSize,
+      mode:"HOURLY_FULL_COVERAGE",
+      rankReferenceCoverage:rankReference.size,rankFrozen,rankHour,completedHour,
+      effectiveBatchSize:nextCoverageBatch(watchlist,currentBatchIndex,Math.max(scanBatchSize,Math.ceil(watchlist.length/4))).effectiveBatchSize,
       currentPassAttempted:scanPassAttempted.size,
       currentPassSucceeded:scanPassSucceeded.size,
       completedPasses:completedScanPasses,
@@ -379,7 +380,7 @@ async function completePaperRollover(){
       diagnostics:{opened:0,quoteErrors:0,scanErrors:0,depthErrors:0,openInterestErrors:0,rateLimitEvents:0,protectionCycles:0,lastProtectionAt:0,lastReason:"",reasons:{},quoteErrorReasons:{},candidatesStaged:0,candidatesConfirmed:0},
       reversalDiagnostics:{observations:0,warnings:0,earlyExits:0,incomplete:0}};
     const boundaries=await rotatePaperRun(old,fresh);
-    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();rankReference.clear();rankBars.clear();rankHour=0;completedHour=0;
+    restoreEngineState({...fresh,...boundaries});evaluated15m.clear();rankReference.clear();rankBars.clear();rankHour=0;completedHour=0;rankFrozen=false;
     addLog("Archived previous PAPER run; started "+id+" at $"+initialVirtualBalance,"success");
     if(institutionalMonitoringEnabled)syncMarketSubscriptions();
   }catch(e:any){rolloverError=String(e?.message||e);addLog("Archive/reset failed; old account preserved: "+rolloverError,"error");}
@@ -502,9 +503,9 @@ async function scanEntries(){
   scanning=true;
   try{
     resetDailyStatsIfNeeded();await updateUniverse();
-    if(rankHour!==hour){rankHour=hour;rankReference.clear();rankBars.clear();currentBatchIndex=0;scanPassStartedAt=Date.now();scanPassAttempted.clear();scanPassSucceeded.clear();}
+    if(rankHour!==hour){rankHour=hour;rankFrozen=false;rankReference.clear();rankBars.clear();currentBatchIndex=0;scanPassStartedAt=Date.now();scanPassAttempted.clear();scanPassSucceeded.clear();}
     // Reference cohort is the actual research universe. Missing symbols are not imputed.
-    const refs=FLOW_REFERENCE_SYMBOLS.filter(x=>watchlist.includes(x)&&!rankReference.has(x));
+    const refs=rankFrozen?[]:FLOW_REFERENCE_SYMBOLS.filter(x=>watchlist.includes(x)&&!rankReference.has(x));
     for(let i=0;i<refs.length;i+=SCAN_CONCURRENCY){
       if(Date.now()-hour>FLOW_VALID_MS||Date.now()<scanBackoffUntil)return;
       await Promise.allSettled(refs.slice(i,i+SCAN_CONCURRENCY).map(async symbol=>{
@@ -513,7 +514,8 @@ async function scanEntries(){
       }));
     }
     if(rankReference.size<30){audit("MARKET","NONE","FLOW_REFERENCE_INCOMPLETE",false);return;}
-    const batch=nextCoverageBatch(watchlist,currentBatchIndex,scanBatchSize);
+    rankFrozen=true;
+    const batch=nextCoverageBatch(watchlist,currentBatchIndex,Math.max(scanBatchSize,Math.ceil(watchlist.length/4)));
     if(!batch.symbols.length)return;
     let attempted=0,succeeded=0,complete=true;
     for(let i=0;i<batch.symbols.length;i+=SCAN_CONCURRENCY){

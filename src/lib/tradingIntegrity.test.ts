@@ -7,10 +7,11 @@ import {closedCandles,validQuote,waveEvidence} from "./tradingIntegrity.js";
 import {ADAPTIVE_STRATEGY_ID} from "./adaptiveRegimeStrategy.js";
 import {FLEX_REVISION} from "./flexInstitutional15m.js";
 import {DIRECTION_REVISION} from "./directionConfirmation.js";
+import {FLOW_REVISION} from "./flowDivergence.js";
 process.env.BEAST_RESEARCH_DIR=mkdtempSync(join(tmpdir(),"beast-fixed2-test-"));
 const {getTrades,getClosedTrades,getStats,protectTradeAtPrice,runProtectionCycle,isActive,resetAccountState,restoreEngineState,engineStateSnapshot,mayStageFollowupSignal}=await import("./apexPredator.js");
-assert.equal(getStats().strategyMode,"FLEX_INSTITUTIONAL_15M");
-assert.equal(getStats().strategyRevision,DIRECTION_REVISION);
+assert.equal(getStats().strategyMode,"FLOW_PRICE_DIVERGENCE_1H");
+assert.equal(getStats().strategyRevision,FLOW_REVISION);
 assert.equal(getStats().legacyEnginesEnabled,false);
 assert.equal(getStats().executionMode,"PAPER");
 // Signal replacement never flips directly: it stages ONLY a later independent signal.
@@ -39,7 +40,7 @@ assert.equal(getStats().strategyPerformance.v4ClosedCount,0);
 assert(Math.abs(getStats().entryReadiness.dailyRiskBudget-(40+priorState.today.pnl))<1e-8,"daily risk budget reflects all account losses");
 assert.equal(getStats().entryReadiness.canOpenTrade,false,"strategy change must not bypass account loss cap");
 const restored=engineStateSnapshot();
-assert.equal(restored.todayRiskStrategyRevision,DIRECTION_REVISION);
+assert.equal(restored.todayRiskStrategyRevision,FLOW_REVISION);
 restoreEngineState(restored);
 assert.equal(getStats().today.pnl,priorState.today.pnl,"daily accounting idempotent after restart");
 const riskLocked={...restored,today:{...restored.today,pnl:-39}} as any;
@@ -132,6 +133,19 @@ for(const side of ["LONG","SHORT"] as const){
   assert(getTrades().includes(t));assert.equal(t.sl,100-sign*10);
   protectTradeAtPrice(t,100+sign*12,Date.now());
   assert(!getTrades().includes(t));assert.equal(t.exitReason,"ADAPTIVE Regime Target");assert(t.finalPnl>0);
+}
+// New Flow positions must never inherit old stop tightening or partial exits.
+for(const side of ["LONG","SHORT"] as const){
+  const sign=side==="LONG"?1:-1,t:any=mk("FLOW"+side+"USDT",side);
+  t.strategyRevision=FLOW_REVISION;t.targetR=1.2;t.maxHoldMs=240*60000;
+  getTrades().push(t);protectTradeAtPrice(t,100+sign*11,Date.now());
+  assert(getTrades().includes(t));assert.equal(t.sl,100-sign*10);assert.equal(t.pos,1);
+  protectTradeAtPrice(t,100+sign*12,Date.now());
+  assert(!getTrades().includes(t));assert.equal(t.exitReason,"ADAPTIVE Regime Target");
+}
+{
+ const t:any=mk("FLOWTIMEUSDT","LONG");t.strategyRevision=FLOW_REVISION;t.targetR=1.2;t.maxHoldMs=240*60000;t.entryTime=new Date(Date.now()-241*60000).toISOString();
+ getTrades().push(t);protectTradeAtPrice(t,100,Date.now());assert(!getTrades().includes(t));assert.equal(t.exitReason,"ADAPTIVE Time Exit");
 }
 // Legacy FLEX positions keep their original fixed exits.
 for(const side of ["LONG","SHORT"] as const){

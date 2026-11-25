@@ -216,7 +216,7 @@ export const PredatorDashboard: React.FC = () => {
                          </span>
                          <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded shadow-sm">{t.grade}</span>
                          {isClosed && <span className="bg-slate-800 text-blue-300 text-[10px] px-2 py-0.5 rounded">
-                           {t.strategyRevision === 'FLEX_DIRECTION_CONFIRMATION_V2_PAPER' ? 'FLEX 15m' : 'محرك سابق'}
+                           {t.strategyRevision === 'BEAST_FLOW_DIVERGENCE_B_1H_V1_PAPER' ? 'FLOW 1h' : 'محرك سابق'}
                          </span>}
                          {t.setupLabel && (
                             <span className="bg-blue-950/80 text-blue-300 border border-blue-500/40 text-[10px] px-2 py-0.5 rounded font-bold">
@@ -359,7 +359,7 @@ export const PredatorDashboard: React.FC = () => {
              <strong className={stats.entryReadiness.canOpenTrade ? 'text-emerald-400 text-sm' : 'text-amber-400 text-sm'}>
                {stats.entryReadiness.canOpenTrade ? 'بوابة الدخول متاحة — بعد استيفاء شروط السوق' : 'بوابة الدخول محظورة'}
              </strong>
-             <span className="text-xs text-slate-400 font-mono" dir="ltr">FLEX Direction V2 PAPER · 1.2R TP · 4% daily limit</span>
+             <span className="text-xs text-slate-400 font-mono" dir="ltr">FLOW DIVERGENCE B PAPER · 1h · 1.2R TP · 4% daily limit</span>
            </div>
            {!stats.entryReadiness.canOpenTrade && (
              <p className="text-sm text-amber-200">
@@ -374,7 +374,7 @@ export const PredatorDashboard: React.FC = () => {
            </div>
            {stats.strategyPerformance && (
              <p className="text-xs text-slate-400">
-               صفقات FLEX المغلقة: {stats.strategyPerformance.v4ClosedCount} (صافي ${Number(stats.strategyPerformance.v4ClosedPnl).toFixed(2)})؛
+               صفقات FLOW المغلقة: {stats.strategyPerformance.v4ClosedCount} (صافي ${Number(stats.strategyPerformance.v4ClosedPnl).toFixed(2)})؛
                الصفقات السابقة: {stats.strategyPerformance.legacyClosedCount} (صافي ${Number(stats.strategyPerformance.legacyClosedPnl).toFixed(2)}).
                الرصيد الكلي يشمل نتائج المحركين، دون حذف أي صفقة.
              </p>
@@ -412,7 +412,7 @@ export const PredatorDashboard: React.FC = () => {
                    <SettingsIcon className="w-5 h-5 text-blue-400"/> إعدادات المحرك الجديد فقط
                 </h2>
                 <p className="text-sm text-slate-300 leading-relaxed">
-                   محرك FLEX Direction V2: اختراق أو تصحيح مؤكد بسعر التنفيذ، هدف 1.2R، مع التحقق من دفتر الأوامر وOI وتكاليف التنفيذ.
+                   محرك FLOW DIVERGENCE B: شمعة ساعة مغلقة، تدفق 3 ساعات، قوة نسبية، وقف 2.5 ATR وهدف 1.2R أو خروج بعد 4 ساعات.
                    يتم رفض الدخول في حال ضعف السيولة أو ارتفاع التكلفة أو تغير الاتجاه. المخاطرة المستهدفة 0.35% لكل صفقة PAPER.
                    التداول الافتراضي طوال اليوم، ولا توجد ضمانة للربحية قبل اختبارات مستقلة.
                 </p>
@@ -424,8 +424,8 @@ export const PredatorDashboard: React.FC = () => {
                      استعمال WebSocket الحي في قرارات التداول — مفعّل افتراضياً
                    </label>
                    <p className="text-xs text-slate-400">
-                     عند التشغيل: يؤكد تدفق aggTrade اللحظي دخول الاختراقات ويدعم كشف الانعكاس في الصفقات المفتوحة.
-                     يلزم وصول بيانات حديثة للاختراق؛ استمرار الاتجاه والتصحيح يحتفظان بقواعد دخولهما السابقة.
+                     عند التشغيل: تُرصد بيانات السوق اللحظية ودفتر الأوامر وOI للمراجعة.
+                     لا تغيّر المراقبة المؤسساتية قواعد دخول أو خروج FLOW المثبتة في المحاكاة.
                      عند الإيقاف: لا تؤثر بيانات WebSocket على الدخول أو الخروج، وتبقى قواعد السعر وREST والوقف والأهداف كما كانت.
                    </p>
                    <p className="text-xs text-sky-400">
@@ -637,7 +637,7 @@ export const PredatorDashboard: React.FC = () => {
                       </span>
                    </div>
                    <p className="text-sm font-bold text-white">
-                      استراتيجية التناغم الثلاثي + درع الوقف الصفري لحماية رأس المال ($1,000)
+                      FLOW DIVERGENCE B — وقف ثابت وهدف ثابت وحماية رأس المال
                    </p>
                    <p className="text-xs text-slate-400">
                       يتم اقتناص الصفقات عند تلاقي سيولة الحيتان (CVD + OI) مع اتجاه البيتكوين، وتأمين الربح عند +0.70R بنقل الوقف لنقطة الدخول فوراً.
