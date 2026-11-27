@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "node --check paqe.mjs && node paqe.mjs --self-test && node paqe.mjs --replay",
+    "build": "node --check paqe.mjs && node paqe.mjs --self-test && node paqe.mjs --db-test && node paqe.mjs --replay",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "start": "node paqe.mjs",
