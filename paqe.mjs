@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import {InstitutionalShadow,exitRule} from './institutional-shadow.mjs';
+import {retryUntil,restoreCooldown,safeDelay} from './research-policies.mjs';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -75,7 +76,7 @@ export class Paper {
   const q=this.open.get(symbol);if(!q)return;
   const pnl=this.pnl(q,price);this.balance+=pnl;this.open.delete(symbol);this.counters.closed++;
   if(pnl>0){this.totalWins++;this.grossProfit+=pnl;}else this.grossLoss-=pnl;
-  this.closed.push({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,exit:price,entryAt:q.entryAt,exitAt:t,pnl,reason,expectedR:q.expectedR});
+  this.closed.push({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,exit:price,entryAt:q.entryAt,exitAt:t,pnl,reason,expectedR:q.expectedR,policy:q.policy??null,horizon:q.horizon??null});
   if(this.closed.length>2000)this.closed.shift();
   this.onLog?.('INFO','TRADE',symbol+' '+(q.side===1?'LONG':'SHORT')+' CLOSED | '+reason+' | net USD '+pnl.toFixed(4));
  }
@@ -116,7 +117,7 @@ export class Paper {
  }
  stats(){
   const profits=this.grossProfit,losses=this.grossLoss;
-  return {engine:'PAQE-Institutional-v0.4-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
+  return {engine:'PAQE-Institutional-v0.5-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
  }
 }
 
@@ -273,10 +274,12 @@ async function live(){
  const persist=()=>{const previous=paper.storageHealthy;paper.storageHealthy=store.save(paper);if(previous!==paper.storageHealthy)log(paper.storageHealthy?'INFO':'ERROR','DATABASE',paper.storageHealthy?'Saving recovered':'Saving failed: '+store.error);};
  shadow.onEntry=(p,q,h)=>{
   if(!paper.storageHealthy||paper.open.has(p.s)||paper.open.size>=6||paper.balance<=0||paper.equity()<=paper.dayStart*.98)return;
-  const side=p.side,entry=side===1?q.ask:q.bid,qty=Math.min(100/entry,paper.balance*.0025/(entry*p.risk),paper.balance*.15/entry);
+  const side=p.execSide;if(![1,-1].includes(side)||!Number.isFinite(p.execEV)||p.execEV<=0)return;
+  const entry=side===1?q.ask:q.bid,equity=paper.equity(),positions=[...paper.open.values()],gross=positions.reduce((v,x)=>v+x.qty*x.last,0),sameSide=positions.filter(x=>x.side===side).reduce((v,x)=>v+x.qty*x.last,0);
+  const qty=Math.min(100/entry,paper.balance*.0025/(entry*p.risk),paper.balance*.15/entry,Math.max(0,equity*.6-gross)/entry,Math.max(0,equity*.35-sameSide)/entry);
   if(!Number.isFinite(qty)||qty<=0||qty*entry>Math.min(q.bid*q.bq,q.ask*q.aq))return;
-  paper.open.set(p.s,{institutional:true,side,entry,entryAt:q.t,mature:p.due,risk:p.risk,qty,riskCash:qty*entry*p.risk,last:side===1?q.bid:q.ask,lastAt:q.t,peak:-Infinity,expectedR:Math.max(...p.pred)/p.risk,fundingTime:p.next,horizon:h});
-  paper.counters.opened++;log('INFO','TRADE',p.s+' institutional '+(side===1?'LONG':'SHORT')+' open | horizon '+h+'m');persist();
+  paper.open.set(p.s,{institutional:true,side,entry,entryAt:q.t,mature:p.due,risk:p.risk,qty,riskCash:qty*entry*p.risk,last:side===1?q.bid:q.ask,lastAt:q.t,peak:-Infinity,expectedR:p.execEV/p.risk,fundingTime:p.next,horizon:h,policy:p.policy});
+  paper.counters.opened++;log('INFO','TRADE',p.s+' institutional '+(side===1?'LONG':'SHORT')+' open | horizon '+h+'m | policy '+p.policy);persist();
  };
  shadow.onQuote=q=>{
   const p=paper.open.get(q.s);if(!p?.institutional)return;
@@ -287,9 +290,9 @@ async function live(){
  setInterval(persist,15000);
  setInterval(saveShadow,30000);
  for(const sig of ['SIGTERM','SIGINT'])process.once(sig,()=>{persist();saveShadow();store.db.close();process.exit(0);});
- let symbols=[],lastMessage=0,errors=0,started=false,messages=0,closedBars=0,invalidMessages=0,reconnects=0,lastError=null;
+ let symbols=[],universeSource='WAITING',lastMessage=0,errors=0,started=false,messages=0,closedBars=0,invalidMessages=0,reconnects=0,lastError=null;
  const template=fs.readFileSync(new URL('./paqe-dashboard.html',import.meta.url),'utf8');
- const status=()=>({...paper.stats(),database:store.status(),institutional:shadow.status(),market:{symbols:symbols.length,receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
+ const status=()=>({...paper.stats(),database:store.status(),institutional:shadow.status(),market:{symbols:symbols.length,universeSource,rest:{pausedUntil:restUntil> Date.now()?new Date(restUntil).toISOString():null,usedWeight:restWeight},receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
  const server=http.createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const pathname=new URL(req.url||'/','http://localhost').pathname;
@@ -308,11 +311,12 @@ async function live(){
   if(pathname==='/api/trades/active'){res.end(JSON.stringify(status().positions));return;}
   if(pathname==='/api/trades/closed'){const q=new URL(req.url,'http://localhost').searchParams;res.end(JSON.stringify(store.list(Number(q.get('limit'))||100,Number(q.get('offset'))||0)));return;}
   if(pathname==='/api/institutional/status'){res.end(JSON.stringify(shadow.status()));return;}
+  if(pathname==='/api/research/policies'){res.end(JSON.stringify(shadow.lab.report()));return;}
   if(pathname==='/api/institutional/labels'){const n=Math.min(500,Math.max(1,Number(new URL(req.url,'http://localhost').searchParams.get('limit'))||100));res.end(JSON.stringify(store.db.prepare('SELECT payload FROM institutional_labels ORDER BY id DESC LIMIT ?').all(Math.floor(n)).map(r=>JSON.parse(r.payload))));return;}
   if(pathname==='/api/database/status'){res.end(JSON.stringify(store.status()));return;}
   res.statusCode=404;res.end(JSON.stringify({error:'Not found'}));
  });
- server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE Institutional v0.4 PAPER ONLY listening'));
+ server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE Institutional v0.5 PAPER ONLY listening'));
  function connect(group,attempt=0){
   const url='wss://fstream.binance.com/market/stream?streams='+group.map(s=>s.toLowerCase()+'@kline_1m').join('/');
   const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:1024*1024,handshakeTimeout:15000});sockets.add(ws);
@@ -335,28 +339,30 @@ async function live(){
  }
  function aux(url,handler){const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:4*1024*1024,handshakeTimeout:15000});let alive=Date.now(),ok=false;const watch=setInterval(()=>{if(Date.now()-alive>90000)ws.terminate();},15000);ws.on('message',buf=>{try{const raw=JSON.parse(buf.toString()),events=raw.data??raw;for(const e of Array.isArray(events)?events:[events])if(handler(e,Date.now())){alive=Date.now();ok=true;}}catch(e){console.error('Auxiliary decode',e.message);}});ws.on('error',e=>log('WARN','MARKET','Institutional feed '+e.message));ws.on('close',()=>{clearInterval(watch);setTimeout(()=>aux(url,handler),ok?10000:60000);});}
  aux('wss://fstream.binance.com/public/ws/!bookTicker',(e,t)=>shadow.quote(e,t));
- aux('wss://fstream.binance.com/market/stream?streams=!markPrice@arr@1s/!forceOrder@arr',(e,t)=>shadow.mark(e,t)||shadow.liquidation(e,t));
+ const observed=new Map();
+ aux('wss://fstream.binance.com/market/stream?streams=!markPrice@arr@1s/!forceOrder@arr',(e,t)=>{if(e?.e==='markPriceUpdate'&&Number(e.st)!==2&&typeof e.s==='string'&&e.s.endsWith('USDT')&&!e.s.includes('_')&&Number(e.T)>t&&Math.abs(Number(e.E)-t)<20000&&Number(e.p)>0&&Number(e.i)>0){observed.set(e.s,t);if(!symbols.length)return true;}return shadow.mark(e,t)||shadow.liquidation(e,t);});
  const metaGet=store.db.prepare("SELECT payload FROM market_metadata WHERE key='symbols'"),metaSet=store.db.prepare("INSERT INTO market_metadata(key,payload) VALUES('symbols',?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload");
- function subscribe(list){symbols=list;shadow.setUniverse(list);for(let i=0;i<list.length;i+=40){const g=list.slice(i,i+40);setTimeout(()=>aux('wss://fstream.binance.com/public/stream?streams='+g.map(x=>x.toLowerCase()+'@depth20@500ms').join('/'),(e,t)=>shadow.depth(e,t)),i/40*600);}for(let i=0;i<symbols.length;i+=80){const group=symbols.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}started=true;log('INFO','MARKET','Subscribed '+symbols.length+' real futures symbols');}
+ function subscribe(list,source){const newSymbols=[...new Set(list)].filter(x=>!symbols.includes(x));if(!newSymbols.length)return;symbols=[...symbols,...newSymbols];universeSource=source;shadow.setUniverse(symbols);list=newSymbols;for(let i=0;i<list.length;i+=40){const g=list.slice(i,i+40);setTimeout(()=>aux('wss://fstream.binance.com/public/stream?streams='+g.map(x=>x.toLowerCase()+'@depth20@500ms').join('/'),(e,t)=>shadow.depth(e,t)),i/40*600);}for(let i=0;i<list.length;i+=80){const group=list.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}started=true;log('INFO','MARKET','Subscribed '+symbols.length+' real futures symbols');}
  const cooldownGet=store.db.prepare("SELECT payload FROM market_metadata WHERE key='rest_cooldown'"),cooldownSet=store.db.prepare("INSERT INTO market_metadata(key,payload) VALUES('rest_cooldown',?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload");
- let restUntil=Number(cooldownGet.get()?.payload)||0,restBusy=false,oiIndex=0,restWeight=0;
+ let restUntil=restoreCooldown(cooldownGet.get()?.payload,Date.now()),restBusy=false,oiIndex=0,restWeight=0;cooldownSet.run(String(restUntil));
  function pauseRest(ms){restUntil=Math.max(restUntil,Date.now()+ms);cooldownSet.run(String(restUntil));}
  async function realRest(path){
   if(Date.now()<restUntil||restBusy){const e=Error('REST cooldown');e.delay=Math.max(2000,restUntil-Date.now());throw e;}
   restBusy=true;try{const r=await fetch('https://fapi.binance.com'+path,{signal:AbortSignal.timeout(15000)});const w=Number(r.headers.get('x-mbx-used-weight-1m'));if(Number.isFinite(w)){restWeight=w;if(w>=1000)pauseRest(60000);}
-   if(!r.ok){const e=Error('Binance HTTP '+r.status);if([418,429,403].includes(r.status)){const h=r.headers.get('retry-after'),n=Number(h),d=Date.parse(h||'');e.delay=Math.max(r.status===418?900000:120000,Number.isFinite(n)?n*1000:0,Number.isFinite(d)?d-Date.now():0);pauseRest(e.delay);}throw e;}return await r.json();
+   if(!r.ok){const e=Error('Binance HTTP '+r.status);if([418,429,403].includes(r.status)){const end=retryUntil(r.headers.get('retry-after'),Date.now(),r.status,await r.text());e.delay=end-Date.now();pauseRest(e.delay);}throw e;}return await r.json();
   }finally{restBusy=false;}
  }
  async function pollOI(){if(!symbols.length||Date.now()<restUntil||restBusy)return;const symbol=symbols[oiIndex++%symbols.length];try{const d=await realRest('/fapi/v1/openInterest?symbol='+encodeURIComponent(symbol));shadow.openInterest(symbol,d,Date.now());}catch(e){if(e.delay)log('WARN','MARKET','OI REST paused | '+e.message);}}
  setInterval(pollOI,2000);
  async function start(){
   try{
-   const d=await realRest('/fapi/v1/exchangeInfo');symbols=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
-   if(!symbols.length)throw Error('no futures symbols');
-   metaSet.run(JSON.stringify({symbols,at:Date.now()}));subscribe(symbols);lastError=null;
-  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('ERROR','MARKET','Exchange discovery | '+e.message);setTimeout(start,e.delay||60000);}
+   const d=await realRest('/fapi/v1/exchangeInfo');const list=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
+   if(!list.length)throw Error('no futures symbols');
+   metaSet.run(JSON.stringify({symbols:list,at:Date.now()}));subscribe(list,'EXCHANGE_INFO');universeSource='EXCHANGE_INFO';shadow.setUniverse(list);lastError=null;
+  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('WARN','MARKET','Exchange discovery | '+e.message);setTimeout(start,safeDelay(e.delay||60000));}
  }
- const cached=metaGet.get();if(cached){const v=JSON.parse(cached.payload);if(Date.now()-v.at<86400000&&Array.isArray(v.symbols)&&v.symbols.length)subscribe(v.symbols);else start();}else start();
+ const cached=metaGet.get();if(cached){const v=JSON.parse(cached.payload);if(Date.now()-v.at<86400000&&Array.isArray(v.symbols)&&v.symbols.length)subscribe(v.symbols,'EXCHANGE_CACHE');}
+ setTimeout(start,1000);setInterval(()=>{if(universeSource==='EXCHANGE_INFO')return;const list=[...observed].filter(([k,t])=>Date.now()-t<15000).map(([k])=>k);if(list.length)subscribe(list,'LIVE_MARK_PRICE_PROVISIONAL');},15000);
  setInterval(()=>{const st=status();log(st.market.feedFresh?'INFO':'WARN','MARKET','Feed '+(st.market.feedFresh?'ACTIVE':'STALE')+' | symbols '+st.market.receivingSymbols+'/'+st.market.symbols+' | messages '+st.market.messages+' | candles '+st.market.closedBars);log('INFO','DECISION','Signals '+st.counters.signals+' | warmup '+st.counters.warmup+' | wait '+st.counters.wait+' | opened '+st.counters.opened+' | closed '+st.counters.closed);log(st.database.healthy?'INFO':'ERROR','DATABASE','Checkpoints '+st.database.writes+' | archive '+st.database.archivedTrades+' | last save '+st.database.lastSavedAt);console.log('PAQE_STATUS '+JSON.stringify({engine:st.engine,balance:st.balance,open:st.open,closed:st.closed,model:st.model,counters:st.counters,market:st.market}));},60000);
 }
 const esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
