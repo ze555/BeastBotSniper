@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {InstitutionalShadow} from './institutional-shadow.mjs';
+import {InstitutionalShadow,exitRule} from './institutional-shadow.mjs';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -63,7 +63,7 @@ export class Paper {
  constructor(model=new Model()){this.model=model;this.balance=1000;this.open=new Map();this.closed=[];this.totalWins=0;this.grossProfit=0;this.grossLoss=0;this.pending=new Map();this.history=new Map();this.day='';this.dayStart=1000;this.counters={signals:0,warmup:0,wait:0,opened:0,closed:0,missing:0};}
  mark(symbol,price,t){
   if(!valid(price)||price<=0||!valid(t))return;
-  const q=this.open.get(symbol);if(!q)return;
+  const q=this.open.get(symbol);if(!q||q.institutional)return;
   const pnl=this.pnl(q,price);q.last=price;q.lastAt=t;q.peak=Math.max(q.peak,pnl);
   const r=pnl/q.riskCash;
   if(q.side*(price/q.entry-1)<=-q.risk){this.close(symbol,price,t,'HARD_STOP');return;}
@@ -96,7 +96,7 @@ export class Paper {
   const x=feature(hist);if(!x)return;
   // Learn each symbol's non-overlapping 15-minute outcomes, whether or not traded.
   const pos=this.open.get(symbol);
-  if(pos){
+  if(pos&&!pos.institutional){
     const decision=this.model.estimate(x);
     if(decision.side===-pos.side&&decision.lower>0.1)this.close(symbol,b.close,t,'EXPECTED_VALUE_REVERSAL');
   }
@@ -106,7 +106,7 @@ export class Paper {
   this.counters.signals++;
   this.onDecision?.(symbol,x,decision);
   if(!decision.side){this.counters[decision.reason==='WARMUP'?'warmup':'wait']++;return;}
-  if(this.storageHealthy===false||this.open.has(symbol)||this.open.size>=6||this.equity()<=this.dayStart*.98||this.balance<=0)return;
+  if(this.institutionalOnly||this.storageHealthy===false||this.open.has(symbol)||this.open.size>=6||this.equity()<=this.dayStart*.98||this.balance<=0)return;
   const riskCash=this.balance*.0025;
   const qty=Math.min(riskCash/(x.price*(x.risk+COST)),this.balance*.15/x.price);
   if(!valid(qty)||qty<=0)return;
@@ -116,7 +116,7 @@ export class Paper {
  }
  stats(){
   const profits=this.grossProfit,losses=this.grossLoss;
-  return {engine:'PAQE-v0.3-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
+  return {engine:'PAQE-Institutional-v0.4-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
  }
 }
 
@@ -254,9 +254,9 @@ async function live(){
  if(!fs.existsSync(mount)||!fs.statSync(mount).isDirectory())throw Error('Persistent Railway volume is required: '+mount);
  const store=new PaperStore(new DatabaseSync(mount+'/paqe.sqlite'));
  store.db.exec("CREATE TABLE IF NOT EXISTS institutional_state (id INTEGER PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS institutional_labels (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS market_metadata (key TEXT PRIMARY KEY, payload TEXT NOT NULL);");
- const row=store.db.prepare('SELECT payload FROM institutional_state WHERE id=1').get(),shadow=new InstitutionalShadow(row?JSON.parse(row.payload):null);
- const saveShadow=()=>{try{store.db.exec('BEGIN IMMEDIATE');store.db.prepare('INSERT INTO institutional_state(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(shadow.snapshot()));const add=store.db.prepare('INSERT INTO institutional_labels(payload) VALUES(?)');for(const x of shadow.dirty)add.run(JSON.stringify(x));store.db.exec('DELETE FROM institutional_labels WHERE id <= (SELECT COALESCE(MAX(id),0)-100000 FROM institutional_labels); COMMIT');shadow.dirty.length=0;}catch(e){try{store.db.exec('ROLLBACK');}catch{}console.error('Institutional DB error',e.message);}};
- const restored=store.load(paper);
+ const row=store.db.prepare('SELECT payload FROM institutional_state WHERE id=2').get(),shadow=new InstitutionalShadow(row?JSON.parse(row.payload):null);
+ const saveShadow=()=>{try{store.db.exec('BEGIN IMMEDIATE');store.db.prepare('INSERT INTO institutional_state(id,payload) VALUES(2,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(shadow.snapshot()));const add=store.db.prepare('INSERT INTO institutional_labels(payload) VALUES(?)');for(const x of shadow.dirty)add.run(JSON.stringify(x));store.db.exec('DELETE FROM institutional_labels WHERE id <= (SELECT COALESCE(MAX(id),0)-100000 FROM institutional_labels); COMMIT');shadow.dirty.length=0;}catch(e){try{store.db.exec('ROLLBACK');}catch{}console.error('Institutional DB error',e.message);}};
+ const restored=store.load(paper);paper.institutionalOnly=true;
  paper.storageHealthy=store.save(paper);
  if(!paper.storageHealthy)throw Error('Initial database save failed');
  const log=(level,category,message)=>store.log(level,category,message);
@@ -271,6 +271,19 @@ async function live(){
  log('INFO','DATABASE',restored?'State restored from SQLite':'SQLite initialized');
  console.log('PAQE_DB_READY '+JSON.stringify({...store.status(),restored}));
  const persist=()=>{const previous=paper.storageHealthy;paper.storageHealthy=store.save(paper);if(previous!==paper.storageHealthy)log(paper.storageHealthy?'INFO':'ERROR','DATABASE',paper.storageHealthy?'Saving recovered':'Saving failed: '+store.error);};
+ shadow.onEntry=(p,q,h)=>{
+  if(!paper.storageHealthy||paper.open.has(p.s)||paper.open.size>=6||paper.balance<=0||paper.equity()<=paper.dayStart*.98)return;
+  const side=p.side,entry=side===1?q.ask:q.bid,qty=Math.min(100/entry,paper.balance*.0025/(entry*p.risk),paper.balance*.15/entry);
+  if(!Number.isFinite(qty)||qty<=0||qty*entry>Math.min(q.bid*q.bq,q.ask*q.aq))return;
+  paper.open.set(p.s,{institutional:true,side,entry,entryAt:q.t,mature:p.due,risk:p.risk,qty,riskCash:qty*entry*p.risk,last:side===1?q.bid:q.ask,lastAt:q.t,peak:-Infinity,expectedR:Math.max(...p.pred)/p.risk,fundingTime:p.next,horizon:h});
+  paper.counters.opened++;log('INFO','TRADE',p.s+' institutional '+(side===1?'LONG':'SHORT')+' open | horizon '+h+'m');persist();
+ };
+ shadow.onQuote=q=>{
+  const p=paper.open.get(q.s);if(!p?.institutional)return;
+  if((p.side===1?q.bid*q.bq:q.ask*q.aq)<p.qty*p.entry)return;
+  const x=exitRule(p.side,p.entry,q,p.risk,p.peak,p.mature,q.t,p.fundingTime);p.last=x.exit;p.lastAt=q.t;p.peak=x.peak;
+  if(x.reason){paper.close(q.s,x.exit,q.t,x.reason);persist();}
+ };
  setInterval(persist,15000);
  setInterval(saveShadow,30000);
  for(const sig of ['SIGTERM','SIGINT'])process.once(sig,()=>{persist();saveShadow();store.db.close();process.exit(0);});
@@ -299,7 +312,7 @@ async function live(){
   if(pathname==='/api/database/status'){res.end(JSON.stringify(store.status()));return;}
   res.statusCode=404;res.end(JSON.stringify({error:'Not found'}));
  });
- server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE v0.3 PAPER ONLY listening'));
+ server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE Institutional v0.4 PAPER ONLY listening'));
  function connect(group,attempt=0){
   const url='wss://fstream.binance.com/market/stream?streams='+group.map(s=>s.toLowerCase()+'@kline_1m').join('/');
   const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:1024*1024,handshakeTimeout:15000});sockets.add(ws);
@@ -324,12 +337,21 @@ async function live(){
  aux('wss://fstream.binance.com/public/ws/!bookTicker',(e,t)=>shadow.quote(e,t));
  aux('wss://fstream.binance.com/market/stream?streams=!markPrice@arr@1s/!forceOrder@arr',(e,t)=>shadow.mark(e,t)||shadow.liquidation(e,t));
  const metaGet=store.db.prepare("SELECT payload FROM market_metadata WHERE key='symbols'"),metaSet=store.db.prepare("INSERT INTO market_metadata(key,payload) VALUES('symbols',?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload");
- function subscribe(list){symbols=list;for(let i=0;i<symbols.length;i+=80){const group=symbols.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}started=true;log('INFO','MARKET','Subscribed '+symbols.length+' real futures symbols');}
+ function subscribe(list){symbols=list;shadow.setUniverse(list);for(let i=0;i<list.length;i+=40){const g=list.slice(i,i+40);setTimeout(()=>aux('wss://fstream.binance.com/public/stream?streams='+g.map(x=>x.toLowerCase()+'@depth20@500ms').join('/'),(e,t)=>shadow.depth(e,t)),i/40*600);}for(let i=0;i<symbols.length;i+=80){const group=symbols.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}started=true;log('INFO','MARKET','Subscribed '+symbols.length+' real futures symbols');}
+ const cooldownGet=store.db.prepare("SELECT payload FROM market_metadata WHERE key='rest_cooldown'"),cooldownSet=store.db.prepare("INSERT INTO market_metadata(key,payload) VALUES('rest_cooldown',?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload");
+ let restUntil=Number(cooldownGet.get()?.payload)||0,restBusy=false,oiIndex=0,restWeight=0;
+ function pauseRest(ms){restUntil=Math.max(restUntil,Date.now()+ms);cooldownSet.run(String(restUntil));}
+ async function realRest(path){
+  if(Date.now()<restUntil||restBusy){const e=Error('REST cooldown');e.delay=Math.max(2000,restUntil-Date.now());throw e;}
+  restBusy=true;try{const r=await fetch('https://fapi.binance.com'+path,{signal:AbortSignal.timeout(15000)});const w=Number(r.headers.get('x-mbx-used-weight-1m'));if(Number.isFinite(w)){restWeight=w;if(w>=1000)pauseRest(60000);}
+   if(!r.ok){const e=Error('Binance HTTP '+r.status);if([418,429,403].includes(r.status)){const h=r.headers.get('retry-after'),n=Number(h),d=Date.parse(h||'');e.delay=Math.max(r.status===418?900000:120000,Number.isFinite(n)?n*1000:0,Number.isFinite(d)?d-Date.now():0);pauseRest(e.delay);}throw e;}return await r.json();
+  }finally{restBusy=false;}
+ }
+ async function pollOI(){if(!symbols.length||Date.now()<restUntil||restBusy)return;const symbol=symbols[oiIndex++%symbols.length];try{const d=await realRest('/fapi/v1/openInterest?symbol='+encodeURIComponent(symbol));shadow.openInterest(symbol,d,Date.now());}catch(e){if(e.delay)log('WARN','MARKET','OI REST paused | '+e.message);}}
+ setInterval(pollOI,2000);
  async function start(){
   try{
-   const r=await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo',{signal:AbortSignal.timeout(15000)});
-   if(!r.ok){const e=Error('exchangeInfo HTTP '+r.status),v=r.headers.get('retry-after'),sec=Number(v);e.delay=r.status===418?Math.max(900000,sec*1000||0):r.status===429?Math.max(120000,sec*1000||0):60000;throw e;}
-   const d=await r.json();symbols=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
+   const d=await realRest('/fapi/v1/exchangeInfo');symbols=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
    if(!symbols.length)throw Error('no futures symbols');
    metaSet.run(JSON.stringify({symbols,at:Date.now()}));subscribe(symbols);lastError=null;
   }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('ERROR','MARKET','Exchange discovery | '+e.message);setTimeout(start,e.delay||60000);}
@@ -348,7 +370,7 @@ function renderLogs(entries,level,category){
 
 function renderDashboard(template,s){
  const m=s.market;
- const metrics=[['الرصيد','$'+num(s.balance)],['حقوق الحساب','$'+num(s.equity)],['صافي الربح المحقق','$'+num(s.realizedPnl)],['مفتوحة',s.open],['مغلقة',s.closed],['نسبة النجاح',s.winRate==null?'—':num(s.winRate*100)+'%'],['معامل الربح',num(s.profitFactor)],['العملات المستقبلة',m.receivingSymbols+' / '+m.symbols],['شموع مغلقة',m.closedBars],['الإشارات',s.counters.signals],['اتصالات السوق',m.sockets],['رسائل السوق',m.messages],['قاعدة البيانات',s.database?.healthy?'متصلة':'خطأ'],['أرشيف الصفقات',s.database?.archivedTrades??0],['Institutional book',s.institutional?.coverage.book??0],['Institutional funding',s.institutional?.coverage.funding??0]];
+ const metrics=[['الرصيد','$'+num(s.balance)],['حقوق الحساب','$'+num(s.equity)],['صافي الربح المحقق','$'+num(s.realizedPnl)],['مفتوحة',s.open],['مغلقة',s.closed],['نسبة النجاح',s.winRate==null?'—':num(s.winRate*100)+'%'],['معامل الربح',num(s.profitFactor)],['العملات المستقبلة',m.receivingSymbols+' / '+m.symbols],['شموع مغلقة',m.closedBars],['الإشارات',s.counters.signals],['اتصالات السوق',m.sockets],['رسائل السوق',m.messages],['قاعدة البيانات',s.database?.healthy?'متصلة':'خطأ'],['أرشيف الصفقات',s.database?.archivedTrades??0],['Institutional book',s.institutional?.coverage.book??0],['Institutional funding',s.institutional?.coverage.funding??0],['Depth 20',s.institutional?.coverage.depth??0],['OI ready',s.institutional?.coverage.oiReady??0]];
  const cards=metrics.map(([k,v])=>'<article><small>'+esc(k)+'</small><strong>'+esc(v)+'</strong></article>').join('');
  const groups=Object.entries(s.model).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+v.samples+'</td><td>'+v.blocks+' / 8</td></tr>').join('')||'<tr><td colspan="3">بانتظار اكتمال بيانات التعلم</td></tr>';
  const active=s.positions.map(t=>'<tr>'+[t.symbol,t.side,num(t.entry,7),num(t.price,7),num(t.pnl),num(t.expectedR)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')||'<tr><td colspan="6">لا توجد صفقات مفتوحة</td></tr>';
