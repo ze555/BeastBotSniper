@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const MINUTE=60000, H=15*MINUTE;
 const COST=0.0014; // assumed round trip: 8 bps fees + 4 slippage + 2 reserve
-const MAX_SAMPLES=500, MIN_SAMPLES=40, MIN_BLOCKS=8;
+const MAX_SAMPLES=6000, MIN_SAMPLES=40, MIN_BLOCKS=8;
 const clip=(x,a,b)=>Math.max(a,Math.min(b,x));
 const valid=x=>Number.isFinite(x);
 const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
@@ -59,7 +59,7 @@ export class Model {
 }
 
 export class Paper {
- constructor(model=new Model()){this.model=model;this.balance=1000;this.open=new Map();this.closed=[];this.pending=new Map();this.history=new Map();this.day='';this.dayStart=1000;this.counters={signals:0,warmup:0,wait:0,opened:0,closed:0,missing:0};}
+ constructor(model=new Model()){this.model=model;this.balance=1000;this.open=new Map();this.closed=[];this.totalWins=0;this.grossProfit=0;this.grossLoss=0;this.pending=new Map();this.history=new Map();this.day='';this.dayStart=1000;this.counters={signals:0,warmup:0,wait:0,opened:0,closed:0,missing:0};}
  mark(symbol,price,t){
   if(!valid(price)||price<=0||!valid(t))return;
   const q=this.open.get(symbol);if(!q)return;
@@ -73,6 +73,7 @@ export class Paper {
  close(symbol,price,t,reason){
   const q=this.open.get(symbol);if(!q)return;
   const pnl=this.pnl(q,price);this.balance+=pnl;this.open.delete(symbol);this.counters.closed++;
+  if(pnl>0){this.totalWins++;this.grossProfit+=pnl;}else this.grossLoss-=pnl;
   this.closed.push({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,exit:price,entryAt:q.entryAt,exitAt:t,pnl,reason,expectedR:q.expectedR});
   if(this.closed.length>2000)this.closed.shift();
  }
@@ -110,9 +111,8 @@ export class Paper {
   this.counters.opened++;
  }
  stats(){
-  const profits=this.closed.filter(x=>x.pnl>0).reduce((s,x)=>s+x.pnl,0);
-  const losses=-this.closed.filter(x=>x.pnl<0).reduce((s,x)=>s+x.pnl,0);
-  return {engine:'PAQE-v0.1-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.closed.length?this.closed.filter(x=>x.pnl>0).length/this.closed.length:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,recent:this.closed.slice(-50)};
+  const profits=this.grossProfit,losses=this.grossLoss;
+  return {engine:'PAQE-v0.1-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,recent:this.closed.slice(-50)};
  }
 }
 
