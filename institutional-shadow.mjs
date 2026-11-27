@@ -23,7 +23,7 @@ export function parseDepth(e,now){
 }
 export function oiUpdate(previous,e,now){
  const t=Number(e?.time),value=Number(e?.openInterest);
- if(!f(t)||!f(value)||value<=0||Math.abs(now-t)>120000)return null;
+ if(!f(t)||!f(value)||value<=0||Math.abs(now-t)>300000)return null;
  if(previous&&t<=previous.t)return null;
  return {t,value,delta:previous&&t-previous.t<=45*M?Math.log(value/previous.value):null};
 }
@@ -41,7 +41,7 @@ export function eligible(z){
  return z.selected>=100&&z.evalBlocks>=20&&z.netUSD100>0&&z.stressUSD100>0&&z.profitFactor!==null&&z.profitFactor>=1.2&&z.blockMeanLowerBps>0;
 }
 export class InstitutionalShadow{
- constructor(saved=null){this.models=Object.fromEntries(H.map(h=>[h,[zero(),zero()]]));this.pending=new Map();this.quotes=new Map();this.funding=new Map();this.liq=new Map();this.depths=new Map();this.oi=new Map();this.allowed=new Set();this.liquidationFeedAt=0;this.vol=new Map();this.ofi=new Map();this.btc=null;this.count={quotes:0,mark:0,liquidation:0,features:0,missing:0,fundingCross:0,depth:0,oi:0,decisions:0,eligible:0};this.dirty=[];this.lab=new ResearchLab(saved?.research);if(saved?.version===2){this.models={...this.models,...saved.models};this.count={...this.count,...saved.count};}}
+ constructor(saved=null){this.models=Object.fromEntries(H.map(h=>[h,[zero(),zero()]]));this.pending=new Map();this.quotes=new Map();this.funding=new Map();this.liq=new Map();this.depths=new Map();this.oi=new Map();this.crossOI=new Map();this.allowed=new Set();this.liquidationFeedAt=0;this.vol=new Map();this.ofi=new Map();this.btc=null;this.count={quotes:0,mark:0,liquidation:0,features:0,missing:0,fundingCross:0,depth:0,oi:0,decisions:0,eligible:0};this.dirty=[];this.lab=new ResearchLab(saved?.research);if(saved?.version===2){this.models={...this.models,...saved.models};this.count={...this.count,...saved.count};}}
  setUniverse(list){this.allowed=new Set(list);}
  depth(e,now){const d=parseDepth(e,now);if(!d||!this.allowed.has(d.s))return false;const old=this.depths.get(d.s);if(old&&d.t<=old.t)return false;this.depths.set(d.s,d);this.count.depth++;return true;}
  openInterest(symbol,e,now){if(!this.allowed.has(symbol)||e.symbol!==symbol)return false;const x=oiUpdate(this.oi.get(symbol),e,now);if(!x)return false;this.oi.set(symbol,x);this.count.oi++;return true;}
@@ -71,7 +71,7 @@ export class InstitutionalShadow{
  const candidates=[];for(const h of H){const k=symbol+':'+h,p=this.pending.get(k);if(p){if(now>(p.due||p.t)+15000){this.pending.delete(k);this.count.missing++;}else continue;}
  const m=this.models[h],ready=!!x&&m.every(z=>z.n>=200&&z.blocks.length>=8),pred=ready?m.map(z=>dot(z.w,x)/100):null,side=pred&&Math.max(...pred)>.001?(pred[0]>=pred[1]?1:-1):0;
  const risk=Math.max(.006,Math.min(.035,2*sigma*Math.sqrt(h)));
- const context={ret,sigma,spread,cvd,imb,ofi,funding:u.rate,basis:u.basis,depthImbalance:depthOk?depth.imb:null,depthUSD:depthOk?depth.liquidity:null,oi:oiOk?oi.value:null,oiDelta:oiOk?oi.delta:null,liquidationObserved:liq};
+ const context={ret,sigma,spread,cvd,imb,ofi,funding:u.rate,basis:u.basis,depthImbalance:depthOk?depth.imb:null,depthUSD:depthOk?depth.liquidity:null,oi:oiOk?oi.value:null,oiDelta:oiOk?oi.delta:null,liquidationObserved:liq,crossOI:(()=>{const v=this.crossOI.get(symbol);return v&&now-v.oldestAt<35*M?v:null;})()};
  const policies=signals(context,pred),choice=this.lab.choose(policies,h,now);
  const pending={s:symbol,t:now,x,entry:null,next:u.next,side,pred,risk,execute:false,context,candidates:policies};
  this.pending.set(k,pending);if(choice)candidates.push({h,p:pending,choice,ev:choice.stat.expectedNet});
