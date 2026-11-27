@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {InstitutionalShadow} from './institutional-shadow.mjs';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -252,6 +253,9 @@ async function live(){
  const mount=process.env.RAILWAY_VOLUME_MOUNT_PATH||'/paqe-data';
  if(!fs.existsSync(mount)||!fs.statSync(mount).isDirectory())throw Error('Persistent Railway volume is required: '+mount);
  const store=new PaperStore(new DatabaseSync(mount+'/paqe.sqlite'));
+ store.db.exec("CREATE TABLE IF NOT EXISTS institutional_state (id INTEGER PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS institutional_labels (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS market_metadata (key TEXT PRIMARY KEY, payload TEXT NOT NULL);");
+ const row=store.db.prepare('SELECT payload FROM institutional_state WHERE id=1').get(),shadow=new InstitutionalShadow(row?JSON.parse(row.payload):null);
+ const saveShadow=()=>{try{store.db.exec('BEGIN IMMEDIATE');store.db.prepare('INSERT INTO institutional_state(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(JSON.stringify(shadow.snapshot()));const add=store.db.prepare('INSERT INTO institutional_labels(payload) VALUES(?)');for(const x of shadow.dirty)add.run(JSON.stringify(x));store.db.exec('DELETE FROM institutional_labels WHERE id <= (SELECT COALESCE(MAX(id),0)-100000 FROM institutional_labels); COMMIT');shadow.dirty.length=0;}catch(e){try{store.db.exec('ROLLBACK');}catch{}console.error('Institutional DB error',e.message);}};
  const restored=store.load(paper);
  paper.storageHealthy=store.save(paper);
  if(!paper.storageHealthy)throw Error('Initial database save failed');
@@ -268,10 +272,11 @@ async function live(){
  console.log('PAQE_DB_READY '+JSON.stringify({...store.status(),restored}));
  const persist=()=>{const previous=paper.storageHealthy;paper.storageHealthy=store.save(paper);if(previous!==paper.storageHealthy)log(paper.storageHealthy?'INFO':'ERROR','DATABASE',paper.storageHealthy?'Saving recovered':'Saving failed: '+store.error);};
  setInterval(persist,15000);
- for(const sig of ['SIGTERM','SIGINT'])process.once(sig,()=>{persist();store.db.close();process.exit(0);});
+ setInterval(saveShadow,30000);
+ for(const sig of ['SIGTERM','SIGINT'])process.once(sig,()=>{persist();saveShadow();store.db.close();process.exit(0);});
  let symbols=[],lastMessage=0,errors=0,started=false,messages=0,closedBars=0,invalidMessages=0,reconnects=0,lastError=null;
  const template=fs.readFileSync(new URL('./paqe-dashboard.html',import.meta.url),'utf8');
- const status=()=>({...paper.stats(),database:store.status(),market:{symbols:symbols.length,receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
+ const status=()=>({...paper.stats(),database:store.status(),institutional:shadow.status(),market:{symbols:symbols.length,receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
  const server=http.createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const pathname=new URL(req.url||'/','http://localhost').pathname;
@@ -289,6 +294,8 @@ async function live(){
   if(['/api/paqe','/api/predator/stats','/api/health','/api/bot/status'].includes(pathname)){res.end(JSON.stringify(status()));return;}
   if(pathname==='/api/trades/active'){res.end(JSON.stringify(status().positions));return;}
   if(pathname==='/api/trades/closed'){const q=new URL(req.url,'http://localhost').searchParams;res.end(JSON.stringify(store.list(Number(q.get('limit'))||100,Number(q.get('offset'))||0)));return;}
+  if(pathname==='/api/institutional/status'){res.end(JSON.stringify(shadow.status()));return;}
+  if(pathname==='/api/institutional/labels'){const n=Math.min(500,Math.max(1,Number(new URL(req.url,'http://localhost').searchParams.get('limit'))||100));res.end(JSON.stringify(store.db.prepare('SELECT payload FROM institutional_labels ORDER BY id DESC LIMIT ?').all(Math.floor(n)).map(r=>JSON.parse(r.payload))));return;}
   if(pathname==='/api/database/status'){res.end(JSON.stringify(store.status()));return;}
   res.statusCode=404;res.end(JSON.stringify({error:'Not found'}));
  });
@@ -306,24 +313,28 @@ async function live(){
     if(!gotData){gotData=true;console.log('PAQE first valid kline',event.symbol,group.length);log('INFO','MARKET','First valid kline | '+event.symbol+' | group '+group.length);}
     const tradeVersion=paper.counters.opened+paper.counters.closed;
     paper.mark(event.symbol,event.price,event.time);
-    if(event.closed&&finiteBar(event.bar)){const prev=paper.history.get(event.symbol)?.at(-1);if(!prev||event.bar.time>prev.time){closedBars++;paper.onBar(event.symbol,event.bar);}}
+    if(event.closed&&finiteBar(event.bar)){const prev=paper.history.get(event.symbol)?.at(-1);if(!prev||event.bar.time>prev.time){closedBars++;paper.onBar(event.symbol,event.bar);shadow.bar(event.symbol,event.bar,paper.history.get(event.symbol),Date.now());}}
     if(tradeVersion!==paper.counters.opened+paper.counters.closed)persist();
    }catch(e){errors++;lastError=String(e?.message||e);}
   });
   ws.on('error',e=>{errors++;lastError=e.message;console.error('PAQE WS error',e.message);log('ERROR','MARKET','WebSocket error | '+e.message);});
   ws.on('close',(code)=>{clearInterval(watchdog);sockets.delete(ws);reconnects++;console.log('PAQE market WS closed',code,group.length);log('WARN','MARKET','WebSocket closed | code '+code+' | group '+group.length);const next=gotData?0:attempt+1;setTimeout(()=>connect(group,next),Math.min(120000,3000*2**Math.min(next,5))+Math.random()*2000);});
  }
+ function aux(url,handler){const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:4*1024*1024,handshakeTimeout:15000});let alive=Date.now(),ok=false;const watch=setInterval(()=>{if(Date.now()-alive>90000)ws.terminate();},15000);ws.on('message',buf=>{try{const raw=JSON.parse(buf.toString()),events=raw.data??raw;for(const e of Array.isArray(events)?events:[events])if(handler(e,Date.now())){alive=Date.now();ok=true;}}catch(e){console.error('Auxiliary decode',e.message);}});ws.on('error',e=>log('WARN','MARKET','Institutional feed '+e.message));ws.on('close',()=>{clearInterval(watch);setTimeout(()=>aux(url,handler),ok?10000:60000);});}
+ aux('wss://fstream.binance.com/public/ws/!bookTicker',(e,t)=>shadow.quote(e,t));
+ aux('wss://fstream.binance.com/market/stream?streams=!markPrice@arr@1s/!forceOrder@arr',(e,t)=>shadow.mark(e,t)||shadow.liquidation(e,t));
+ const metaGet=store.db.prepare("SELECT payload FROM market_metadata WHERE key='symbols'"),metaSet=store.db.prepare("INSERT INTO market_metadata(key,payload) VALUES('symbols',?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload");
+ function subscribe(list){symbols=list;for(let i=0;i<symbols.length;i+=80){const group=symbols.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}started=true;log('INFO','MARKET','Subscribed '+symbols.length+' real futures symbols');}
  async function start(){
   try{
    const r=await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo',{signal:AbortSignal.timeout(15000)});
-   if(!r.ok)throw Error('exchangeInfo HTTP '+r.status);
+   if(!r.ok){const e=Error('exchangeInfo HTTP '+r.status),v=r.headers.get('retry-after'),sec=Number(v);e.delay=r.status===418?Math.max(900000,sec*1000||0):r.status===429?Math.max(120000,sec*1000||0):60000;throw e;}
    const d=await r.json();symbols=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
    if(!symbols.length)throw Error('no futures symbols');
-   for(let i=0;i<symbols.length;i+=80){const group=symbols.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}
-   started=true;console.log('PAQE subscribed',symbols.length);log('INFO','MARKET','Subscribed '+symbols.length+' perpetual futures symbols');
-  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('ERROR','MARKET','Exchange discovery | '+e.message);setTimeout(start,60000);}
+   metaSet.run(JSON.stringify({symbols,at:Date.now()}));subscribe(symbols);lastError=null;
+  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('ERROR','MARKET','Exchange discovery | '+e.message);setTimeout(start,e.delay||60000);}
  }
- start();
+ const cached=metaGet.get();if(cached){const v=JSON.parse(cached.payload);if(Date.now()-v.at<86400000&&Array.isArray(v.symbols)&&v.symbols.length)subscribe(v.symbols);else start();}else start();
  setInterval(()=>{const st=status();log(st.market.feedFresh?'INFO':'WARN','MARKET','Feed '+(st.market.feedFresh?'ACTIVE':'STALE')+' | symbols '+st.market.receivingSymbols+'/'+st.market.symbols+' | messages '+st.market.messages+' | candles '+st.market.closedBars);log('INFO','DECISION','Signals '+st.counters.signals+' | warmup '+st.counters.warmup+' | wait '+st.counters.wait+' | opened '+st.counters.opened+' | closed '+st.counters.closed);log(st.database.healthy?'INFO':'ERROR','DATABASE','Checkpoints '+st.database.writes+' | archive '+st.database.archivedTrades+' | last save '+st.database.lastSavedAt);console.log('PAQE_STATUS '+JSON.stringify({engine:st.engine,balance:st.balance,open:st.open,closed:st.closed,model:st.model,counters:st.counters,market:st.market}));},60000);
 }
 const esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -337,7 +348,7 @@ function renderLogs(entries,level,category){
 
 function renderDashboard(template,s){
  const m=s.market;
- const metrics=[['الرصيد','$'+num(s.balance)],['حقوق الحساب','$'+num(s.equity)],['صافي الربح المحقق','$'+num(s.realizedPnl)],['مفتوحة',s.open],['مغلقة',s.closed],['نسبة النجاح',s.winRate==null?'—':num(s.winRate*100)+'%'],['معامل الربح',num(s.profitFactor)],['العملات المستقبلة',m.receivingSymbols+' / '+m.symbols],['شموع مغلقة',m.closedBars],['الإشارات',s.counters.signals],['اتصالات السوق',m.sockets],['رسائل السوق',m.messages],['قاعدة البيانات',s.database?.healthy?'متصلة':'خطأ'],['أرشيف الصفقات',s.database?.archivedTrades??0]];
+ const metrics=[['الرصيد','$'+num(s.balance)],['حقوق الحساب','$'+num(s.equity)],['صافي الربح المحقق','$'+num(s.realizedPnl)],['مفتوحة',s.open],['مغلقة',s.closed],['نسبة النجاح',s.winRate==null?'—':num(s.winRate*100)+'%'],['معامل الربح',num(s.profitFactor)],['العملات المستقبلة',m.receivingSymbols+' / '+m.symbols],['شموع مغلقة',m.closedBars],['الإشارات',s.counters.signals],['اتصالات السوق',m.sockets],['رسائل السوق',m.messages],['قاعدة البيانات',s.database?.healthy?'متصلة':'خطأ'],['أرشيف الصفقات',s.database?.archivedTrades??0],['Institutional book',s.institutional?.coverage.book??0],['Institutional funding',s.institutional?.coverage.funding??0]];
  const cards=metrics.map(([k,v])=>'<article><small>'+esc(k)+'</small><strong>'+esc(v)+'</strong></article>').join('');
  const groups=Object.entries(s.model).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+v.samples+'</td><td>'+v.blocks+' / 8</td></tr>').join('')||'<tr><td colspan="3">بانتظار اكتمال بيانات التعلم</td></tr>';
  const active=s.positions.map(t=>'<tr>'+[t.symbol,t.side,num(t.entry,7),num(t.price,7),num(t.pnl),num(t.expectedR)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')||'<tr><td colspan="6">لا توجد صفقات مفتوحة</td></tr>';
