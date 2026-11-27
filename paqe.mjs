@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import {InstitutionalShadow,exitRule} from './institutional-shadow.mjs';
 import {retryUntil,restoreCooldown,safeDelay} from './research-policies.mjs';
+import {Budget,REST_GAP,REST_PER_MIN,WEIGHT_STOP,WS_GAP,WS_PER_MIN,reconnectDelay} from './binance-safety.mjs';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -117,7 +118,7 @@ export class Paper {
  }
  stats(){
   const profits=this.grossProfit,losses=this.grossLoss;
-  return {engine:'PAQE-Institutional-v0.5-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
+  return {engine:'PAQE-Institutional-v0.5.1-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
  }
 }
 
@@ -273,7 +274,7 @@ async function live(){
  console.log('PAQE_DB_READY '+JSON.stringify({...store.status(),restored}));
  const persist=()=>{const previous=paper.storageHealthy;paper.storageHealthy=store.save(paper);if(previous!==paper.storageHealthy)log(paper.storageHealthy?'INFO':'ERROR','DATABASE',paper.storageHealthy?'Saving recovered':'Saving failed: '+store.error);};
  shadow.onEntry=(p,q,h)=>{
-  if(!paper.storageHealthy||paper.open.has(p.s)||paper.open.size>=6||paper.balance<=0||paper.equity()<=paper.dayStart*.98)return;
+  if(universeSource!=='EXCHANGE_INFO'||!shadow.allowed.has(p.s)||!paper.storageHealthy||paper.open.has(p.s)||paper.open.size>=6||paper.balance<=0||paper.equity()<=paper.dayStart*.98)return;
   const side=p.execSide;if(![1,-1].includes(side)||!Number.isFinite(p.execEV)||p.execEV<=0)return;
   const entry=side===1?q.ask:q.bid,equity=paper.equity(),positions=[...paper.open.values()],gross=positions.reduce((v,x)=>v+x.qty*x.last,0),sameSide=positions.filter(x=>x.side===side).reduce((v,x)=>v+x.qty*x.last,0);
   const qty=Math.min(100/entry,paper.balance*.0025/(entry*p.risk),paper.balance*.15/entry,Math.max(0,equity*.6-gross)/entry,Math.max(0,equity*.35-sameSide)/entry);
@@ -292,7 +293,7 @@ async function live(){
  for(const sig of ['SIGTERM','SIGINT'])process.once(sig,()=>{persist();saveShadow();store.db.close();process.exit(0);});
  let symbols=[],universeSource='WAITING',lastMessage=0,errors=0,started=false,messages=0,closedBars=0,invalidMessages=0,reconnects=0,lastError=null;
  const template=fs.readFileSync(new URL('./paqe-dashboard.html',import.meta.url),'utf8');
- const status=()=>({...paper.stats(),database:store.status(),institutional:shadow.status(),market:{symbols:symbols.length,universeSource,rest:{pausedUntil:restUntil> Date.now()?new Date(restUntil).toISOString():null,usedWeight:restWeight},receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
+ const status=()=>({...paper.stats(),database:store.status(),institutional:shadow.status(),market:{symbols:symbols.length,universeSource,rest:{pausedUntil:restUntil> Date.now()?new Date(restUntil).toISOString():null,usedWeight:restWeight,requestsThisProcess:restRequests,locallyBlocked:restBlocked,lastHTTPStatus:restLastStatus,localMaxPerMinute:REST_PER_MIN,weightStop:WEIGHT_STOP,oiPriorityLimit:120},websocketSafety:{attempts:wsAttempts,queued:wsQueue.length,localMaxConnectionsPerMinute:WS_PER_MIN,pausedUntil:wsPausedUntil>Date.now()?new Date(wsPausedUntil).toISOString():null},receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
  const server=http.createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const pathname=new URL(req.url||'/','http://localhost').pathname;
@@ -317,11 +318,18 @@ async function live(){
   res.statusCode=404;res.end(JSON.stringify({error:'Not found'}));
  });
  server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE Institutional v0.5 PAPER ONLY listening'));
- function connect(group,attempt=0){
+ const restBudget=new Budget(REST_GAP,REST_PER_MIN),wsBudget=new Budget(WS_GAP,WS_PER_MIN),wsQueue=[],queued=new Set();
+ let wsAttempts=0,restRequests=0,restBlocked=0,restLastStatus=null,wsPausedUntil=0;
+ function queueWS(key,fn){if(queued.has(key))return;queued.add(key);wsQueue.push({key,fn});}
+ setInterval(()=>{if(!wsQueue.length||Date.now()<wsPausedUntil||!wsBudget.take(Date.now()))return;const item=wsQueue.shift();queued.delete(item.key);wsAttempts++;item.fn();},1000);
+ function wsUnexpected(res){if([418,429,403,451].includes(res.statusCode)){const end=retryUntil(res.headers['retry-after'],Date.now(),res.statusCode);wsPausedUntil=Math.max(wsPausedUntil,end);pauseRest(end-Date.now());log('WARN','MARKET','WebSocket handshake restricted '+res.statusCode+' | all new connections paused');}}
+ function connect(group,attempt=0){const key='kline:'+group.join(',');queueWS(key,()=>connectNow(group,attempt));}
+ function connectNow(group,attempt=0){
   const url='wss://fstream.binance.com/market/stream?streams='+group.map(s=>s.toLowerCase()+'@kline_1m').join('/');
   const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:1024*1024,handshakeTimeout:15000});sockets.add(ws);
-  let alive=Date.now(),gotData=false;
-  const watchdog=setInterval(()=>{if(Date.now()-alive>90000)ws.terminate();},15000);
+  let alive=Date.now(),gotData=false,openedAt=Date.now();
+  const watchdog=setInterval(()=>{if(Date.now()-alive>180000)ws.terminate();},30000);
+  ws.on('unexpected-response',(req,res)=>{wsUnexpected(res);res.resume();ws.terminate();});
   ws.on('open',()=>{console.log('PAQE market WS connected',group.length);log('INFO','MARKET','WebSocket connected | '+group.length+' symbols');});
   ws.on('message',buf=>{
    try{
@@ -335,9 +343,10 @@ async function live(){
    }catch(e){errors++;lastError=String(e?.message||e);}
   });
   ws.on('error',e=>{errors++;lastError=e.message;console.error('PAQE WS error',e.message);log('ERROR','MARKET','WebSocket error | '+e.message);});
-  ws.on('close',(code)=>{clearInterval(watchdog);sockets.delete(ws);reconnects++;console.log('PAQE market WS closed',code,group.length);log('WARN','MARKET','WebSocket closed | code '+code+' | group '+group.length);const next=gotData?0:attempt+1;setTimeout(()=>connect(group,next),Math.min(120000,3000*2**Math.min(next,5))+Math.random()*2000);});
+  ws.on('close',(code)=>{clearInterval(watchdog);sockets.delete(ws);reconnects++;console.log('PAQE market WS closed',code,group.length);log('WARN','MARKET','WebSocket closed | code '+code+' | group '+group.length);const next=gotData&&Date.now()-openedAt>600000?0:attempt+1;setTimeout(()=>connect(group,next),reconnectDelay(next));});
  }
- function aux(url,handler){const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:4*1024*1024,handshakeTimeout:15000});let alive=Date.now(),ok=false;const watch=setInterval(()=>{if(Date.now()-alive>90000)ws.terminate();},15000);ws.on('message',buf=>{try{const raw=JSON.parse(buf.toString()),events=raw.data??raw;for(const e of Array.isArray(events)?events:[events])if(handler(e,Date.now())){alive=Date.now();ok=true;}}catch(e){console.error('Auxiliary decode',e.message);}});ws.on('error',e=>log('WARN','MARKET','Institutional feed '+e.message));ws.on('close',()=>{clearInterval(watch);setTimeout(()=>aux(url,handler),ok?10000:60000);});}
+ function aux(url,handler,attempt=0){queueWS(url,()=>auxNow(url,handler,attempt));}
+ function auxNow(url,handler,attempt){const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:4*1024*1024,handshakeTimeout:15000});let alive=Date.now(),ok=false,openedAt=Date.now();const watch=setInterval(()=>{if(Date.now()-alive>180000)ws.terminate();},30000);ws.on('unexpected-response',(req,res)=>{wsUnexpected(res);res.resume();ws.terminate();});ws.on('message',buf=>{try{const raw=JSON.parse(buf.toString()),events=raw.data??raw;for(const e of Array.isArray(events)?events:[events])if(handler(e,Date.now())){alive=Date.now();ok=true;}}catch(e){console.error('Auxiliary decode',e.message);}});ws.on('error',e=>log('WARN','MARKET','Institutional feed '+e.message));ws.on('close',()=>{clearInterval(watch);const next=ok&&Date.now()-openedAt>600000?0:attempt+1;setTimeout(()=>aux(url,handler,next),reconnectDelay(next));});}
  aux('wss://fstream.binance.com/public/ws/!bookTicker',(e,t)=>shadow.quote(e,t));
  const observed=new Map();
  aux('wss://fstream.binance.com/market/stream?streams=!markPrice@arr@1s/!forceOrder@arr',(e,t)=>{if(e?.e==='markPriceUpdate'&&Number(e.st)!==2&&typeof e.s==='string'&&e.s.endsWith('USDT')&&!e.s.includes('_')&&Number(e.T)>t&&Math.abs(Number(e.E)-t)<20000&&Number(e.p)>0&&Number(e.i)>0){observed.set(e.s,t);if(!symbols.length)return true;}return shadow.mark(e,t)||shadow.liquidation(e,t);});
@@ -347,19 +356,21 @@ async function live(){
  let restUntil=restoreCooldown(cooldownGet.get()?.payload,Date.now()),restBusy=false,oiIndex=0,restWeight=0;cooldownSet.run(String(restUntil));
  function pauseRest(ms){restUntil=Math.max(restUntil,Date.now()+ms);cooldownSet.run(String(restUntil));}
  async function realRest(path){
-  if(Date.now()<restUntil||restBusy){const e=Error('REST cooldown');e.delay=Math.max(2000,restUntil-Date.now());throw e;}
-  restBusy=true;try{const r=await fetch('https://fapi.binance.com'+path,{signal:AbortSignal.timeout(15000)});const w=Number(r.headers.get('x-mbx-used-weight-1m'));if(Number.isFinite(w)){restWeight=w;if(w>=1000)pauseRest(60000);}
-   if(!r.ok){const e=Error('Binance HTTP '+r.status);if([418,429,403].includes(r.status)){const end=retryUntil(r.headers.get('retry-after'),Date.now(),r.status,await r.text());e.delay=end-Date.now();pauseRest(e.delay);}throw e;}return await r.json();
+  if(Date.now()<restUntil||restBusy||restBudget.delay(Date.now())>0){restBlocked++;const e=Error('REST locally paused');e.delay=Math.max(5000,restUntil-Date.now(),restBudget.delay(Date.now()));throw e;}
+  restBudget.take(Date.now());restRequests++;restBusy=true;try{const r=await fetch('https://fapi.binance.com'+path,{signal:AbortSignal.timeout(15000)});restLastStatus=r.status;const header=r.headers.get('x-mbx-used-weight-1m'),w=header===null?NaN:Number(header);if(Number.isFinite(w)){restWeight=w;if(w>=WEIGHT_STOP)pauseRest(120000);}
+   if(!r.ok){const e=Error('Binance HTTP '+r.status);if([418,429,403,451].includes(r.status)){const end=Math.max(retryUntil(r.headers.get('retry-after'),Date.now(),r.status,await r.text()),Date.now()+(r.status===418?900000:r.status===451?86400000:120000));e.delay=end-Date.now();pauseRest(e.delay);}throw e;}return await r.json();
   }finally{restBusy=false;}
  }
- async function pollOI(){if(!symbols.length||Date.now()<restUntil||restBusy)return;const symbol=symbols[oiIndex++%symbols.length];try{const d=await realRest('/fapi/v1/openInterest?symbol='+encodeURIComponent(symbol));shadow.openInterest(symbol,d,Date.now());}catch(e){if(e.delay)log('WARN','MARKET','OI REST paused | '+e.message);}}
- setInterval(pollOI,2000);
+ async function pollOI(){if(!symbols.length||universeSource!=='EXCHANGE_INFO'||Date.now()<restUntil||restBusy||restBudget.delay(Date.now())>0)return;const now=Date.now();const ranked=symbols.filter(x=>shadow.quotes.has(x)&&shadow.depths.has(x)&&now-shadow.quotes.get(x).t<15000&&now-shadow.depths.get(x).t<15000).sort((a,b)=>shadow.depths.get(b).liquidity-shadow.depths.get(a).liquidity).slice(0,120);if(!ranked.length)return;const symbol=ranked[oiIndex++%ranked.length];try{const d=await realRest('/fapi/v1/openInterest?symbol='+encodeURIComponent(symbol));shadow.openInterest(symbol,d,Date.now());}catch(e){if(e.delay)log('WARN','MARKET','OI REST paused | '+e.message);}}
+ setInterval(pollOI,6000);
  async function start(){
+  if(Date.now()<restUntil||restBusy||restBudget.delay(Date.now())>0){setTimeout(start,Math.max(60000,Math.min(3600000,restUntil-Date.now())));return;}
   try{
    const d=await realRest('/fapi/v1/exchangeInfo');const list=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
    if(!list.length)throw Error('no futures symbols');
    metaSet.run(JSON.stringify({symbols:list,at:Date.now()}));subscribe(list,'EXCHANGE_INFO');universeSource='EXCHANGE_INFO';shadow.setUniverse(list);lastError=null;
-  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('WARN','MARKET','Exchange discovery | '+e.message);setTimeout(start,safeDelay(e.delay||60000));}
+   setTimeout(start,21600000);
+  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);log('WARN','MARKET','Exchange discovery | '+e.message);setTimeout(start,Math.max(60000,Math.min(3600000,e.delay||300000)));}
  }
  const cached=metaGet.get();if(cached){const v=JSON.parse(cached.payload);if(Date.now()-v.at<86400000&&Array.isArray(v.symbols)&&v.symbols.length)subscribe(v.symbols,'EXCHANGE_CACHE');}
  setTimeout(start,1000);setInterval(()=>{if(universeSource==='EXCHANGE_INFO')return;const list=[...observed].filter(([k,t])=>Date.now()-t<15000).map(([k])=>k);if(list.length)subscribe(list,'LIVE_MARK_PRICE_PROVISIONAL');},15000);
