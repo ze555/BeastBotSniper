@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --target=node18 --outfile=dist/server.cjs --format=cjs --packages=external",
+    "build": "node --check paqe.mjs && node paqe.mjs --self-test && node paqe.mjs --replay",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "start": "NODE_ENV=production node dist/server.cjs",
-    "test": "tsx src/lib/exitEvidenceEngine.test.ts && tsx src/lib/directionStateEngine.test.ts && tsx src/lib/directionDecoupling.test.ts && tsx src/lib/reasoningEngine.test.ts && tsx src/lib/exitEvidenceReplay.ts && tsx src/lib/institutionalMarketEngine.test.ts && tsx src/lib/futuresWaveFeed.test.ts && tsx src/lib/entryQualityEngine.test.ts && tsx src/lib/reverseWaveEngine.test.ts && tsx src/lib/marketAlignmentEngine.test.ts"
+    "start": "node paqe.mjs",
+    "test": "tsx src/lib/exitEvidenceEngine.test.ts && tsx src/lib/directionStateEngine.test.ts && tsx src/lib/directionDecoupling.test.ts && tsx src/lib/reasoningEngine.test.ts && tsx src/lib/exitEvidenceReplay.ts && tsx src/lib/institutionalMarketEngine.test.ts && tsx src/lib/futuresWaveFeed.test.ts && tsx src/lib/entryQualityEngine.test.ts && tsx src/lib/reverseWaveEngine.test.ts && tsx src/lib/marketAlignmentEngine.test.ts",
+    "test:paqe": "node paqe.mjs --self-test"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",
