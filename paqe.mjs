@@ -112,7 +112,7 @@ export class Paper {
  }
  stats(){
   const profits=this.grossProfit,losses=this.grossLoss;
-  return {engine:'PAQE-v0.1-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,recent:this.closed.slice(-50)};
+  return {engine:'PAQE-v0.2-paper',mode:'PAPER_ONLY',balance:this.balance,equity:this.equity(),realizedPnl:this.balance-1000,open:this.open.size,closed:this.counters.closed,winRate:this.counters.closed?this.totalWins/this.counters.closed:null,profitFactor:losses?profits/losses:null,costRoundTrip:COST,model:this.model.stats(),counters:this.counters,positions:[...this.open.entries()].map(([symbol,q])=>({symbol,side:q.side===1?'LONG':'SHORT',entry:q.entry,price:q.last,pnl:this.pnl(q,q.last),entryAt:q.entryAt,lastAt:q.lastAt,peak:q.peak,expectedR:q.expectedR})),recent:this.closed.slice(-50)};
  }
 }
 
@@ -134,7 +134,12 @@ export function selfTest(){
  const candles=Array.from({length:5},(_,i)=>({time:i*MINUTE,open:100+i,high:101+i,low:99+i,close:100.5+i,quoteVolume:100,takerBuyQuote:70}));
  assert.equal(feature(candles).kind,'momentum');
  assert.equal(feature(candles.map((x,i)=>({...x,time:x.time+(i===4?MINUTE:0)}))),null);
- console.log('PAQE self-test PASS: warmup, causal label, costs, risk stop, data continuity');
+ const now=Date.now(),k={e:'kline',E:now,k:{s:'BTCUSDT',i:'1m',t:now-60000,o:'100',h:'102',l:'99',c:'101',q:'1000',Q:'600',x:true}};
+ assert.equal(parseKline({data:k},now).symbol,'BTCUSDT');
+ assert.equal(parseKline(k,now).closed,true);
+ assert.equal(parseKline({result:null,id:1},now),null);
+ assert.equal(parseKline(k,now+100000),null);
+ console.log('PAQE self-test PASS: model, raw/combined websocket parsing');
 }
 
 export function replay(){
@@ -161,32 +166,49 @@ export function replay(){
  console.log(JSON.stringify({type:'HISTORICAL_REPLAY',note:'fixed 15m labels, next-open entry, 5 USD normalized risk; not live-paper exit simulation',records:a.length,trades,pnl,wins,model:model.stats()}));
 }
 
+
+export function parseKline(payload,now){
+ const event=payload?.data??payload,k=event?.k;
+ if(event?.e!=='kline'||!k||k.i!=='1m'||typeof k.s!=='string')return null;
+ const time=Number(event.E),price=Number(k.c);
+ if(!valid(time)||!valid(price)||price<=0||Math.abs(now-time)>90000)return null;
+ return {symbol:k.s,time,price,closed:k.x===true,bar:{time:Number(k.t),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:price,quoteVolume:Number(k.q),takerBuyQuote:Number(k.Q)}};
+}
 async function live(){
  const {default:WebSocket}=await import('ws');
- const paper=new Paper(),sockets=new Set();let symbols=[],lastMessage=0,errors=0,started=false;
+ const paper=new Paper(),sockets=new Set(),seen=new Map();
+ let symbols=[],lastMessage=0,errors=0,started=false,messages=0,closedBars=0,invalidMessages=0,reconnects=0,lastError=null;
+ const template=fs.readFileSync(new URL('./paqe-dashboard.html',import.meta.url),'utf8');
+ const status=()=>({...paper.stats(),market:{symbols:symbols.length,receivingSymbols:[...seen.values()].filter(t=>Date.now()-t<90000).length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:lastMessage>0&&Date.now()-lastMessage<90000,errors,started,messages,closedBars,invalidMessages,reconnects,lastError}});
  const server=http.createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');
-  if(req.url==='/'||req.url==='/index.html'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(fs.readFileSync(new URL('./paqe-dashboard.html',import.meta.url),'utf8'));return;}
-  if(req.url==='/api/legacy/archive'){res.setHeader('Content-Type','application/json');res.end(fs.readFileSync(new URL('./data/paqe-legacy-snapshot-20261127.json',import.meta.url),'utf8'));return;}
-  res.setHeader('Content-Type','application/json');
-  res.end(JSON.stringify({...paper.stats(),market:{symbols:symbols.length,sockets:[...sockets].filter(s=>s.readyState===WebSocket.OPEN).length,lastMessageAt:lastMessage?new Date(lastMessage).toISOString():null,feedFresh:Date.now()-lastMessage<90000,errors,started}}));
+  const pathname=new URL(req.url||'/','http://localhost').pathname;
+  if(pathname==='/'||pathname==='/index.html'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(renderDashboard(template,status()));return;}
+  if(pathname==='/api/legacy/archive'){res.setHeader('Content-Type','application/json');res.end(fs.readFileSync(new URL('./data/paqe-legacy-snapshot-20261127.json',import.meta.url),'utf8'));return;}
+  res.setHeader('Content-Type','application/json; charset=utf-8');
+  if(['/api/paqe','/api/predator/stats','/api/health','/api/bot/status'].includes(pathname)){res.end(JSON.stringify(status()));return;}
+  if(pathname==='/api/trades/active'){res.end(JSON.stringify(status().positions));return;}
+  if(pathname==='/api/trades/closed'){res.end(JSON.stringify(paper.closed));return;}
+  res.statusCode=404;res.end(JSON.stringify({error:'Not found'}));
  });
- server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE PAPER ONLY listening'));
- function connect(group){
-  const url='wss://fstream.binance.com/stream?streams='+group.map(s=>s.toLowerCase()+'@kline_1m').join('/');
-  const ws=new WebSocket(url);sockets.add(ws);let alive=Date.now();
-  const watchdog=setInterval(()=>{if(Date.now()-alive>90000)ws.terminate();},30000);
-  ws.on('open',()=>console.log('PAQE WS connected',group.length));
+ server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('PAQE v0.2 PAPER ONLY listening'));
+ function connect(group,attempt=0){
+  const url='wss://fstream.binance.com/market/stream?streams='+group.map(s=>s.toLowerCase()+'@kline_1m').join('/');
+  const ws=new WebSocket(url,{perMessageDeflate:false,maxPayload:1024*1024,handshakeTimeout:15000});sockets.add(ws);
+  let alive=Date.now(),gotData=false;
+  const watchdog=setInterval(()=>{if(Date.now()-alive>90000)ws.terminate();},15000);
+  ws.on('open',()=>console.log('PAQE market WS connected',group.length));
   ws.on('message',buf=>{
    try{
-    alive=Date.now();const event=JSON.parse(buf.toString()).data;const k=event?.k;if(!k||!valid(Number(event.E)))return;
-    const time=Number(event.E),price=Number(k.c);if(Math.abs(Date.now()-time)>90000)return;
-    lastMessage=Date.now();paper.mark(k.s,price,time);
-    if(k.x)paper.onBar(k.s,{time:Number(k.t),open:Number(k.o),high:Number(k.h),low:Number(k.l),close:price,quoteVolume:Number(k.q),takerBuyQuote:Number(k.Q)});
-   }catch(e){errors++;}
+    const event=parseKline(JSON.parse(buf.toString()),Date.now());if(!event){invalidMessages++;return;}
+    alive=Date.now();lastMessage=alive;seen.set(event.symbol,alive);messages++;
+    if(!gotData){gotData=true;console.log('PAQE first valid kline',event.symbol,group.length);}
+    paper.mark(event.symbol,event.price,event.time);
+    if(event.closed&&finiteBar(event.bar)){const prev=paper.history.get(event.symbol)?.at(-1);if(!prev||event.bar.time>prev.time){closedBars++;paper.onBar(event.symbol,event.bar);}}
+   }catch(e){errors++;lastError=String(e?.message||e);}
   });
-  ws.on('error',e=>{errors++;console.error('PAQE WS error',e.message);});
-  ws.on('close',()=>{clearInterval(watchdog);sockets.delete(ws);setTimeout(()=>connect(group),15000);});
+  ws.on('error',e=>{errors++;lastError=e.message;console.error('PAQE WS error',e.message);});
+  ws.on('close',(code)=>{clearInterval(watchdog);sockets.delete(ws);reconnects++;console.log('PAQE market WS closed',code,group.length);const next=gotData?0:attempt+1;setTimeout(()=>connect(group,next),Math.min(120000,3000*2**Math.min(next,5))+Math.random()*2000);});
  }
  async function start(){
   try{
@@ -194,12 +216,24 @@ async function live(){
    if(!r.ok)throw Error('exchangeInfo HTTP '+r.status);
    const d=await r.json();symbols=d.symbols.filter(s=>s.status==='TRADING'&&s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT').map(s=>s.symbol);
    if(!symbols.length)throw Error('no futures symbols');
-   for(let i=0;i<symbols.length;i+=80)connect(symbols.slice(i,i+80));
+   for(let i=0;i<symbols.length;i+=80){const group=symbols.slice(i,i+80);setTimeout(()=>connect(group),i/80*350);}
    started=true;console.log('PAQE subscribed',symbols.length);
-  }catch(e){errors++;console.error('PAQE feed discovery:',e.message);setTimeout(start,60000);}
+  }catch(e){errors++;lastError=e.message;console.error('PAQE feed discovery:',e.message);setTimeout(start,60000);}
  }
  start();
- setInterval(()=>console.log(JSON.stringify({type:'PAQE_STATUS',...paper.stats(),market:{symbols:symbols.length,feedFresh:Date.now()-lastMessage<90000,errors},recent:undefined})),60000);
+ setInterval(()=>{const st=status();console.log('PAQE_STATUS '+JSON.stringify({engine:st.engine,balance:st.balance,open:st.open,closed:st.closed,model:st.model,counters:st.counters,market:st.market}));},60000);
+}
+const esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=(x,d=2)=>Number.isFinite(x)?x.toFixed(d):'—';
+function renderDashboard(template,s){
+ const m=s.market;
+ const metrics=[['الرصيد','$'+num(s.balance)],['حقوق الحساب','$'+num(s.equity)],['صافي الربح المحقق','$'+num(s.realizedPnl)],['مفتوحة',s.open],['مغلقة',s.closed],['نسبة النجاح',s.winRate==null?'—':num(s.winRate*100)+'%'],['معامل الربح',num(s.profitFactor)],['العملات المستقبلة',m.receivingSymbols+' / '+m.symbols],['شموع مغلقة',m.closedBars],['الإشارات',s.counters.signals],['اتصالات السوق',m.sockets],['رسائل السوق',m.messages]];
+ const cards=metrics.map(([k,v])=>'<article><small>'+esc(k)+'</small><strong>'+esc(v)+'</strong></article>').join('');
+ const groups=Object.entries(s.model).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+v.samples+'</td><td>'+v.blocks+' / 8</td></tr>').join('')||'<tr><td colspan="3">بانتظار اكتمال بيانات التعلم</td></tr>';
+ const active=s.positions.map(t=>'<tr>'+[t.symbol,t.side,num(t.entry,7),num(t.price,7),num(t.pnl),num(t.expectedR)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')||'<tr><td colspan="6">لا توجد صفقات مفتوحة</td></tr>';
+ const closed=s.recent.slice().reverse().map(t=>'<tr>'+[t.symbol,t.side,num(t.pnl),t.reason,new Date(t.exitAt).toISOString().slice(11,19)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')||'<tr><td colspan="5">لا توجد صفقات مغلقة</td></tr>';
+ const status=m.feedFresh?'تغذية السوق نشطة':m.started?'بانتظار بيانات السوق':'اكتشاف العملات';
+ return template.replace('<!--STATUS-->',esc(status)).replace('<!--STATUSCLASS-->',m.feedFresh?'ok':'warn').replace('<!--METRICS-->',cards).replace('<!--GROUPS-->',groups).replace('<!--ACTIVE-->',active).replace('<!--CLOSED-->',closed).replace('<!--DETAILS-->',esc('آخر بيانات: '+(m.lastMessageAt||'—')+' | أخطاء: '+m.errors+' | إعادة اتصال: '+m.reconnects+' | انتظار التعلم: '+s.counters.warmup+' | انتظار أفضلية: '+s.counters.wait));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  if(process.argv.includes('--self-test'))selfTest();
